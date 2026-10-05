@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config version="11.1.0" detail-version="11.1.4">
+  <shared>
+    <address><entry name="shared-net"><ip-netmask>192.0.2.0/24</ip-netmask></entry></address>
+    <service><entry name="shared-web"><protocol><tcp><port>443</port></tcp></protocol></entry></service>
+  </shared>
+  <devices><entry name="synthetic-device">
+    <network>
+      <interface>
+        <ethernet>
+          <entry name="ethernet1/1"><comment>Example uplink</comment><link-state>auto</link-state><link-speed>auto</link-speed><link-duplex>auto</link-duplex><layer3><ip><entry name="192.0.2.1/24" /></ip><interface-management-profile>example-mgmt</interface-management-profile><units><entry name="ethernet1/1.10"><tag>10</tag><ip><entry name="192.0.2.10/24" /></ip><interface-management-profile>example-sub-mgmt</interface-management-profile><adjust-tcp-mss><enable>yes</enable></adjust-tcp-mss></entry></units></layer3></entry>
+          <entry name="ethernet1/2"><layer2><units><entry name="ethernet1/2.20"><tag>20</tag></entry></units></layer2></entry>
+          <entry name="ethernet1/5"><virtual-wire /></entry>
+          <entry name="ethernet1/6"><aggregate-group>ae1</aggregate-group></entry>
+          <entry name="ethernet1/7"><aggregate-group>ae1</aggregate-group></entry>
+        </ethernet>
+        <aggregate-ethernet><entry name="ae1"><layer3><ip><entry name="198.51.100.1/24" /></ip></layer3></entry></aggregate-ethernet>
+        <vlan><units><entry name="vlan.10"><ip><entry name="203.0.113.1/24" /></ip><interface-management-profile>vlan-mgmt</interface-management-profile></entry></units></vlan>
+        <loopback><units><entry name="loopback.1"><ip><entry name="192.0.2.254/32" /></ip></entry></units></loopback>
+      </interface>
+      <virtual-router><entry name="vr-default"><interface><member>ethernet1/1.10</member><member>ae1</member></interface><routing-table><ip><static-route>
+        <entry name="default-route"><destination>0.0.0.0/0</destination><interface>ethernet1/1</interface><nexthop><ip-address>192.0.2.254</ip-address></nexthop><metric>10</metric></entry>
+        <entry name="internal-route"><destination>198.51.100.0/24</destination><nexthop><next-vr>vr-internal</next-vr></nexthop></entry>
+      </static-route></ip></routing-table></entry></virtual-router>
+    </network>
+    <vsys><entry name="vsys1">
+      <zone><entry name="trust"><network><layer3><member>ethernet1/1</member></layer3></network></entry><entry name="inside"><network><layer2><member>ethernet1/2</member></layer2></network></entry></zone>
+      <address><entry name="vsys-host"><ip-netmask>198.51.100.10/32</ip-netmask></entry></address>
+      <service><entry name="vsys-dns"><protocol><udp><port>53</port><source-port>1000-2000</source-port></udp></protocol></entry></service>
+      <rulebase>
+        <security><rules>
+          <entry name="allow-web" uuid="synthetic-rule-1"><from><member>trust</member></from><to><member>inside</member></to><source><member>shared-net</member></source><destination><member>vsys-host</member></destination><application><member>web-browsing</member></application><service><member>shared-web</member></service><action>allow</action></entry>
+          <entry name="deny-other" uuid="synthetic-rule-2"><from><member>inside</member></from><to><member>trust</member></to><source><member>any</member></source><destination><member>any</member></destination><application><member>any</member></application><service><member>any</member></service><action>deny</action><disabled>yes</disabled></entry>
+        </rules></security>
+        <nat><rules><entry name="outbound-nat" uuid="synthetic-nat-1"><from><member>trust</member></from><to><member>inside</member></to><source><member>shared-net</member></source><destination><member>any</member></destination><service>any</service><source-translation><dynamic-ip-and-port><interface-address><interface>loopback.1</interface></interface-address></dynamic-ip-and-port></source-translation></entry></rules></nat>
+      </rulebase>
+    </entry></vsys>
+  </entry></devices>
+</config>

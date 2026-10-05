@@ -1,5 +1,10 @@
 node_modules
 dist
+/local-samples/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
 .vite
 *.local
 .DS_Store

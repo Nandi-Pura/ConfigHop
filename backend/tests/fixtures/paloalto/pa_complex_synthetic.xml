@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config version="11.1.0" detail-version="11.1.4">
+  <shared><address><entry name="repeat-name"><fqdn>example.invalid</fqdn></entry></address><service><entry name="shared-http"><protocol><tcp><port>80</port></tcp></protocol></entry></service></shared>
+  <devices><entry name="synthetic-device">
+    <network>
+      <interface>
+        <ethernet>
+          <entry name="ethernet1/1"><aggregate-group>ae1</aggregate-group></entry>
+          <entry name="ethernet1/2"><aggregate-group>ae1</aggregate-group></entry>
+          <entry name="ethernet1/12"><layer3><units>
+            <entry name="ethernet1/12.262"><tag>262</tag><ip><entry name="192.0.2.1/28" /></ip><interface-management-profile>example-mgmt</interface-management-profile></entry>
+            <entry name="ethernet1/12.264"><tag>264</tag><ip><entry name="192.0.2.17/28" /></ip></entry>
+            <entry name="ethernet1/12.265"><tag>265</tag><ip><entry name="192.0.2.33/28" /></ip></entry>
+            <entry name="ethernet1/12.266"><tag>266</tag><ip><entry name="192.0.2.49/28" /></ip></entry>
+            <entry name="ethernet1/12.2204"><tag>2204</tag><ip><entry name="192.0.2.65/28" /></ip></entry>
+          </units></layer3></entry>
+          <entry name="ethernet1/13"><layer2><units><entry name="ethernet1/13.30"><tag>30</tag></entry></units></layer2></entry>
+        </ethernet>
+        <aggregate-ethernet><entry name="ae1"><layer3><ip><entry name="198.51.100.1/24" /></ip></layer3></entry></aggregate-ethernet>
+        <vlan><units><entry name="vlan.30"><ip><entry name="203.0.113.30/24" /></ip></entry></units></vlan>
+        <loopback><units><entry name="loopback.1"><ip><entry name="198.51.100.254/32" /></ip></entry></units></loopback>
+      </interface>
+      <virtual-router>
+        <entry name="vr-external"><interface><member>ethernet1/12.265</member><member>ethernet1/12.266</member></interface><routing-table><ip><static-route>
+          <entry name="to-example"><destination>203.0.113.0/24</destination><interface>ethernet1/12.265</interface><nexthop><ip-address>192.0.2.46</ip-address></nexthop></entry>
+          <entry name="to-internal"><destination>198.51.100.0/24</destination><nexthop><next-vr>vr-internal</next-vr></nexthop></entry>
+        </static-route></ip></routing-table></entry>
+        <entry name="vr-internal"><interface><member>ae1</member></interface></entry>
+      </virtual-router>
+    </network>
+    <vsys>
+      <entry name="vsys1">
+        <zone><entry name="inside"><network><layer3><member>ethernet1/12.262</member></layer3></network></entry><entry name="outside"><network><layer3><member>ethernet1/12.265</member></layer3></network></entry></zone>
+        <address><entry name="repeat-name"><ip-range>192.0.2.10-192.0.2.20</ip-range></entry></address>
+        <service><entry name="dns-service"><protocol><udp><port>53</port></udp></protocol></entry></service>
+        <rulebase><security><rules><entry name="allow-example"><from><member>inside</member></from><to><member>outside</member></to><source><member>repeat-name</member></source><destination><member>any</member></destination><application><member>any</member></application><service><member>dns-service</member></service><action>allow</action></entry></rules></security><nat><rules><entry name="loopback-nat"><from><member>inside</member></from><to><member>outside</member></to><source><member>any</member></source><destination><member>any</member></destination><service>any</service><source-translation><dynamic-ip-and-port><interface-address><interface>loopback.1</interface></interface-address></dynamic-ip-and-port></source-translation></entry></rules></nat></rulebase>
+      </entry>
+      <entry name="vsys2"><zone><entry name="inside"><network><virtual-wire><member>ethernet1/13</member></virtual-wire></network></entry></zone><address><entry name="vsys2-host"><ip-netmask>203.0.113.2/32</ip-netmask></entry></address></entry>
+    </vsys>
+  </entry></devices>
+  <unrelated-feature><opaque-data /></unrelated-feature>
+</config>
