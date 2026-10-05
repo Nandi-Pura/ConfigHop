@@ -13,7 +13,8 @@ test('Firewall remains the default workflow and Switch has its own sections', as
     const activeActions = { current: null }
     const switchPage = renderToStaticMarkup(React.createElement(SwitchWorkspace, { onDomainChange() {}, actionsRef: activeActions, onTitleChange() {} }))
     assert.ok(firewall.includes('ConfigHop'))
-    assert.ok(firewall.includes('/brand/confighop-mark.svg'))
+    assert.ok(!firewall.includes('brand-logo'))
+    assert.ok(!firewall.includes('brand-mark'))
     assert.ok(!firewall.includes('ConfigMorph'))
     for (const heading of ['Migration Setup', 'Source Configuration', 'Source Inventory', 'Physical Interface Mapping', 'Migration Readiness', 'Migration Results']) assert.ok(firewall.includes(heading), heading)
     assert.ok(!firewall.includes('VLAN &amp; LAG Mapping'))

@@ -1,7 +1,5 @@
 # ConfigHop
 
-<img src="public/brand/confighop-logo.svg" alt="ConfigHop" width="180" />
-
 Network Configuration Migration
 
 ConfigHop is an open-source network configuration migration workbench for moving configurations across hardware platforms and network vendors. The current frontend uses mock data; it does not perform production migrations.

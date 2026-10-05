@@ -403,7 +403,6 @@ function App() {
 
 function Header({ projectName, setProjectName }: { projectName: string, setProjectName: (s: string) => void }) {
   return <header className="app-header">
-    <img className="brand-logo" src="/brand/confighop-mark.svg" alt="" aria-hidden="true" width="30" height="30" />
     <div className="brand-text" aria-label="ConfigHop — Network Configuration Migration"><strong>ConfigHop</strong><span>Network Configuration Migration</span></div>
     <div className="header-divider" />
     <div className="project-name"><input value={projectName} onChange={(e) => setProjectName(e.target.value)} aria-label="Project name" /><Pencil size={13} aria-hidden="true" /></div>
