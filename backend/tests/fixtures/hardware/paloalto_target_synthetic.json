@@ -10,6 +10,8 @@
     {"name": "ethernet1/5", "kind": "physical_ethernet"},
     {"name": "ethernet1/6", "kind": "physical_ethernet"},
     {"name": "ethernet1/7", "kind": "physical_ethernet"},
-    {"name": "ethernet1/8", "kind": "physical_ethernet"}
+    {"name": "ethernet1/8", "kind": "physical_ethernet"},
+    {"name": "ethernet1/12", "kind": "physical_ethernet"},
+    {"name": "ethernet1/50", "kind": "physical_ethernet"}
   ]
 }
