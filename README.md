@@ -1,44 +1,35 @@
 # ConfigHop
 
-Network Configuration Migration
+ConfigHop is a local network configuration migration workbench. The Firewall path accepts PAN-OS XML, parses a real source inventory, previews manual physical interface mappings, and generates a preservation-first candidate XML through a FastAPI service. The Switch workspace remains a frontend mock.
 
-ConfigHop is an open-source network configuration migration workbench for moving configurations across hardware platforms and network vendors. The current frontend uses mock data; it does not perform production migrations.
+The current target profile is synthetic development data. Candidate validation proves modeled transformations and XML preservation within the implemented scope; it does not prove real hardware compatibility, PAN-OS import, or production deployment safety. There is no live firewall connection.
 
-Example migration scenarios: Palo Alto PA-3410 → PA-5410, Cisco Catalyst → HPE Aruba CX, and Palo Alto → Fortinet.
+## Run locally
 
-## Stack
+Use Python 3.12 or newer. In `backend`:
 
-- React
-- TypeScript
-- Vite
-- Lucide React
-- CSS (no component framework)
+```powershell
+python -m pip install -e ".[api,dev]"
+python -m uvicorn confighop_api.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-## Run
+In the repository root, in a second terminal:
 
-```bash
-npm install
+```powershell
+npm ci
 npm run dev
 ```
 
-Production build:
+Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost. Project files live only in a temporary server workspace and disappear when the server stops or a project is deleted.
 
-```bash
-npm run build
+## Test
+
+```powershell
+cd backend
+python -m pytest -q
+python -m compileall src
 ```
 
-## Included interactions
+From the repository root, run `npm test` and `npm run build`.
 
-- Source/target platform selectors
-- Local configuration file upload
-- Paste-from-clipboard support
-- Interface mapping search and filters
-- Manual target interface mapping
-- Auto-map suggestions
-- Table / hardware mapping views
-- Migration readiness state
-- Generate Migration action
-- Result tabs (overview, raw comparison, semantic changes, interface mapping, migration plan, candidate config, findings)
-- LocalStorage Save/Load Project
-
-All data and migration logic are mocked locally in the browser. No backend or API is included.
+Core v0.1 parses PAN-OS XML, v0.2 previews exact interface dependencies, and v0.3 renders and validates a patched candidate. See [API v0.4](docs/api/API_V0_4.md) and [app integration v0.4](docs/app/APP_V0_4.md). Private XML and generated candidates belong in ignored `local-samples/` and `local-output/` directories.

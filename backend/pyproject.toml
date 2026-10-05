@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "confighop-core"
-version = "0.3.0"
+version = "0.4.0"
 description = "ConfigHop Palo Alto XML source inventory core"
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2,<3", "defusedxml>=0.7,<1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10"]
+api = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
+dev = ["pytest>=8,<10", "httpx>=0.27,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
