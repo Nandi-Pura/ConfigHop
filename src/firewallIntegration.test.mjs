@@ -50,3 +50,19 @@ test('Large XML viewer renders only visible lines', async () => {
     assert.ok(!html.includes('name="49999"'))
   } finally { await vite.close() }
 })
+
+test('Verified hardware selector displays official context and manual PAN-OS trains', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  try {
+    const { PlatformCard } = await vite.ssrLoadModule('/src/FirewallApp.tsx')
+    const profile = { id: 'paloalto-pa-5410', model: 'PA-5410', series: 'PA-5400', profile_status: 'verified',
+      evidence_ids: ['PAN-HW-PA5400-FRONT'], supported_panos_trains: ['10.2', '11.1'], interfaces: [], port_details: [] }
+    const html = renderToStaticMarkup(React.createElement(PlatformCard, { title: 'Target Platform', eyebrow: 'Migration Destination', profile,
+      profiles: [profile], selected: profile.id, onSelect() {}, train: '11.1', onTrain() {}, onEvidence() {} }))
+    assert.ok(html.includes('Verified Profile'))
+    assert.ok(html.includes('Evidence: 1 official sources'))
+    assert.ok(html.includes('View Evidence'))
+    assert.ok(html.includes('PA-5410'))
+    assert.ok(html.includes('11.1'))
+  } finally { await vite.close() }
+})

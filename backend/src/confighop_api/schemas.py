@@ -3,6 +3,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from confighop_core.models.common import ParserWarning
+from confighop_core.compatibility import CompatibilityAssessment, HardwareAssessment, PlatformAssessment
+from confighop_core.models.hardware import HardwareInterfaceGroup
 from confighop_core.models.mapping import InterfaceMapping, MigrationPreview, PreviewStatus
 from confighop_core.models.transformation import (
     CandidateValidationReport, RenderFinding, SemanticMigrationDiff, TransformationPlan,
@@ -79,6 +81,11 @@ class ProjectView(BaseModel):
     source_filename: str | None
     source_size_bytes: int | None
     target_profile_id: str | None
+    source_profile_id: str | None = None
+    source_panos_train: str | None = None
+    target_panos_train: str | None = None
+    latest_platform_assessment: PlatformAssessment | None = None
+    latest_hardware_assessment: HardwareAssessment | None = None
     preview_available: bool
     preview_status: PreviewStatus | None
     candidate_available: bool
@@ -92,14 +99,33 @@ class ProfileSummary(BaseModel):
     model: str
     profile_status: str
     interface_count: int
+    series: str | None = None
+    verified_at: str | None = None
+    native_interface_count: int = 0
+    conditional_interface_count: int = 0
+    breakout_interface_count: int = 0
+    candidate_ready_interface_count: int = 0
+    supported_panos_trains: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class ProfileDetail(ProfileSummary):
     interfaces: list[str]
+    port_details: list[dict] = Field(default_factory=list)
+    interface_groups: list[HardwareInterfaceGroup] = Field(default_factory=list)
+    first_supported_release: str | None = None
+    notes: str | None = None
 
 
 class SelectProfileRequest(BaseModel):
     profile_id: str | None
+    panos_train: str | None = None
+
+
+class PreviewView(MigrationPreview):
+    platform_assessment: PlatformAssessment | None = None
+    hardware_assessment: HardwareAssessment | None = None
+    overall_status: str | None = None
 
 
 class PreviewRequest(BaseModel):
@@ -117,11 +143,19 @@ class CandidateMetadata(BaseModel):
     candidate_size_bytes: int | None
     preview_status: PreviewStatus
     plan_status: PreviewStatus
-    validation: CandidateValidationReport
-    semantic_diff: SemanticMigrationDiff
-    findings: list[RenderFinding]
-    plan: TransformationPlan
-    summary: dict[str, int]
+    validation: CandidateValidationReport | None = None
+    semantic_diff: SemanticMigrationDiff | None = None
+    findings: list[RenderFinding] = Field(default_factory=list)
+    plan: TransformationPlan | None = None
+    summary: dict[str, int] = Field(default_factory=dict)
+    source_profile_id: str | None = None
+    target_profile_id: str | None = None
+    source_profile_status: str | None = None
+    target_profile_status: str | None = None
+    effective_panos_version: str | None = None
+    platform_assessment_status: str | None = None
+    hardware_assessment_status: str | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
 
 
 class HealthView(BaseModel):

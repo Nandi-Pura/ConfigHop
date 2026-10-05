@@ -7,22 +7,29 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from confighop_core.models.mapping import MigrationPreview
 from confighop_core.models.transformation import SemanticMigrationDiff
+from confighop_core.evidence.registry import EVIDENCE, PROFILES
+from confighop_core.compatibility import CompatibilityAssessment
 
 from .schemas import (
     CandidateMetadata, CandidateRequest, ErrorView, HealthView, InventoryView,
-    PreviewRequest, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest, SourceView,
+    PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest, SourceView,
 )
 from .services import (
     PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, generate_candidate, inventory_view,
     profile_detail, profile_summary, project_view, require_inventory, require_live, select_profile,
+    select_source_profile, assess_project,
     update_preview, upload_source,
 )
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status)
+
+
+def _overall(preview_status: str, compatibility: CompatibilityAssessment | None) -> str:
+    statuses = {preview_status, compatibility.status.value if compatibility else preview_status}
+    return "BLOCKED" if "BLOCKED" in statuses else "REVIEW_REQUIRED" if "REVIEW_REQUIRED" in statuses else "READY"
 
 
 def create_app(store: ProjectStore | None = None) -> FastAPI:
@@ -34,7 +41,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         finally:
             app.state.store.close()
 
-    app = FastAPI(title="ConfigHop Local API", version="0.4.0",
+    app = FastAPI(title="ConfigHop Local API", version="0.5.0",
         description="Local single-user API without authentication. Bind to 127.0.0.1 only.", lifespan=lifespan)
     origins = [item.strip() for item in os.getenv("CONFIGHOP_CORS_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173").split(",") if item.strip()]
@@ -77,7 +84,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
     async def capabilities():
         return {"domains": {"firewall": {"palo_alto_xml_inventory": True,
             "manual_interface_mapping": True, "dependency_preview": True, "panos_candidate_renderer": True},
-            "switch": {"backend_enabled": False}}, "verified_hardware_profiles": [],
+            "switch": {"backend_enabled": False}}, "verified_hardware_profiles": ["paloalto-pa-3410", "paloalto-pa-5410"],
             "synthetic_hardware_profiles": [PROFILE_ID]}
 
     @app.post("/api/v1/projects", response_model=ProjectView)
@@ -125,32 +132,68 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.get("/api/v1/hardware-profiles", response_model=list[ProfileSummary])
     async def list_profiles():
-        return [profile_summary()]
+        return [profile_summary(profile_id) for profile_id in PROFILES]
 
     @app.get("/api/v1/hardware-profiles/{profile_id}", response_model=ProfileDetail)
     async def get_profile(profile_id: str):
         return profile_detail(profile_id)
 
+    @app.get("/api/v1/evidence")
+    async def list_evidence():
+        return list(EVIDENCE.values())
+
+    @app.get("/api/v1/evidence/{evidence_id}")
+    async def get_evidence(evidence_id: str):
+        if evidence_id not in EVIDENCE:
+            raise ServiceError("EVIDENCE_NOT_FOUND", "Evidence record was not found.", 404)
+        return EVIDENCE[evidence_id]
+
+    @app.put("/api/v1/projects/{project_id}/source-profile", response_model=ProjectView)
+    async def set_source_profile(project_id: str, body: SelectProfileRequest, request: Request):
+        project = current_store(request).get(project_id)
+        async with project.lock:
+            return select_source_profile(project, body.profile_id, body.panos_train)
+
     @app.put("/api/v1/projects/{project_id}/target-profile", response_model=ProjectView)
     async def set_profile(project_id: str, body: SelectProfileRequest, request: Request):
         project = current_store(request).get(project_id)
         async with project.lock:
-            return select_profile(project, body.profile_id)
+            return select_profile(project, body.profile_id, body.panos_train)
 
-    @app.post("/api/v1/projects/{project_id}/preview", response_model=MigrationPreview)
+    @app.post("/api/v1/projects/{project_id}/compatibility", response_model=CompatibilityAssessment)
+    async def post_compatibility(project_id: str, body: PreviewRequest, request: Request):
+        project = current_store(request).get(project_id)
+        async with project.lock:
+            return assess_project(project, body.mappings)
+
+    @app.get("/api/v1/projects/{project_id}/compatibility", response_model=CompatibilityAssessment)
+    async def get_compatibility(project_id: str, request: Request):
+        project = current_store(request).get(project_id)
+        async with project.lock:
+            require_live(project)
+            if project.compatibility is None:
+                raise ServiceError("COMPATIBILITY_NOT_AVAILABLE", "Compatibility assessment is not available.", 409)
+            return project.compatibility
+
+    @app.post("/api/v1/projects/{project_id}/preview", response_model=PreviewView)
     async def post_preview(project_id: str, body: PreviewRequest, request: Request):
         project = current_store(request).get(project_id)
         async with project.lock:
-            return await update_preview(project, body.mappings)
+            preview = await update_preview(project, body.mappings)
+            return PreviewView(**preview.model_dump(), platform_assessment=project.compatibility.platform if project.compatibility else None,
+                hardware_assessment=project.compatibility.hardware if project.compatibility else None,
+                overall_status=_overall(preview.status.value, project.compatibility))
 
-    @app.get("/api/v1/projects/{project_id}/preview", response_model=MigrationPreview)
+    @app.get("/api/v1/projects/{project_id}/preview", response_model=PreviewView)
     async def get_preview(project_id: str, request: Request):
         project = current_store(request).get(project_id)
         async with project.lock:
             require_live(project)
             if project.preview is None:
                 raise ServiceError("PREVIEW_NOT_AVAILABLE", "Preview is not available.", 409)
-            return project.preview
+            return PreviewView(**project.preview.model_dump(), platform_assessment=project.compatibility.platform if project.compatibility else None,
+                hardware_assessment=project.compatibility.hardware if project.compatibility else None,
+                overall_status=_overall(project.preview.status.value, project.compatibility))
 
     @app.post("/api/v1/projects/{project_id}/candidate", response_model=CandidateMetadata)
     async def post_candidate(project_id: str, body: CandidateRequest, request: Request):

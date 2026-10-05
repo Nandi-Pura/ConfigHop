@@ -8,6 +8,9 @@ export interface ProjectState {
   source_filename: string | null
   source_size_bytes: number | null
   target_profile_id: string | null
+  source_profile_id: string | null
+  source_panos_train: string | null
+  target_panos_train: string | null
   preview_available: boolean
   preview_status: PreviewStatus | null
   candidate_available: boolean
@@ -58,8 +61,13 @@ export interface InventoryView {
   physical_interfaces: PhysicalInterfaceView[]
   parser_warnings: ParserWarning[]
 }
-export interface HardwareProfileSummary { id: string; vendor: string; model: string; profile_status: string; interface_count: number }
-export interface HardwareProfileDetail extends HardwareProfileSummary { interfaces: string[] }
+export interface HardwareProfileSummary { id: string; vendor: string; model: string; series: string | null; profile_status: string; interface_count: number; verified_at: string | null; candidate_ready_interface_count: number; native_interface_count: number; conditional_interface_count: number; breakout_interface_count: number; supported_panos_trains: string[]; evidence_ids: string[] }
+export interface HardwarePort { name: string; availability: 'NATIVE' | 'NATIVE_CONDITIONAL' | 'BREAKOUT_CHILD'; candidate_support: 'SUPPORTED' | 'BLOCKED'; required_condition: string; parent_interface: string | null; speed_capabilities: string[]; media_capabilities: string[]; evidence_ids: string[] }
+export interface HardwareProfileDetail extends HardwareProfileSummary { interfaces: string[]; port_details: HardwarePort[]; first_supported_release: string | null; notes: string | null }
+export interface EvidenceRecord { id: string; source_title: string; source_url: string; source_type: string; checked_at: string; scope: string; summary: string; status: string }
+export interface CompatibilityFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; message: string; source_interface: string | null; target_interface: string | null; evidence_ids: string[] }
+export interface InterfaceAssessment { source_interface: string; target_interface: string; explicit_mapping: boolean; configured_source_speed: string | null; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
+export interface CompatibilityAssessment { platform: { status: PreviewStatus; effective_source_version: string | null; source_version_status: string; target_version_status: string; findings: CompatibilityFinding[] }; hardware: { status: PreviewStatus; effective_assignments: InterfaceAssessment[]; findings: CompatibilityFinding[] }; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
 export interface InterfaceMapping { source_interface: string; target_interface: string }
 export interface MigrationFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; scope: string; source_interface: string | null; target_interface: string | null; object_type: string | null; object_name: string | null; message: string }
 export interface ReferenceChange { reference_type: string; object_type: string; object_name: string; scope: string; field: string; old_value: string; new_value: string; action: string; status: string }
@@ -70,6 +78,9 @@ export interface MigrationPreview {
   findings: MigrationFinding[]
   summary: { submitted_mappings: number; valid_mappings: number; derived_subinterface_mappings: number; zone_reference_changes: number; virtual_router_reference_changes: number; static_route_reference_changes: number; nat_reference_changes: number; aggregate_membership_changes: number; review_findings: number; blocking_findings: number }
   status: PreviewStatus
+  overall_status?: PreviewStatus
+  platform_assessment?: CompatibilityAssessment['platform'] | null
+  hardware_assessment?: CompatibilityAssessment['hardware'] | null
 }
 export interface RenderFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; message: string }
 export interface TransformationOperation { sequence: number; operation_type: string; source_value: string; target_value: string; object_type: string; object_name: string; scope: string; field: string; expected_occurrences: number }
@@ -83,10 +94,18 @@ export interface CandidateMetadata {
   candidate_size_bytes: number | null
   preview_status: PreviewStatus
   plan_status: PreviewStatus
-  validation: { candidate_parse_ok: boolean; expected_inventory_match: boolean; preservation_audit_ok: boolean; operations_planned: number; operations_applied: number; valid: boolean }
-  semantic_diff: SemanticMigrationDiff
+  validation: { candidate_parse_ok: boolean; expected_inventory_match: boolean; preservation_audit_ok: boolean; operations_planned: number; operations_applied: number; valid: boolean } | null
+  semantic_diff: SemanticMigrationDiff | null
   findings: RenderFinding[]
-  plan: TransformationPlan
+  plan: TransformationPlan | null
   summary: MigrationPreview['summary']
+  source_profile_id: string | null
+  target_profile_id: string | null
+  source_profile_status: string | null
+  target_profile_status: string | null
+  effective_panos_version: string | null
+  platform_assessment_status: string | null
+  hardware_assessment_status: string | null
+  evidence_ids: string[]
 }
 export interface ApiError { error: { code: string; message: string } }

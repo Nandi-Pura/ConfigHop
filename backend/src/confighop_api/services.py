@@ -11,10 +11,12 @@ from uuid import uuid4
 from fastapi import Request
 
 from confighop_core import parse_palo_alto_xml, preview_interface_mappings, render_panos_candidate
+from confighop_core.compatibility import CompatibilityAssessment, assess
+from confighop_core.evidence.registry import SYNTHETIC, get_profile
 from confighop_core.dependencies import build_dependency_index
 from confighop_core.errors import ConfigParseError
 from confighop_core.models.dependency import ReferenceType
-from confighop_core.models.hardware import HardwareInterface, HardwareKind, HardwareProfile, ProfileStatus
+from confighop_core.models.hardware import HardwareProfile, ProfileStatus
 from confighop_core.models.inventory import PaloAltoInventory
 from confighop_core.models.mapping import InterfaceMapping, MigrationPreview, PreviewStatus
 from confighop_core.models.transformation import CandidateRenderResult
@@ -27,10 +29,7 @@ from .schemas import (
 
 
 PROFILE_ID = "paloalto-synthetic-64"
-SYNTHETIC_PROFILE = HardwareProfile(vendor="palo_alto", model="synthetic-panos-target-64",
-    profile_status=ProfileStatus.SYNTHETIC,
-    interfaces=[HardwareInterface(name=f"ethernet1/{number}", kind=HardwareKind.PHYSICAL_ETHERNET)
-        for number in range(1, 65)], notes="Development profile only; no real hardware compatibility claim.")
+SYNTHETIC_PROFILE = SYNTHETIC
 
 
 class ServiceError(Exception):
@@ -49,6 +48,10 @@ class ProjectSession:
     source_size_bytes: int | None = None
     inventory: PaloAltoInventory | None = None
     profile_id: str | None = None
+    source_profile_id: str | None = None
+    source_panos_train: str | None = None
+    target_panos_train: str | None = None
+    compatibility: CompatibilityAssessment | None = None
     mappings: list[InterfaceMapping] = field(default_factory=list)
     preview: MigrationPreview | None = None
     candidate: CandidateRenderResult | None = None
@@ -62,6 +65,7 @@ class ProjectSession:
         return self.workspace / "candidate.xml"
 
     def invalidate(self) -> None:
+        self.compatibility = None
         self.mappings = []
         self.preview = None
         self.candidate = None
@@ -120,6 +124,10 @@ def project_view(project: ProjectSession) -> ProjectView:
     return ProjectView(project_id=project.project_id, state=state,
         source_available=project.inventory is not None, source_filename=project.source_filename,
         source_size_bytes=project.source_size_bytes, target_profile_id=project.profile_id,
+        source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
+        target_panos_train=project.target_panos_train,
+        latest_platform_assessment=project.compatibility.platform if project.compatibility else None,
+        latest_hardware_assessment=project.compatibility.hardware if project.compatibility else None,
         preview_available=project.preview is not None,
         preview_status=project.preview.status if project.preview else None,
         candidate_available=bool(project.candidate and project.candidate.validation.valid),
@@ -159,15 +167,27 @@ def inventory_view(inventory: PaloAltoInventory) -> InventoryView:
         summary=inventory_summary(inventory), physical_interfaces=rows, parser_warnings=inventory.warnings)
 
 
-def profile_summary() -> ProfileSummary:
-    return ProfileSummary(id=PROFILE_ID, vendor=SYNTHETIC_PROFILE.vendor, model=SYNTHETIC_PROFILE.model,
-        profile_status=SYNTHETIC_PROFILE.profile_status.value, interface_count=len(SYNTHETIC_PROFILE.interfaces))
+def profile_summary(profile_id: str = PROFILE_ID) -> ProfileSummary:
+    profile = get_profile(profile_id)
+    if profile is None:
+        raise ServiceError("TARGET_PROFILE_NOT_FOUND", "Target profile was not found.", 404)
+    return ProfileSummary(id=profile_id, vendor=profile.vendor, model=profile.model,
+        profile_status=profile.profile_status.value, interface_count=len(profile.interfaces), series=profile.series,
+        verified_at=profile.verified_at,
+        native_interface_count=sum(item.availability.value == "NATIVE" for item in profile.interfaces),
+        conditional_interface_count=sum(item.availability.value == "NATIVE_CONDITIONAL" for item in profile.interfaces),
+        breakout_interface_count=sum(item.availability.value == "BREAKOUT_CHILD" for item in profile.interfaces),
+        candidate_ready_interface_count=sum(item.candidate_support.value == "SUPPORTED" for item in profile.interfaces),
+        supported_panos_trains=profile.supported_panos_trains, evidence_ids=profile.evidence_ids)
 
 
 def profile_detail(profile_id: str) -> ProfileDetail:
-    if profile_id != PROFILE_ID:
+    profile = get_profile(profile_id)
+    if profile is None:
         raise ServiceError("TARGET_PROFILE_NOT_FOUND", "Target profile was not found.", 404)
-    return ProfileDetail(**profile_summary().model_dump(), interfaces=[item.name for item in SYNTHETIC_PROFILE.interfaces])
+    return ProfileDetail(**profile_summary(profile_id).model_dump(), interfaces=[item.name for item in profile.interfaces],
+        port_details=[item.model_dump(mode="json") for item in profile.interfaces],
+        interface_groups=profile.interface_groups, first_supported_release=profile.first_supported_release, notes=profile.notes)
 
 
 async def upload_source(store: ProjectStore, project: ProjectSession, request: Request, filename: str | None) -> SourceView:
@@ -218,7 +238,10 @@ def require_profile(project: ProjectSession) -> HardwareProfile:
     require_live(project)
     if project.profile_id is None:
         raise ServiceError("TARGET_PROFILE_REQUIRED", "Select an available target profile first.", 409)
-    return SYNTHETIC_PROFILE
+    profile = get_profile(project.profile_id)
+    if profile is None:
+        raise ServiceError("TARGET_PROFILE_NOT_FOUND", "Target profile was not found.", 404)
+    return profile
 
 
 def require_live(project: ProjectSession) -> None:
@@ -226,13 +249,33 @@ def require_live(project: ProjectSession) -> None:
         raise ServiceError("PROJECT_NOT_FOUND", "Project session was not found.", 404)
 
 
-def select_profile(project: ProjectSession, profile_id: str | None) -> ProjectView:
+def select_profile(project: ProjectSession, profile_id: str | None, panos_train: str | None = None) -> ProjectView:
     require_live(project)
     if profile_id:
         profile_detail(profile_id)
     project.profile_id = profile_id
+    project.target_panos_train = panos_train
     project.invalidate()
     return project_view(project)
+
+
+def select_source_profile(project: ProjectSession, profile_id: str | None, panos_train: str | None) -> ProjectView:
+    require_live(project)
+    if profile_id:
+        profile_detail(profile_id)
+    project.source_profile_id = profile_id
+    project.source_panos_train = panos_train
+    project.invalidate()
+    return project_view(project)
+
+
+def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:
+    inventory = require_inventory(project)
+    project.invalidate()
+    project.mappings = mappings
+    project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
+        project.profile_id, project.target_panos_train, mappings)
+    return project.compatibility
 
 
 async def update_preview(project: ProjectSession, mappings: list[InterfaceMapping]) -> MigrationPreview:
@@ -240,19 +283,45 @@ async def update_preview(project: ProjectSession, mappings: list[InterfaceMappin
     profile = require_profile(project)
     project.invalidate()
     project.mappings = mappings
+    if profile.profile_status == ProfileStatus.VERIFIED:
+        project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
+            project.profile_id, project.target_panos_train, mappings)
     project.preview = await asyncio.to_thread(preview_interface_mappings, inventory, mappings, profile)
     return project.preview
 
 
 def candidate_metadata(project: ProjectSession) -> CandidateMetadata:
     result = project.candidate
+    if result is None and project.compatibility and project.compatibility.status.value == "BLOCKED":
+        return CandidateMetadata(status=PreviewStatus.BLOCKED, candidate_available=False,
+            candidate_sha256=None, candidate_size_bytes=None,
+            preview_status=project.preview.status if project.preview else PreviewStatus.BLOCKED,
+            plan_status=PreviewStatus.BLOCKED,
+            findings=[{"code": item.code, "severity": item.severity, "message": item.message} for item in project.compatibility.findings],
+            source_profile_id=project.source_profile_id, target_profile_id=project.profile_id,
+            source_profile_status=get_profile(project.source_profile_id).profile_status.value if get_profile(project.source_profile_id or "") else None,
+            target_profile_status=get_profile(project.profile_id).profile_status.value if get_profile(project.profile_id or "") else None,
+            effective_panos_version=project.compatibility.platform.effective_source_version,
+            platform_assessment_status=project.compatibility.platform.status.value,
+            hardware_assessment_status=project.compatibility.hardware.status.value,
+            evidence_ids=project.compatibility.evidence_ids)
     if result is None or project.preview is None:
         raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Candidate result is not available.", 409)
-    return CandidateMetadata(status=result.status, candidate_available=result.validation.valid,
+    overall = result.status
+    if project.compatibility and project.compatibility.status.value == "REVIEW_REQUIRED" and overall == PreviewStatus.READY:
+        overall = PreviewStatus.REVIEW_REQUIRED
+    return CandidateMetadata(status=overall, candidate_available=result.validation.valid,
         candidate_sha256=result.candidate_sha256, candidate_size_bytes=result.candidate_size_bytes,
         preview_status=project.preview.status, plan_status=result.plan.status, validation=result.validation,
         semantic_diff=result.semantic_diff, findings=result.plan.findings, plan=result.plan,
-        summary=project.preview.summary.model_dump())
+        summary=project.preview.summary.model_dump(), source_profile_id=project.source_profile_id,
+        target_profile_id=project.profile_id,
+        source_profile_status=get_profile(project.source_profile_id).profile_status.value if get_profile(project.source_profile_id or "") else None,
+        target_profile_status=get_profile(project.profile_id).profile_status.value if get_profile(project.profile_id or "") else None,
+        effective_panos_version=project.compatibility.platform.effective_source_version if project.compatibility else None,
+        platform_assessment_status=project.compatibility.platform.status.value if project.compatibility else None,
+        hardware_assessment_status=project.compatibility.hardware.status.value if project.compatibility else None,
+        evidence_ids=project.compatibility.evidence_ids if project.compatibility else [])
 
 
 async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMapping], allow_review: bool) -> CandidateMetadata:
@@ -260,7 +329,31 @@ async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMa
     profile = require_profile(project)
     project.invalidate()
     project.mappings = mappings
+    if profile.profile_status == ProfileStatus.VERIFIED:
+        project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
+            project.profile_id, project.target_panos_train, mappings)
+        if project.compatibility.status.value == "BLOCKED" or (project.compatibility.status.value == "REVIEW_REQUIRED" and not allow_review):
+            return candidate_metadata(project) if project.compatibility.status.value == "BLOCKED" else blocked_review_metadata(project)
     project.preview = await asyncio.to_thread(preview_interface_mappings, inventory, mappings, profile)
+    if project.preview.status == PreviewStatus.BLOCKED or project.preview.status == PreviewStatus.REVIEW_REQUIRED and not allow_review:
+        return blocked_review_metadata(project)
     project.candidate = await asyncio.to_thread(render_panos_candidate, project.source_path, inventory,
         project.preview, profile, project.candidate_path, allow_review=allow_review)
     return candidate_metadata(project)
+
+
+def blocked_review_metadata(project: ProjectSession) -> CandidateMetadata:
+    compatibility = project.compatibility
+    blocked = (compatibility and compatibility.status.value == "BLOCKED") or (project.preview and project.preview.status == PreviewStatus.BLOCKED)
+    return CandidateMetadata(status=PreviewStatus.BLOCKED if blocked else PreviewStatus.REVIEW_REQUIRED,
+        candidate_available=False, candidate_sha256=None, candidate_size_bytes=None,
+        preview_status=project.preview.status if project.preview else PreviewStatus.BLOCKED,
+        plan_status=PreviewStatus.BLOCKED,
+        findings=[{"code": item.code, "severity": item.severity, "message": item.message} for item in compatibility.findings] if compatibility else [],
+        source_profile_id=project.source_profile_id, target_profile_id=project.profile_id,
+        source_profile_status=get_profile(project.source_profile_id).profile_status.value if get_profile(project.source_profile_id or "") else None,
+        target_profile_status=get_profile(project.profile_id).profile_status.value if get_profile(project.profile_id or "") else None,
+        effective_panos_version=compatibility.platform.effective_source_version if compatibility else None,
+        platform_assessment_status=compatibility.platform.status.value if compatibility else None,
+        hardware_assessment_status=compatibility.hardware.status.value if compatibility else None,
+        evidence_ids=compatibility.evidence_ids if compatibility else [])

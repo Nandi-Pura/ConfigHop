@@ -32,4 +32,4 @@ python -m compileall src
 
 From the repository root, run `npm test` and `npm run build`.
 
-Core v0.1 parses PAN-OS XML, v0.2 previews exact interface dependencies, and v0.3 renders and validates a patched candidate. See [API v0.4](docs/api/API_V0_4.md) and [app integration v0.4](docs/app/APP_V0_4.md). Private XML and generated candidates belong in ignored `local-samples/` and `local-output/` directories.
+Core v0.1 parses PAN-OS XML, v0.2 previews exact interface dependencies, and v0.3 renders and validates a patched candidate. App v0.5 adds verified hardware metadata for PA-3410 and PA-5410 from curated official Palo Alto documentation, plus physical-port and PAN-OS compatibility checks. This is not vendor certification, device import validation, or production deployment approval. See [API v0.5](docs/api/API_V0_5.md), [app v0.5](docs/app/APP_V0_5.md), and [v0.5 hardware compatibility](docs/core/CORE_V0_5.md). Private XML and generated candidates belong in ignored `local-samples/` and `local-output/` directories.

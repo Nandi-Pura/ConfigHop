@@ -1,4 +1,4 @@
-import type { CandidateMetadata, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState } from './types'
+import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState } from './types'
 
 export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || 'http://127.0.0.1:8000/api/v1').replace(/\/$/, '')
 export const MAX_TEXT_PREVIEW_BYTES = 10 * 1024 * 1024
@@ -53,8 +53,15 @@ export const api = {
   getInventory: (id: string, signal?: AbortSignal) => request<InventoryView>(`/projects/${id}/inventory`, { signal }),
   listProfiles: (signal?: AbortSignal) => request<HardwareProfileSummary[]>('/hardware-profiles', { signal }),
   getProfile: (id: string, signal?: AbortSignal) => request<HardwareProfileDetail>(`/hardware-profiles/${id}`, { signal }),
-  setProfile: (id: string, profileId: string, signal?: AbortSignal) => request<ProjectState>(`/projects/${id}/target-profile`, {
-    method: 'PUT', body: JSON.stringify({ profile_id: profileId }), signal,
+  listEvidence: (signal?: AbortSignal) => request<EvidenceRecord[]>('/evidence', { signal }),
+  setSourceProfile: (id: string, profileId: string, train: string, signal?: AbortSignal) => request<ProjectState>(`/projects/${id}/source-profile`, {
+    method: 'PUT', body: JSON.stringify({ profile_id: profileId || null, panos_train: train || null }), signal,
+  }),
+  setProfile: (id: string, profileId: string, train = '', signal?: AbortSignal) => request<ProjectState>(`/projects/${id}/target-profile`, {
+    method: 'PUT', body: JSON.stringify({ profile_id: profileId || null, panos_train: train || null }), signal,
+  }),
+  compatibility: (id: string, mappings: InterfaceMapping[], signal?: AbortSignal) => request<CompatibilityAssessment>(`/projects/${id}/compatibility`, {
+    method: 'POST', body: JSON.stringify({ mappings }), signal,
   }),
   preview: (id: string, mappings: InterfaceMapping[], signal?: AbortSignal) => request<MigrationPreview>(`/projects/${id}/preview`, {
     method: 'POST', body: JSON.stringify({ mappings }), signal,
