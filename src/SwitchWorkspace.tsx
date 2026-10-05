@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { AlertTriangle, ArrowRight, Check, CircleCheck, Clipboard, Download, FileText, GitCompareArrows, Network, RotateCcw, Search, Upload, X } from 'lucide-react'
 import { autoMapSwitchPorts, changeSwitchPort, filterSwitchPorts, switchCandidate, switchCatalog, switchConfig, switchInventory, switchOsLabel, switchPorts, switchSource, switchTarget, switchVlans, type SwitchPlatform, type SwitchPort } from './switchData'
+import { readProjectStorage } from './projectStorage'
 
 type VlanRow = (typeof switchVlans)[number]
 type Tab = 'Overview' | 'Raw Comparison' | 'Semantic Changes' | 'Port Mapping' | 'VLAN & LAG Mapping' | 'Migration Plan' | 'Candidate Configuration' | 'Findings'
@@ -50,8 +51,8 @@ export default function SwitchWorkspace({ onDomainChange, actionsRef, onTitleCha
   const changePort = (id: number, port: string) => setPorts((current) => changeSwitchPort(current, id, port))
   const reset = () => { setSource(switchSource); setTarget(switchTarget); setConfig(switchConfig); setFileName('c9300-config.txt'); setFileSize('1.8 MB'); setPorts(switchPorts); setVlans(switchVlans); setSearch(''); setFilter('All'); setView('Table'); setMappingTab('VLAN Mapping'); setResultTab('Overview'); setGenerated(false); onTitleChange('C9300-48P → CX 6300M 48G') }
   actionsRef.current = {
-    save: () => localStorage.setItem('configmorph-switch-project', JSON.stringify({ source, target, config, fileName, fileSize, ports, vlans, generated })),
-    load: () => { const raw = localStorage.getItem('configmorph-switch-project'); if (!raw) return alert('No saved Switch project found.'); try { const saved = JSON.parse(raw); setSource(saved.source); setTarget(saved.target); setConfig(saved.config); setFileName(saved.fileName); setFileSize(saved.fileSize); setPorts(saved.ports); setVlans(saved.vlans); setGenerated(saved.generated); onTitleChange(`${saved.source.hardware.model} → ${saved.target.hardware.model}`) } catch { alert('Saved Switch project could not be loaded.') } },
+    save: () => localStorage.setItem('confighop-switch-project', JSON.stringify({ source, target, config, fileName, fileSize, ports, vlans, generated })),
+    load: () => { const raw = readProjectStorage('confighop-switch-project', 'configmorph-switch-project'); if (!raw) return alert('No saved Switch project found.'); try { const saved = JSON.parse(raw); setSource(saved.source); setTarget(saved.target); setConfig(saved.config); setFileName(saved.fileName); setFileSize(saved.fileSize); setPorts(saved.ports); setVlans(saved.vlans); setGenerated(saved.generated); onTitleChange(`${saved.source.hardware.model} → ${saved.target.hardware.model}`) } catch { alert('Saved Switch project could not be loaded.') } },
     clear: () => { setConfig(''); setFileName('No configuration loaded'); setFileSize(''); setGenerated(false) },
     reset,
   }

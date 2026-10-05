@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import SwitchWorkspace, { type SwitchActions } from './SwitchWorkspace'
+import { readProjectStorage } from './projectStorage'
 import {
   AlertTriangle,
   ArrowRight,
@@ -230,11 +231,11 @@ function App() {
       const match = platforms.find((platform) => platform.vendor === vendor && platform.hardware.model === hardware && osLabel(platform) === os)
       return match ?? platforms.find((platform) => platform.vendor === vendor && platform.hardware.model === hardware)
     }
-    localStorage.setItem('configmorph-project', JSON.stringify({ sourcePlatform: platformData(sourceVendor, sourceHardware, sourceOs), targetPlatform: platformData(targetVendor, targetHardware, targetOs), sourceConfig, fileName, fileSize, mappings, projectName }))
+    localStorage.setItem('confighop-project', JSON.stringify({ sourcePlatform: platformData(sourceVendor, sourceHardware, sourceOs), targetPlatform: platformData(targetVendor, targetHardware, targetOs), sourceConfig, fileName, fileSize, mappings, projectName }))
   }
 
   const loadProject = () => {
-    const raw = localStorage.getItem('configmorph-project')
+    const raw = readProjectStorage('confighop-project', 'configmorph-project')
     if (!raw) return alert('No saved project found.')
     const p = JSON.parse(raw)
     setSourceVendor(p.sourcePlatform?.vendor ?? p.sourceVendor)
@@ -402,8 +403,8 @@ function App() {
 
 function Header({ projectName, setProjectName }: { projectName: string, setProjectName: (s: string) => void }) {
   return <header className="app-header">
-    <div className="brand-mark">CM</div>
-    <div className="brand-text"><strong>ConfigMorph</strong><span>Network Configuration Migration</span></div>
+    <img className="brand-logo" src="/brand/confighop-mark.svg" alt="" aria-hidden="true" width="30" height="30" />
+    <div className="brand-text" aria-label="ConfigHop — Network Configuration Migration"><strong>ConfigHop</strong><span>Network Configuration Migration</span></div>
     <div className="header-divider" />
     <div className="project-name"><input value={projectName} onChange={(e) => setProjectName(e.target.value)} aria-label="Project name" /><Pencil size={13} aria-hidden="true" /></div>
   </header>

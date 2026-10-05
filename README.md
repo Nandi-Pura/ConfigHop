@@ -1,6 +1,12 @@
-# ConfigMorph UI Prototype
+# ConfigHop
 
-Greenfield frontend prototype for the ConfigMorph migration workbench.
+<img src="public/brand/confighop-logo.svg" alt="ConfigHop" width="180" />
+
+Network Configuration Migration
+
+ConfigHop is an open-source network configuration migration workbench for moving configurations across hardware platforms and network vendors. The current frontend uses mock data; it does not perform production migrations.
+
+Example migration scenarios: Palo Alto PA-3410 → PA-5410, Cisco Catalyst → HPE Aruba CX, and Palo Alto → Fortinet.
 
 ## Stack
 
