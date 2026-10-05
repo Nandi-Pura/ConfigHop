@@ -1,0 +1,15 @@
+{
+  "vendor": "palo_alto",
+  "model": "synthetic-target-fw",
+  "profile_status": "synthetic",
+  "interfaces": [
+    {"name": "ethernet1/1", "kind": "physical_ethernet"},
+    {"name": "ethernet1/2", "kind": "physical_ethernet"},
+    {"name": "ethernet1/3", "kind": "physical_ethernet"},
+    {"name": "ethernet1/4", "kind": "physical_ethernet"},
+    {"name": "ethernet1/5", "kind": "physical_ethernet"},
+    {"name": "ethernet1/6", "kind": "physical_ethernet"},
+    {"name": "ethernet1/7", "kind": "physical_ethernet"},
+    {"name": "ethernet1/8", "kind": "physical_ethernet"}
+  ]
+}
