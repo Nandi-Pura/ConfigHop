@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .dependency import ReferenceType
 
@@ -36,10 +38,24 @@ class ChangeAction(StrEnum):
     REVIEW = "REVIEW"
 
 
+class TargetLinkSpeed(StrEnum):
+    FORTY_G = "40G"
+    HUNDRED_G = "100G"
+    AUTO = "auto"
+    TEN_G = "10G"
+    TWENTY_FIVE_G = "25G"
+
+
+class TargetInterfaceSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    link_speed: TargetLinkSpeed | str | None = None
+
+
 class InterfaceMapping(BaseModel):
     source_interface: str
     target_interface: str
     notes: str | None = None
+    target_settings: TargetInterfaceSettings | None = None
 
 
 class DerivedSubinterfaceMapping(BaseModel):

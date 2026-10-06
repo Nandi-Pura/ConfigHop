@@ -11,11 +11,18 @@ from confighop_core.models.hardware import (
 
 CHECKED_AT = date(2026, 10, 5)
 TRAINS = ["10.2", "11.0", "11.1", "11.2", "12.1", "12.2"]
+NATIVE_QSFP_SPEED_XML = {"40G": "40000", "100G": "100000"}
+NATIVE_QSFP_EVIDENCE = ["PAN-HW-PA5400-FRONT", "PAN-CONFIG-ETHERNET-LINK-SPEED", "PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", "PAN-CONFIG-ETHERNET-LINK-SPEED-TEST"]
 
 
 class EvidenceStatus(StrEnum):
     VERIFIED = "VERIFIED"
     RETIRED = "RETIRED"
+
+
+class VerificationLevel(StrEnum):
+    DOCUMENTATION_VERIFIED = "DOCUMENTATION_VERIFIED"
+    DEVICE_VALIDATED = "DEVICE_VALIDATED"
 
 
 class EvidenceRecord(BaseModel):
@@ -28,12 +35,15 @@ class EvidenceRecord(BaseModel):
     scope: str
     summary: str
     status: EvidenceStatus = EvidenceStatus.VERIFIED
+    verification_level: VerificationLevel | None = None
+    device_validated: bool = False
 
     @field_validator("source_url")
     @classmethod
     def official_https(cls, value: str) -> str:
         parsed = urlparse(value)
-        if parsed.scheme != "https" or parsed.hostname not in {"docs.paloaltonetworks.com", "paloaltonetworks.com", "www.paloaltonetworks.com"} or parsed.username or parsed.password:
+        official = parsed.hostname in {"docs.paloaltonetworks.com", "paloaltonetworks.com", "www.paloaltonetworks.com"} or parsed.hostname == "github.com" and parsed.path.startswith("/PaloAltoNetworks/pan-os-python/")
+        if parsed.scheme != "https" or not official or parsed.username or parsed.password:
             raise ValueError("verified evidence requires an official HTTPS URL")
         return value
 
@@ -46,6 +56,9 @@ EVIDENCE = {
         EvidenceRecord(id="PAN-HW-PA5400-FRONT", source_title="PA-5400 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-5400-hardware-reference/pa-5400-series-firewall-overview/pa-5400-series-front-and-back-panel-descriptions/pa-5400-series-front-panel", source_type="HARDWARE_REFERENCE", scope="PA-5410 dataplane ports, breakout topology, native QSFP speed condition", summary="PA-5410 has 1–24 direct ports, 25–40 breakout identities and 41–44 native QSFP identities; auto speed defaults QSFP to breakout."),
         EvidenceRecord(id="PAN-COMPAT-PANOS-BY-MODEL", source_title="Palo Alto Networks Next-Generation Firewalls", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/palo-alto-networks-next-gen-firewalls", source_type="COMPATIBILITY_MATRIX", scope="PA-3400 and PA-5410 PAN-OS trains", summary="Both model groups explicitly do not support 10.1; they support 10.2, 11.0, 11.1, 11.2, 12.1 and 12.2; 12.x starts at 12.1.2."),
         EvidenceRecord(id="PAN-COMPAT-BREAKOUT", source_title="Breakout Port Support", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/breakout-port-support", source_type="COMPATIBILITY_MATRIX", scope="PA-5410 QSFP breakout parent and child identities", summary="Ports 41–44 each break out to four children at 10G or 25G."),
+        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED", source_title="PAN-OS Python SDK EthernetInterface", source_url="https://github.com/PaloAltoNetworks/pan-os-python/blob/develop/panos/network.py", source_type="VENDOR_SDK", scope="Ethernet link-speed XML node", summary="EthernetInterface serializes link_speed under the direct link-speed node; the official SDK Ethernet serialization test confirms direct value output.", verification_level="DOCUMENTATION_VERIFIED"),
+        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", source_title="Configure an Aggregate Ethernet Interface Variable", source_url="https://docs.paloaltonetworks.com/ngfw/networking/configure-interfaces/configure-an-aggregate-interface-group/configure-an-aggregate-ethernet-interface", source_type="CONFIGURATION_REFERENCE", scope="PAN-OS interface link speed values in Mbps", summary="Interface link speed values include 40000 and 100000 Mbps.", verification_level="DOCUMENTATION_VERIFIED"),
+        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED-TEST", source_title="PAN-OS Python SDK Ethernet serialization test", source_url="https://github.com/PaloAltoNetworks/pan-os-python/blob/develop/tests/test_integration.py", source_type="VENDOR_SDK_TEST", scope="EthernetInterface XML serialization", summary="Official SDK test serializes link_speed=1000 as a direct Ethernet entry child <link-speed>1000</link-speed>.", verification_level="DOCUMENTATION_VERIFIED"),
     ]
 }
 
@@ -58,7 +71,7 @@ def _group(profile: str, key: str, numbers: range, media: list[str], speeds: lis
     group = HardwareInterfaceGroup(id=f"{profile}-{key}", label=key, interface_names=names,
         media_capabilities=media, speed_capabilities=speeds, availability=availability,
         mapping_support=MappingSupport.CONDITIONAL if availability == PortAvailability.NATIVE_CONDITIONAL else MappingSupport.UNSUPPORTED if blocked else MappingSupport.SUPPORTED,
-        candidate_support=CandidateSupport.BLOCKED if blocked else CandidateSupport.SUPPORTED,
+        candidate_support=CandidateSupport.CONDITIONAL if condition == RequiredCondition.MANUAL_NATIVE_PORT_SPEED else CandidateSupport.BLOCKED if blocked else CandidateSupport.SUPPORTED,
         required_condition=condition, evidence_ids=[evidence], notes=notes)
     interfaces = [HardwareInterface(name=name, kind=HardwareKind.PHYSICAL_ETHERNET,
         speed_capabilities=speeds, media_capabilities=media, media=media[0], availability=availability,
@@ -87,8 +100,8 @@ PA5410 = _profile("paloalto-pa-5410", "PA-5410", "PA-5400", [
     _group("pa5410", "SFP 9-20", range(9, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA5400-FRONT"),
     _group("pa5410", "SFP28 21-24", range(21, 25), ["SFP", "SFP_PLUS", "SFP28"], ["1G", "10G", "25G"], "PAN-HW-PA5400-FRONT", notes="Remote endpoint RS-FEC is documented; ConfigHop does not configure FEC."),
     _group("pa5410", "Breakout 25-40", range(25, 41), ["QSFP_PLUS", "QSFP28"], ["10G", "25G"], "PAN-COMPAT-BREAKOUT", PortAvailability.BREAKOUT_CHILD, RequiredCondition.BREAKOUT_MODE),
-    _group("pa5410", "Conditional QSFP 41-44", range(41, 45), ["QSFP_PLUS", "QSFP28"], ["40G", "100G"], "PAN-HW-PA5400-FRONT", PortAvailability.NATIVE_CONDITIONAL, RequiredCondition.MANUAL_NATIVE_PORT_SPEED, notes="Auto speed defaults to breakout; native mode needs explicit speed that ConfigHop does not render."),
-], ["PAN-HW-PA5400-OVERVIEW", "PAN-HW-PA5400-FRONT", "PAN-COMPAT-PANOS-BY-MODEL", "PAN-COMPAT-BREAKOUT"], "10.2.0")
+    _group("pa5410", "Conditional QSFP 41-44", range(41, 45), ["QSFP_PLUS", "QSFP28"], ["40G", "100G"], "PAN-HW-PA5400-FRONT", PortAvailability.NATIVE_CONDITIONAL, RequiredCondition.MANUAL_NATIVE_PORT_SPEED, notes="Auto speed defaults to breakout; native mode requires an explicit 40G or 100G target speed."),
+], ["PAN-HW-PA5400-OVERVIEW", "PAN-HW-PA5400-FRONT", "PAN-COMPAT-PANOS-BY-MODEL", "PAN-COMPAT-BREAKOUT", "PAN-CONFIG-ETHERNET-LINK-SPEED", "PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", "PAN-CONFIG-ETHERNET-LINK-SPEED-TEST"], "10.2.0")
 
 SYNTHETIC = HardwareProfile(id="paloalto-synthetic-64", vendor="palo_alto", model="synthetic-panos-target-64",
     profile_status=ProfileStatus.SYNTHETIC,

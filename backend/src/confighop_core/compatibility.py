@@ -4,7 +4,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from .evidence.registry import get_profile
+from .evidence.registry import NATIVE_QSFP_EVIDENCE, NATIVE_QSFP_SPEED_XML, get_profile
 from .models.hardware import CandidateSupport, PortAvailability
 from .models.inventory import PaloAltoInventory
 from .models.mapping import InterfaceMapping, Severity
@@ -168,6 +168,7 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
         findings=platform_findings, evidence_ids=matrix)
 
     explicit = {item.source_interface: item.target_interface for item in mappings}
+    decisions = {item.source_interface: item.target_settings for item in mappings}
     source_ports = {item.name: item for item in source.interfaces} if source else {}
     target_ports = {item.name: item for item in target.interfaces} if target else {}
     hardware_findings: list[Finding] = []
@@ -196,7 +197,20 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
                 findings.append(_finding("BREAKOUT_MODE_REQUIRED", "This breakout child requires target QSFP breakout configuration that ConfigHop does not render.", source=item.name, target=target_name, evidence=target_port.evidence_ids))
             else:
                 findings.append(_finding("TARGET_NATIVE_PORT_MODE_REQUIRED", "This native QSFP target requires explicit speed configuration that ConfigHop does not render.", source=item.name, target=target_name, evidence=target_port.evidence_ids))
+        settings = decisions.get(item.name)
+        chosen = settings.link_speed if settings else None
+        native = bool(target_port and target_port.candidate_support == CandidateSupport.CONDITIONAL)
+        if native and chosen is None:
+            findings.append(_finding("TARGET_NATIVE_PORT_MODE_REQUIRED", "Select 40G or 100G for the native QSFP target.", source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
+        elif native and chosen not in NATIVE_QSFP_SPEED_XML:
+            findings.append(_finding("TARGET_LINK_SPEED_UNSUPPORTED", "The selected speed cannot configure this native QSFP target.", source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
+        elif settings is not None and not native:
+            findings.append(_finding("TARGET_INTERFACE_SETTING_NOT_APPLICABLE", "Native QSFP target speed does not apply to this interface.", source=item.name, target=target_name))
         speed = _configured_speed(item.link_speed)
+        if native and chosen in NATIVE_QSFP_SPEED_XML:
+            findings.append(_finding("PHYSICAL_LINK_CHANGE_REQUIRED", "Target speed was selected explicitly; verify optics, cabling and peer compatibility before deployment.", severity=Severity.WARNING, source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
+            if speed and speed != chosen:
+                findings.append(_finding("TARGET_LINK_SPEED_CHANGED", "Configured source link speed differs from the selected target speed.", severity=Severity.WARNING, source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
         if source_port and target_port and target_port.candidate_support == CandidateSupport.SUPPORTED and source_port.speed_capabilities and target_port.speed_capabilities:
             if speed == "UNKNOWN":
                 findings.append(_finding("CONFIGURED_SPEED_NOT_VERIFIED", "Configured source speed could not be normalized.", severity=Severity.WARNING, source=item.name, target=target_name))

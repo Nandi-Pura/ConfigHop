@@ -17,8 +17,12 @@ def expected_inventory(source: PaloAltoInventory, plan: TransformationPlan) -> P
         return children.get(value, physical.get(value, value))
 
     for item in expected.physical_interfaces:
+        source_name = item.name
         item.name = physical.get(item.name, item.name)
         item.subinterface_names = [mapped(name) for name in item.subinterface_names]
+        for op in plan.operations:
+            if op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED and op.object_name == source_name:
+                item.link_speed = op.target_value
     for item in expected.subinterfaces:
         item.name = children.get(item.name, item.name)
         item.parent_interface = physical.get(item.parent_interface, item.parent_interface)
@@ -66,6 +70,11 @@ def preservation_audit(
             node = node[index]
         if field == "name":
             node.set("name", old)
+        elif field == "delete-link-speed":
+            speed = node.find("link-speed")
+            if speed is None:
+                return False
+            node.remove(speed)
         else:
             node.text = old
     source_xml = ET.canonicalize(ET.tostring(source_root, encoding="unicode"), with_comments=True)

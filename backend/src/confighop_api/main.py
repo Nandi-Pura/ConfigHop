@@ -41,7 +41,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         finally:
             app.state.store.close()
 
-    app = FastAPI(title="ConfigHop Local API", version="0.5.1",
+    app = FastAPI(title="ConfigHop Local API", version="0.6.0",
         description="Local single-user API without authentication. Bind to 127.0.0.1 only.", lifespan=lifespan)
     origins = [item.strip() for item in os.getenv("CONFIGHOP_CORS_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173").split(",") if item.strip()]

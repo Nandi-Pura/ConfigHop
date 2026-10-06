@@ -1,6 +1,7 @@
 from collections import Counter
 
-from ..models.hardware import HardwareKind, HardwareProfile
+from ..evidence.registry import NATIVE_QSFP_SPEED_XML
+from ..models.hardware import CandidateSupport, HardwareKind, HardwareProfile
 from ..models.inventory import PaloAltoInventory
 from ..models.mapping import InterfaceMapping, MigrationFinding, Severity
 
@@ -38,4 +39,16 @@ def validate_mappings(
             error("TARGET_INTERFACE_NOT_FOUND", "Target interface was not found in the hardware profile.")
         elif target.kind != HardwareKind.PHYSICAL_ETHERNET:
             error("TARGET_INTERFACE_TYPE_UNSUPPORTED", "Target interface is not physical Ethernet.")
+        chosen = mapping.target_settings.link_speed if mapping.target_settings else None
+        if target and target.candidate_support == CandidateSupport.CONDITIONAL:
+            if chosen is None:
+                error("TARGET_NATIVE_PORT_MODE_REQUIRED", "Select 40G or 100G for the native QSFP target.")
+            elif chosen not in NATIVE_QSFP_SPEED_XML:
+                error("TARGET_LINK_SPEED_UNSUPPORTED", "The selected speed cannot configure this native QSFP target.")
+            else:
+                findings.append(MigrationFinding(code="PHYSICAL_LINK_CHANGE_REQUIRED", severity=Severity.WARNING,
+                    source_interface=mapping.source_interface, target_interface=mapping.target_interface,
+                    message="Verify optics, cabling and peer compatibility before deployment."))
+        elif mapping.target_settings is not None:
+            error("TARGET_INTERFACE_SETTING_NOT_APPLICABLE", "Native QSFP target speed does not apply to this interface.")
     return findings
