@@ -87,6 +87,7 @@ class HardwareProfile(BaseModel):
     interface_groups: list[HardwareInterfaceGroup] = Field(default_factory=list)
     evidence_ids: list[str] = Field(default_factory=list)
     supported_panos_trains: list[str] = Field(default_factory=list)
+    verified_unsupported_panos_trains: list[str] = Field(default_factory=list)
     first_supported_release: str | None = None
     verified_at: str | None = None
     notes: str | None = None

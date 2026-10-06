@@ -32,17 +32,45 @@ def test_evidence_and_exact_profiles():
 
 
 def test_version_support_and_hotfix():
-    assert parse_version("11.1.4-h2").hotfix == 2
-    assert version_support(PA5410.id, "12.1") == "VERSION_NOT_VERIFIED"
-    assert version_support(PA5410.id, "12.1.1") == "VERSION_BELOW_SUPPORTED_FLOOR"
-    assert version_support(PA5410.id, "12.1.2") == "SUPPORTED"
-    assert version_support(PA3410.id, "10.1.9") == "UNSUPPORTED"
-    assert version_support(PA3410.id, "13.0.0") == "UNSUPPORTED"
+    hotfix = parse_version("11.1.4-h2")
+    assert (hotfix.train, hotfix.patch, hotfix.hotfix) == ("11.1", 4, 2)
+    for profile in (PA3410, PA5410):
+        assert profile.verified_unsupported_panos_trains == ["10.1"]
+        assert "PAN-COMPAT-PANOS-BY-MODEL" in profile.evidence_ids
+        for value in ("10.1", "10.1.0", "10.1.9"):
+            assert version_support(profile.id, value) == "UNSUPPORTED"
+        for value in ("10.2", "11.1.4", "11.1.4-h2", "12.1.2", "12.1.3"):
+            assert version_support(profile.id, value) == "SUPPORTED"
+        for value in ("12.1", "13.0", "13.0.0", "13.1.4", "9.9.9"):
+            assert version_support(profile.id, value) == "VERSION_NOT_VERIFIED"
+        for value in ("12.1.0", "12.1.1"):
+            assert version_support(profile.id, value) == "VERSION_BELOW_SUPPORTED_FLOOR"
+    for value in ("not-a-version", None, ""):
+        assert version_support(PA3410.id, value) == "UNKNOWN_SOFTWARE"
     inventory = parse_palo_alto_xml(FIXTURE)
     inventory.platform.detail_version = "12.1.1"
     below = assess(inventory, PA3410.id, "12.1", PA5410.id, "12.1", [])
     assert below.status == "BLOCKED"
     assert below.platform.source_version_status == "VERSION_BELOW_SUPPORTED_FLOOR"
+
+
+@pytest.mark.parametrize("version,status,findings", [
+    ("13.0.0", "VERSION_NOT_VERIFIED", {"VERSION_NOT_VERIFIED"}),
+    ("10.1.9", "UNSUPPORTED", {"SOURCE_OS_UNSUPPORTED", "TARGET_OS_UNSUPPORTED"}),
+])
+def test_platform_version_evidence_blocks(version, status, findings):
+    inventory = parse_palo_alto_xml(FIXTURE)
+    inventory.platform.detail_version = version
+    train = parse_version(version).train
+    result = assess(inventory, PA3410.id, train, PA5410.id, train, [])
+    codes = {item.code for item in result.platform.findings}
+    assert result.platform.source_version_status == status
+    assert result.platform.target_version_status == status
+    assert result.platform.status == result.status == "BLOCKED"
+    assert findings <= codes
+    if status == "VERSION_NOT_VERIFIED":
+        assert "SOURCE_OS_UNSUPPORTED" not in codes
+        assert "TARGET_OS_UNSUPPORTED" not in codes
 
 
 def test_effective_assignments_and_blockers():
@@ -129,3 +157,28 @@ def test_api_review_requires_acknowledgment_and_context_invalidates():
         assert client.get(f"/api/v1/projects/{project}/candidate/download").status_code == 409
         changed = client.post(f"/api/v1/projects/{project}/compatibility", json={"mappings": []}, headers=HEADERS).json()
         assert "TARGET_OS_CHANGE_UNSUPPORTED" in {item["code"] for item in changed["findings"]}
+
+
+def test_api_unverified_future_blocks_candidate_even_with_review():
+    source = FIXTURE.read_bytes().replace(b'detail-version="11.1.4"', b'detail-version="13.0.0"')
+    with TestClient(create_app(ProjectStore())) as client:
+        project = client.post("/api/v1/projects", headers=HEADERS).json()["project_id"]
+        for role, profile in (("source", PA3410), ("target", PA5410)):
+            response = client.put(f"/api/v1/projects/{project}/{role}-profile",
+                json={"profile_id": profile.id, "panos_train": "13.0"}, headers=HEADERS)
+            assert response.status_code == 200
+        assert client.put(f"/api/v1/projects/{project}/source", content=source,
+            headers={**HEADERS, "Content-Type": "application/xml"}).status_code == 200
+        compatibility = client.post(f"/api/v1/projects/{project}/compatibility",
+            json={"mappings": []}, headers=HEADERS)
+        assert compatibility.status_code == 200
+        result = compatibility.json()
+        assert result["platform"]["source_version_status"] == "VERSION_NOT_VERIFIED"
+        assert result["platform"]["target_version_status"] == "VERSION_NOT_VERIFIED"
+        assert result["status"] == "BLOCKED"
+        assert {item["code"] for item in result["findings"]} >= {"VERSION_NOT_VERIFIED"}
+        candidate = client.post(f"/api/v1/projects/{project}/candidate",
+            json={"mappings": [], "allow_review": True}, headers=HEADERS)
+        assert candidate.status_code == 200
+        assert candidate.json()["candidate_available"] is False
+        assert client.get(f"/api/v1/projects/{project}/candidate/download").status_code == 409

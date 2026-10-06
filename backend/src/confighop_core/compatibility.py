@@ -52,8 +52,10 @@ def version_support(profile_id: str, value: str | None) -> str:
         return "VERSION_NOT_VERIFIED"
     if version is None:
         return "UNKNOWN_SOFTWARE"
-    if version.train not in profile.supported_panos_trains:
+    if version.train in profile.verified_unsupported_panos_trains:
         return "UNSUPPORTED"
+    if version.train not in profile.supported_panos_trains:
+        return "VERSION_NOT_VERIFIED"
     if version.train == "12.1":
         if version.patch is None:
             return "VERSION_NOT_VERIFIED"

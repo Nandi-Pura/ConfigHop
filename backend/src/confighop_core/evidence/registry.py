@@ -44,7 +44,7 @@ EVIDENCE = {
         EvidenceRecord(id="PAN-HW-PA3400-FRONT", source_title="PA-3400 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-3400-hardware-reference/pa-3400-series-overview/front-panel-3400-series", source_type="HARDWARE_REFERENCE", scope="PA-3410 dataplane port groups", summary="PA-3410 has Ethernet 1–26 in RJ45, SFP/SFP+, and SFP28 groups."),
         EvidenceRecord(id="PAN-HW-PA5400-OVERVIEW", source_title="PA-5400 Series Firewall Overview", source_url="https://docs.paloaltonetworks.com/hardware/pa-5400-hardware-reference/pa-5400-series-firewall-overview", source_type="HARDWARE_OVERVIEW", scope="PA-5410 model and first supported release", summary="PA-5410 first supports PAN-OS 10.2.0."),
         EvidenceRecord(id="PAN-HW-PA5400-FRONT", source_title="PA-5400 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-5400-hardware-reference/pa-5400-series-firewall-overview/pa-5400-series-front-and-back-panel-descriptions/pa-5400-series-front-panel", source_type="HARDWARE_REFERENCE", scope="PA-5410 dataplane ports, breakout topology, native QSFP speed condition", summary="PA-5410 has 1–24 direct ports, 25–40 breakout identities and 41–44 native QSFP identities; auto speed defaults QSFP to breakout."),
-        EvidenceRecord(id="PAN-COMPAT-PANOS-BY-MODEL", source_title="Palo Alto Networks Next-Generation Firewalls", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/palo-alto-networks-next-gen-firewalls", source_type="COMPATIBILITY_MATRIX", scope="PA-3400 and PA-5410 PAN-OS trains", summary="Both model groups support 10.2, 11.0, 11.1, 11.2, 12.1 and 12.2; 12.x starts at 12.1.2."),
+        EvidenceRecord(id="PAN-COMPAT-PANOS-BY-MODEL", source_title="Palo Alto Networks Next-Generation Firewalls", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/palo-alto-networks-next-gen-firewalls", source_type="COMPATIBILITY_MATRIX", scope="PA-3400 and PA-5410 PAN-OS trains", summary="Both model groups explicitly do not support 10.1; they support 10.2, 11.0, 11.1, 11.2, 12.1 and 12.2; 12.x starts at 12.1.2."),
         EvidenceRecord(id="PAN-COMPAT-BREAKOUT", source_title="Breakout Port Support", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/breakout-port-support", source_type="COMPATIBILITY_MATRIX", scope="PA-5410 QSFP breakout parent and child identities", summary="Ports 41–44 each break out to four children at 10G or 25G."),
     ]
 }
@@ -72,7 +72,8 @@ def _profile(profile_id: str, model: str, series: str, groups: list[tuple[Hardwa
     return HardwareProfile(id=profile_id, vendor="palo_alto", model=model, series=series,
         profile_status=ProfileStatus.VERIFIED, interfaces=sorted([item for _, members in groups for item in members], key=lambda item: int(item.name.split("/")[1])),
         interface_groups=[group for group, _ in groups], evidence_ids=evidence_ids,
-        supported_panos_trains=TRAINS, first_supported_release=first, verified_at=CHECKED_AT.isoformat())
+        supported_panos_trains=TRAINS, verified_unsupported_panos_trains=["10.1"],
+        first_supported_release=first, verified_at=CHECKED_AT.isoformat())
 
 
 PA3410 = _profile("paloalto-pa-3410", "PA-3410", "PA-3400", [
