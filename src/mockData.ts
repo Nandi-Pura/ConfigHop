@@ -1,5 +1,5 @@
 import type { ConversionState, Domain } from './platformCatalog'
-export type MappingRow = { source: string; type: string; details: string; suggested: string; target: string; status: 'Mapped' | 'Unmapped' | 'Review'; notes: string }
+export type MappingRow = { source: string; type: string; details: string; suggested: string; target: string; status: 'Mapped' | 'Unmapped' | 'Review' | 'Conflict'; notes: string }
 export type SemanticRow = { tab: string; sourceType: string; source: string; targetType: string; target: string; state: ConversionState; note: string }
 export const firewallConfig = `<config>\n  <devices>\n    <entry name="localhost.localdomain">\n      <network>\n        <interface>\n          <ethernet>\n            <entry name="ethernet1/1"/>\n            <entry name="ethernet1/2"/>\n          </ethernet>\n        </interface>\n      </network>\n    </entry>\n  </devices>\n</config>`
 export const firewallCandidate = `config system interface\n    edit "port1"\n        set alias "TRUST"\n    next\n    edit "port2"\n        set alias "UNTRUST"\n    next\nend\nconfig firewall address\n    edit "WEB-SERVERS"\n        set subnet 10.10.10.0 255.255.255.0\n    next\nend\n# Synthetic UI fixture; engineer review required.`

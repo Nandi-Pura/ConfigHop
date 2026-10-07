@@ -34,6 +34,64 @@
 @media(max-width:1450px){.mock-workspace .setup-grid{grid-template-columns:minmax(145px,.6fr) minmax(0,1fr) 24px minmax(0,1fr)}.mock-workspace .platform-fields{grid-template-columns:1fr 1fr}.mock-workspace .platform-fields .field:first-child{grid-column:1/-1}.mock-readiness{grid-template-columns:1fr 180px}.mock-readiness .readiness-summary{grid-column:1/-1}.mock-workspace .results-tabs button{padding:0 8px}}
 @media(max-width:1100px){.mock-workspace .setup-grid{grid-template-columns:1fr 24px 1fr}.mock-workspace .migration-type-card{grid-column:1/-1}.mock-workspace .source-row{grid-template-columns:1fr}.mock-readiness{grid-template-columns:1fr}.mock-readiness .readiness-summary{grid-column:auto}}
 @media(max-width:700px){.mock-workspace .setup-grid{grid-template-columns:1fr}.mock-workspace .migration-arrow{transform:rotate(90deg)}.mock-workspace .source-config-grid{grid-template-columns:1fr}.readiness-checks{grid-template-columns:1fr 1fr}.mock-overview{flex-wrap:wrap}}
+
+.app-shell{grid-template-columns:145px minmax(0,1fr)}
+.app-shell.sidebar-collapsed{grid-template-columns:52px minmax(0,1fr)}
+.project-sidebar{padding:5px 4px;gap:3px}
+.sidebar-toggle,.sidebar-action{min-height:34px;padding:0 8px;font-size:10px}
+.sidebar-toggle{margin-bottom:3px}
+.sidebar-action.new-project{margin-bottom:6px}
+.app-header{height:42px;padding:0 11px}
+.brand-text{min-width:142px}.brand-text strong{font-size:16px}.brand-text span{font-size:9px}
+.project-name input{width:240px;font-size:12px}
+.mock-workspace .section-card:first-child{position:relative}
+.mock-workspace .section-card:first-child .mock-mode{position:absolute;top:7px;right:9px;padding:0}
+.mock-workspace .setup-grid{padding-top:4px;padding-bottom:5px}
+.mock-workspace .migration-type-card{padding:7px}
+.mock-workspace .platform-card{padding:6px 8px}
+.mock-workspace .field select{height:27px}
+.mock-workspace .source-config-grid{grid-template-columns:165px minmax(0,1fr)}
+.mock-workspace .mock-editor>.code-toolbar{height:24px}
+.mock-workspace .mock-editor .code-viewer .code-toolbar{display:none}
+.mock-workspace .mock-editor .virtual-code-scroll{height:130px!important}
+.mock-workspace .mapping-toolbar{padding:4px 6px}
+.mock-workspace .mapping-toolbar .search-wrap{height:26px}
+.mock-workspace .mapping-toolbar .chip{height:26px;padding:0 9px}
+.mock-workspace .mapping-toolbar .btn{height:27px;padding:0 9px}
+.mock-workspace .mapping-toolbar .segmented button{height:27px}
+.mock-workspace .simple-table th{height:21px;padding:0 7px}
+.mock-workspace .simple-table td{height:21px;padding:0 7px}
+.mock-workspace .table-select{height:20px}
+.mock-readiness{grid-template-columns:minmax(0,1fr) 220px 170px}
+.readiness-checks{grid-template-columns:repeat(8,minmax(0,1fr))}
+.mock-readiness .readiness-item{min-height:44px}
+.mock-workspace .empty-results{height:58px;flex-direction:row;gap:12px}
+.mock-workspace .empty-results>span{font-size:9px}
+.mock-workspace .empty-results .generate-btn{flex:none;height:29px}
+.mock-workspace .switch-chassis{grid-template-columns:1fr 1fr;padding:8px;gap:8px}
+.mock-workspace .switch-chassis>div{min-width:0;padding:9px}
+.mock-workspace .switch-port-grid{grid-template-columns:repeat(12,minmax(0,1fr));gap:3px;margin-top:7px}
+.mock-workspace .switch-port-grid span{height:18px}
+.mock-workspace .switch-port-grid .unmapped{opacity:.55}
+.chassis-legend{grid-column:1/-1;display:flex;gap:14px;color:var(--muted);font-size:9px}
+.chassis-legend span:first-child{color:var(--success)}.chassis-legend span:nth-child(2){color:var(--warning)}
+.mock-raw .raw-toolbar{flex-wrap:wrap;gap:6px;padding:6px 8px}
+.mock-raw .raw-toolbar>span{font-size:9px;color:var(--muted);margin-right:auto}
+.mock-raw .raw-toolbar .search-wrap{height:27px;width:170px}
+.mock-raw .raw-toolbar label{display:flex;align-items:center;gap:5px}
+.mock-raw .raw-toolbar select{height:27px;border:1px solid var(--border);border-radius:4px;background:var(--surface3);color:var(--text);font-size:10px}
+.mock-raw .switch-diff>div{min-width:0}
+.mock-raw .switch-diff .code-viewer{min-height:0}
+.mock-raw .switch-diff .code-viewer .code-toolbar{display:none}
+.mock-raw .code-line.changed{background:rgba(77,168,255,.055)}
+.mock-raw .code-line.added{background:rgba(67,209,125,.09)}
+.mock-raw .code-line.removed{background:rgba(242,89,89,.09)}
+.mock-workspace .platform-card-head{min-height:22px}
+.mock-workspace .source-row{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}
+.mock-workspace .mock-editor .code-viewer{min-height:0}
+@media(max-width:1450px){.mock-workspace .migration-type-card{grid-column:auto}.mock-workspace .platform-fields{grid-template-columns:repeat(3,minmax(0,1fr))}.mock-workspace .platform-fields .field:first-child{grid-column:auto}.mock-readiness{grid-template-columns:minmax(0,1fr) 175px 155px}.mock-readiness .readiness-summary{grid-column:auto}}
+@media(max-width:1100px){.app-shell{grid-template-columns:130px minmax(0,1fr)}.mock-workspace .section-card:first-child .mock-mode{position:static;padding:4px 8px}.mock-workspace .setup-grid{padding-top:4px}.mock-workspace .migration-type-card{grid-column:1/-1}.mock-workspace .platform-fields{grid-template-columns:1fr 1fr}.mock-workspace .platform-fields .field:first-child{grid-column:1/-1}.mock-workspace .source-row{grid-template-columns:1fr}.mock-readiness{grid-template-columns:1fr}.readiness-checks{grid-template-columns:repeat(4,minmax(0,1fr))}.mock-readiness .readiness-summary{grid-column:auto}}
+@media(max-width:700px){.app-shell{grid-template-columns:52px minmax(0,1fr)}.mock-workspace .empty-results{height:auto;min-height:80px;flex-wrap:wrap;padding:8px}.mock-workspace .switch-chassis{grid-template-columns:1fr}}
 .status-badge.preserved{color:#8d9aa4}
 .evidence-link{border:0;background:none;color:var(--accent);text-decoration:underline;cursor:pointer;padding:2px 0;font-size:11px;text-align:left}
 .evidence-overlay{position:fixed;inset:0;z-index:100;background:rgba(0,7,14,.72);display:flex;align-items:center;justify-content:center;padding:18px}
