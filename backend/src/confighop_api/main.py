@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from confighop_core.models.transformation import SemanticMigrationDiff
-from confighop_core.evidence.registry import EVIDENCE, PROFILES
+from confighop_core.evidence.registry import EVIDENCE
+from confighop_core.hardware.registry import list_profiles as list_hardware_profiles
 from confighop_core.compatibility import CompatibilityAssessment
 
 from .schemas import (
@@ -41,7 +42,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         finally:
             app.state.store.close()
 
-    app = FastAPI(title="ConfigHop Local API", version="0.6.0",
+    app = FastAPI(title="ConfigHop Local API", version="0.7.0",
         description="Local single-user API without authentication. Bind to 127.0.0.1 only.", lifespan=lifespan)
     origins = [item.strip() for item in os.getenv("CONFIGHOP_CORS_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173").split(",") if item.strip()]
@@ -82,10 +83,14 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.get("/api/v1/capabilities")
     async def capabilities():
+        profiles = list_hardware_profiles()
         return {"domains": {"firewall": {"palo_alto_xml_inventory": True,
             "manual_interface_mapping": True, "dependency_preview": True, "panos_candidate_renderer": True},
-            "switch": {"backend_enabled": False}}, "verified_hardware_profiles": ["paloalto-pa-3410", "paloalto-pa-5410"],
-            "synthetic_hardware_profiles": [PROFILE_ID]}
+            "switch": {"backend_enabled": False}},
+            "verified_hardware_profiles": [p.id for p in profiles if p.profile_status == "verified"],
+            "synthetic_hardware_profiles": [p.id for p in profiles if p.profile_status == "synthetic"],
+            "candidate_render_profiles": [p.id for p in profiles if p.profile_status == "verified" and p.target_render_support == "SUPPORTED"],
+            "analysis_only_target_profiles": [p.id for p in profiles if p.target_render_support == "ANALYSIS_ONLY"]}
 
     @app.post("/api/v1/projects", response_model=ProjectView)
     async def create_project(request: Request):
@@ -132,7 +137,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.get("/api/v1/hardware-profiles", response_model=list[ProfileSummary])
     async def list_profiles():
-        return [profile_summary(profile_id) for profile_id in PROFILES]
+        return [profile_summary(profile.id) for profile in list_hardware_profiles()]
 
     @app.get("/api/v1/hardware-profiles/{profile_id}", response_model=ProfileDetail)
     async def get_profile(profile_id: str):

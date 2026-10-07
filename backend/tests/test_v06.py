@@ -8,7 +8,9 @@ from fastapi.testclient import TestClient
 from confighop_api.main import create_app
 from confighop_api.services import ProjectStore
 from confighop_core import parse_palo_alto_xml
-from confighop_core.evidence.registry import EVIDENCE, NATIVE_QSFP_SPEED_XML, PA3410, PA5410
+from confighop_core.evidence.registry import EVIDENCE
+from confighop_core.hardware.palo_alto import PA3410, PA5410
+from confighop_core.palo_alto_constants import NATIVE_QSFP_SPEED_XML
 
 
 FIXTURE = Path(__file__).parent / "fixtures/paloalto/pa_complex_synthetic.xml"

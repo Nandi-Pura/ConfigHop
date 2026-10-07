@@ -4,8 +4,9 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from .evidence.registry import NATIVE_QSFP_EVIDENCE, NATIVE_QSFP_SPEED_XML, get_profile
-from .models.hardware import CandidateSupport, PortAvailability
+from .hardware.registry import get_profile
+from .palo_alto_constants import NATIVE_QSFP_EVIDENCE, NATIVE_QSFP_SPEED_XML
+from .models.hardware import CandidateSupport, PortAvailability, TargetRenderSupport, SoftwareSupportStatus
 from .models.inventory import PaloAltoInventory
 from .models.mapping import InterfaceMapping, Severity
 
@@ -48,18 +49,24 @@ def parse_version(value: str | None) -> Version | None:
 def version_support(profile_id: str, value: str | None) -> str:
     profile = get_profile(profile_id)
     version = parse_version(value)
-    if profile is None or profile.profile_status != "verified":
+    if profile is None:
+        return "UNKNOWN_HARDWARE"
+    if profile.profile_status != "verified":
         return "VERSION_NOT_VERIFIED"
     if version is None:
         return "UNKNOWN_SOFTWARE"
-    if version.train in profile.verified_unsupported_panos_trains:
-        return "UNSUPPORTED"
-    if version.train not in profile.supported_panos_trains:
+    rule = next((item for item in profile.software_support_rules if item.train == version.train), None)
+    if rule is None:
         return "VERSION_NOT_VERIFIED"
-    if version.train == "12.1":
+    if rule.status == SoftwareSupportStatus.UNSUPPORTED:
+        return "UNSUPPORTED"
+    if rule.minimum_version:
+        minimum = parse_version(rule.minimum_version)
+        if minimum is None:
+            return "VERSION_NOT_VERIFIED"
         if version.patch is None:
             return "VERSION_NOT_VERIFIED"
-        if version.patch < 2:
+        if (version.major, version.minor, version.patch, version.hotfix or 0) < (minimum.major, minimum.minor, minimum.patch or 0, minimum.hotfix or 0):
             return "VERSION_BELOW_SUPPORTED_FLOOR"
     return "SUPPORTED"
 
@@ -149,6 +156,8 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
         platform_findings.append(_finding("SOURCE_PROFILE_REQUIRED", "Select a source hardware profile."))
     if not target:
         platform_findings.append(_finding("TARGET_PROFILE_REQUIRED", "Select a target hardware profile."))
+    elif target.target_render_support == TargetRenderSupport.ANALYSIS_ONLY:
+        platform_findings.append(_finding("TARGET_PROFILE_RENDERING_NOT_VERIFIED", "Target hardware is verified for analysis, but candidate rendering is not verified.", evidence=target.evidence_ids))
     if not source_train or not target_train:
         platform_findings.append(_finding("VERSION_NOT_VERIFIED", "Select source and target PAN-OS trains.", evidence=matrix))
     if effective is None:
