@@ -19,15 +19,21 @@ const models: Record<string, Record<string, string[]>> = {
     'EX4400 Series': ['EX4400-24P', 'EX4400-48P'],
     'EX4650 Series': ['EX4650-48Y'],
   },
+  Huawei: {
+    'CloudEngine S5735 Series': ['CloudEngine S5735'],
+    'CloudEngine S6730-H Series': ['CloudEngine S6730-H'],
+    'CloudEngine S12700E Series': ['CloudEngine S12700E'],
+  },
 }
 const software: Record<string, { product: string; versions: string[]; train: string }> = {
   Cisco: { product: 'IOS XE', versions: ['17.9', '17.10', '17.11', '17.12'], train: '17.x' },
-  'HPE Aruba Networking': { product: 'AOS-CX', versions: ['10.11', '10.12', '10.13', '10.14'], train: '10.x' },
+  'HPE Aruba Networking': { product: 'AOS-CX', versions: ['10.11', '10.12', '10.13', '10.14', '10.15'], train: '10.x' },
   'Juniper Networks': { product: 'Junos', versions: ['21.4R3', '22.4R3', '23.2R2', '23.4R1'], train: '21.x–23.x' },
+  Huawei: { product: 'VRP', versions: ['V200R023', 'V600R023'], train: 'VRP' },
 }
 export const switchCatalog: SwitchPlatform[] = Object.entries(models).flatMap(([vendor, series]) => Object.entries(series).flatMap(([name, devices]) => devices.flatMap((model) => software[vendor].versions.map((version) => ({ vendor, hardware: { model, series: name }, software: { product: software[vendor].product, version, train: software[vendor].train } })))))
 export const switchSource = switchCatalog.find((item) => item.hardware.model === 'C9300-48P' && item.software.version === '17.12')!
-export const switchTarget = switchCatalog.find((item) => item.hardware.model === 'CX 6300M 48G' && item.software.version === '10.13')!
+export const switchTarget = switchCatalog.find((item) => item.hardware.model === 'CX 6300M 48G' && item.software.version === '10.15')!
 export const switchOsLabel = (item: SwitchPlatform) => `${item.software.product} ${item.software.version}`
 
 export const switchConfig = `version 17.12.3

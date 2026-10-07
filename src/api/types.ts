@@ -61,7 +61,7 @@ export interface InventoryView {
   physical_interfaces: PhysicalInterfaceView[]
   parser_warnings: ParserWarning[]
 }
-export interface HardwareProfileSummary { id: string; vendor: string; model: string; series: string | null; profile_status: string; interface_count: number; verified_at: string | null; candidate_ready_interface_count: number; native_interface_count: number; conditional_interface_count: number; breakout_interface_count: number; supported_panos_trains: string[]; evidence_ids: string[] }
+export interface HardwareProfileSummary { id: string; vendor: string; model: string; series: string | null; profile_status: string; target_render_support?: 'SUPPORTED' | 'ANALYSIS_ONLY'; interface_count: number; verified_at: string | null; candidate_ready_interface_count: number; native_interface_count: number; conditional_interface_count: number; breakout_interface_count: number; supported_panos_trains: string[]; evidence_ids: string[] }
 export interface HardwarePort { name: string; availability: 'NATIVE' | 'NATIVE_CONDITIONAL' | 'BREAKOUT_CHILD'; candidate_support: 'SUPPORTED' | 'CONDITIONAL' | 'BLOCKED'; required_condition: string; parent_interface: string | null; speed_capabilities: string[]; media_capabilities: string[]; evidence_ids: string[] }
 export interface HardwareProfileDetail extends HardwareProfileSummary { interfaces: string[]; port_details: HardwarePort[]; first_supported_release: string | null; notes: string | null }
 export interface EvidenceRecord { id: string; source_title: string; source_url: string; source_type: string; checked_at: string; scope: string; summary: string; status: string }
