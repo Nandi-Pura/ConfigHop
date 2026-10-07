@@ -9,8 +9,8 @@ from defusedxml import ElementTree as SafeET
 from defusedxml.common import DefusedXmlException
 
 from ...errors import ConfigParseError
-from ...evidence.registry import NATIVE_QSFP_SPEED_XML
-from ...models.hardware import HardwareProfile
+from ...palo_alto_constants import NATIVE_QSFP_SPEED_XML
+from ...models.hardware import HardwareProfile, TargetRenderSupport
 from ...models.inventory import PaloAltoInventory
 from ...models.mapping import MigrationPreview, PreviewStatus, Severity
 from ...models.transformation import (
@@ -68,6 +68,8 @@ def render_panos_candidate(
     except OSError:
         data = b""
     plan = build_transformation_plan(data, source_inventory, preview, target_profile, allow_review=allow_review)
+    if target_profile.target_render_support != TargetRenderSupport.SUPPORTED:
+        return _blocked(plan, "TARGET_PROFILE_RENDERING_NOT_VERIFIED")
     if plan.status == PreviewStatus.BLOCKED:
         return _blocked(plan)
     if source.resolve() == output.resolve():

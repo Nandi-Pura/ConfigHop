@@ -97,6 +97,9 @@ class ProfileSummary(BaseModel):
     id: str
     vendor: str
     model: str
+    domain: str = "firewall"
+    software_family: str = "pan_os"
+    target_render_support: str = "SUPPORTED"
     profile_status: str
     interface_count: int
     series: str | None = None
@@ -115,6 +118,7 @@ class ProfileDetail(ProfileSummary):
     interface_groups: list[HardwareInterfaceGroup] = Field(default_factory=list)
     first_supported_release: str | None = None
     notes: str | None = None
+    software_support_rules: list[dict] = Field(default_factory=list)
 
 
 class SelectProfileRequest(BaseModel):
@@ -152,6 +156,7 @@ class CandidateMetadata(BaseModel):
     target_profile_id: str | None = None
     source_profile_status: str | None = None
     target_profile_status: str | None = None
+    target_render_support: str | None = None
     effective_panos_version: str | None = None
     platform_assessment_status: str | None = None
     hardware_assessment_status: str | None = None

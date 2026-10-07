@@ -4,15 +4,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, field_validator
 
-from confighop_core.models.hardware import (
-    CandidateSupport, HardwareInterface, HardwareInterfaceGroup, HardwareKind, HardwareProfile,
-    MappingSupport, PortAvailability, ProfileStatus, RequiredCondition,
-)
-
-CHECKED_AT = date(2026, 10, 5)
-TRAINS = ["10.2", "11.0", "11.1", "11.2", "12.1", "12.2"]
-NATIVE_QSFP_SPEED_XML = {"40G": "40000", "100G": "100000"}
-NATIVE_QSFP_EVIDENCE = ["PAN-HW-PA5400-FRONT", "PAN-CONFIG-ETHERNET-LINK-SPEED", "PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", "PAN-CONFIG-ETHERNET-LINK-SPEED-TEST"]
+CHECKED_AT = date(2026, 10, 7)
 
 
 class EvidenceStatus(StrEnum):
@@ -54,62 +46,16 @@ EVIDENCE = {
         EvidenceRecord(id="PAN-HW-PA3400-FRONT", source_title="PA-3400 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-3400-hardware-reference/pa-3400-series-overview/front-panel-3400-series", source_type="HARDWARE_REFERENCE", scope="PA-3410 dataplane port groups", summary="PA-3410 has Ethernet 1–26 in RJ45, SFP/SFP+, and SFP28 groups."),
         EvidenceRecord(id="PAN-HW-PA5400-OVERVIEW", source_title="PA-5400 Series Firewall Overview", source_url="https://docs.paloaltonetworks.com/hardware/pa-5400-hardware-reference/pa-5400-series-firewall-overview", source_type="HARDWARE_OVERVIEW", scope="PA-5410 model and first supported release", summary="PA-5410 first supports PAN-OS 10.2.0."),
         EvidenceRecord(id="PAN-HW-PA5400-FRONT", source_title="PA-5400 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-5400-hardware-reference/pa-5400-series-firewall-overview/pa-5400-series-front-and-back-panel-descriptions/pa-5400-series-front-panel", source_type="HARDWARE_REFERENCE", scope="PA-5410 dataplane ports, breakout topology, native QSFP speed condition", summary="PA-5410 has 1–24 direct ports, 25–40 breakout identities and 41–44 native QSFP identities; auto speed defaults QSFP to breakout."),
-        EvidenceRecord(id="PAN-COMPAT-PANOS-BY-MODEL", source_title="Palo Alto Networks Next-Generation Firewalls", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/palo-alto-networks-next-gen-firewalls", source_type="COMPATIBILITY_MATRIX", scope="PA-3400 and PA-5410 PAN-OS trains", summary="Both model groups explicitly do not support 10.1; they support 10.2, 11.0, 11.1, 11.2, 12.1 and 12.2; 12.x starts at 12.1.2."),
+        EvidenceRecord(id="PAN-COMPAT-PANOS-BY-MODEL", source_title="Palo Alto Networks Next-Generation Firewalls", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/palo-alto-networks-next-gen-firewalls", source_type="COMPATIBILITY_MATRIX", scope="PA-1400, PA-3200, PA-3400, PA-5200, and PA-5410 PAN-OS trains", summary="The current matrix lists explicit supported and unsupported trains for each series; 12.x support begins at 12.1.2 where listed."),
         EvidenceRecord(id="PAN-COMPAT-BREAKOUT", source_title="Breakout Port Support", source_url="https://docs.paloaltonetworks.com/compatibility-matrix/reference/supported-os-releases-by-model/breakout-port-support", source_type="COMPATIBILITY_MATRIX", scope="PA-5410 QSFP breakout parent and child identities", summary="Ports 41–44 each break out to four children at 10G or 25G."),
-        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED", source_title="PAN-OS Python SDK EthernetInterface", source_url="https://github.com/PaloAltoNetworks/pan-os-python/blob/develop/panos/network.py", source_type="VENDOR_SDK", scope="Ethernet link-speed XML node", summary="EthernetInterface serializes link_speed under the direct link-speed node; the official SDK Ethernet serialization test confirms direct value output.", verification_level="DOCUMENTATION_VERIFIED"),
+        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED", source_title="PAN-OS Python SDK EthernetInterface", source_url="https://github.com/PaloAltoNetworks/pan-os-python/blob/92ed648d89b7541052a15e234eb34e99edba6d2d/panos/network.py", source_type="VENDOR_SDK", scope="Ethernet link-speed XML node", summary="EthernetInterface serializes link_speed under the direct link-speed node; the official SDK Ethernet serialization test confirms direct value output.", verification_level="DOCUMENTATION_VERIFIED"),
         EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", source_title="Configure an Aggregate Ethernet Interface Variable", source_url="https://docs.paloaltonetworks.com/ngfw/networking/configure-interfaces/configure-an-aggregate-interface-group/configure-an-aggregate-ethernet-interface", source_type="CONFIGURATION_REFERENCE", scope="PAN-OS interface link speed values in Mbps", summary="Interface link speed values include 40000 and 100000 Mbps.", verification_level="DOCUMENTATION_VERIFIED"),
-        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED-TEST", source_title="PAN-OS Python SDK Ethernet serialization test", source_url="https://github.com/PaloAltoNetworks/pan-os-python/blob/develop/tests/test_integration.py", source_type="VENDOR_SDK_TEST", scope="EthernetInterface XML serialization", summary="Official SDK test serializes link_speed=1000 as a direct Ethernet entry child <link-speed>1000</link-speed>.", verification_level="DOCUMENTATION_VERIFIED"),
+        EvidenceRecord(id="PAN-CONFIG-ETHERNET-LINK-SPEED-TEST", source_title="PAN-OS Python SDK Ethernet serialization test", source_url="https://github.com/PaloAltoNetworks/pan-os-python/blob/92ed648d89b7541052a15e234eb34e99edba6d2d/tests/test_integration.py", source_type="VENDOR_SDK_TEST", scope="EthernetInterface XML serialization", summary="Official SDK test serializes link_speed=1000 as a direct Ethernet entry child <link-speed>1000</link-speed>.", verification_level="DOCUMENTATION_VERIFIED"),
+        EvidenceRecord(id="PAN-HW-PA1400-OVERVIEW", source_title="PA-1400 Series Firewall Overview", source_url="https://docs.paloaltonetworks.com/hardware/pa-1400-hardware-reference/pa-1400-series-overview", source_type="HARDWARE_OVERVIEW", scope="PA-1410 and PA-1420 identity and first release", summary="PA-1400 comprises PA-1410 and PA-1420; first supported PAN-OS release is 11.0."),
+        EvidenceRecord(id="PAN-HW-PA1400-FRONT", source_title="PA-1400 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-1400-hardware-reference/pa-1400-series-overview/front-panel-1400-series", source_type="HARDWARE_REFERENCE", scope="PA-1410 and PA-1420 dataplane ports", summary="Documents model-specific RJ45 and SFP speeds, port 1 ZTP, and PoE on ports 9-12."),
+        EvidenceRecord(id="PAN-HW-PA3200-OVERVIEW", source_title="PA-3200 Series Firewall Overview", source_url="https://docs.paloaltonetworks.com/hardware/pa-3200-hardware-reference/pa-3220-series-overview", source_type="HARDWARE_OVERVIEW", scope="PA-3220, PA-3250 and PA-3260 identity and first release", summary="PA-3200 first supports PAN-OS 8.1."),
+        EvidenceRecord(id="PAN-HW-PA3200-FRONT", source_title="PA-3200 Series Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-3200-hardware-reference/pa-3220-series-overview/front-panel-3200-series", source_type="HARDWARE_REFERENCE", scope="PA-3200 model-specific dataplane ports", summary="Documents model-specific SFP groups and PA-3260 40G QSFP+ ports."),
+        EvidenceRecord(id="PAN-HW-PA5200-OVERVIEW", source_title="PA-5200 Series Firewall Overview", source_url="https://docs.paloaltonetworks.com/hardware/pa-5200-hardware-reference/pa-5200-series-firewall-overview", source_type="HARDWARE_OVERVIEW", scope="PA-5200 identity and first releases", summary="PA-5220, PA-5250 and PA-5260 first support PAN-OS 8.0; PA-5280 first supports 8.1."),
+        EvidenceRecord(id="PAN-HW-PA5200-FRONT", source_title="PA-5200 Front Panel", source_url="https://docs.paloaltonetworks.com/hardware/pa-5200-hardware-reference/pa-5200-series-firewall-overview/pa-5200-front-panel", source_type="HARDWARE_REFERENCE", scope="PA-5200 model-specific dataplane ports", summary="Documents 1-24 and model-specific 40G or 40G/100G QSFP capabilities."),
     ]
 }
-
-
-def _group(profile: str, key: str, numbers: range, media: list[str], speeds: list[str], evidence: str,
-           availability: PortAvailability = PortAvailability.NATIVE,
-           condition: RequiredCondition = RequiredCondition.NONE, notes: str | None = None) -> tuple[HardwareInterfaceGroup, list[HardwareInterface]]:
-    names = [f"ethernet1/{number}" for number in numbers]
-    blocked = condition != RequiredCondition.NONE
-    group = HardwareInterfaceGroup(id=f"{profile}-{key}", label=key, interface_names=names,
-        media_capabilities=media, speed_capabilities=speeds, availability=availability,
-        mapping_support=MappingSupport.CONDITIONAL if availability == PortAvailability.NATIVE_CONDITIONAL else MappingSupport.UNSUPPORTED if blocked else MappingSupport.SUPPORTED,
-        candidate_support=CandidateSupport.CONDITIONAL if condition == RequiredCondition.MANUAL_NATIVE_PORT_SPEED else CandidateSupport.BLOCKED if blocked else CandidateSupport.SUPPORTED,
-        required_condition=condition, evidence_ids=[evidence], notes=notes)
-    interfaces = [HardwareInterface(name=name, kind=HardwareKind.PHYSICAL_ETHERNET,
-        speed_capabilities=speeds, media_capabilities=media, media=media[0], availability=availability,
-        mapping_support=group.mapping_support, candidate_support=group.candidate_support,
-        required_condition=condition, parent_interface=f"ethernet1/{41 + (number - 25) // 4}" if availability == PortAvailability.BREAKOUT_CHILD else None,
-        evidence_ids=[evidence], ztp_capable=number == 1, notes=notes) for number, name in zip(numbers, names)]
-    return group, interfaces
-
-
-def _profile(profile_id: str, model: str, series: str, groups: list[tuple[HardwareInterfaceGroup, list[HardwareInterface]]], evidence_ids: list[str], first: str) -> HardwareProfile:
-    return HardwareProfile(id=profile_id, vendor="palo_alto", model=model, series=series,
-        profile_status=ProfileStatus.VERIFIED, interfaces=sorted([item for _, members in groups for item in members], key=lambda item: int(item.name.split("/")[1])),
-        interface_groups=[group for group, _ in groups], evidence_ids=evidence_ids,
-        supported_panos_trains=TRAINS, verified_unsupported_panos_trains=["10.1"],
-        first_supported_release=first, verified_at=CHECKED_AT.isoformat())
-
-
-PA3410 = _profile("paloalto-pa-3410", "PA-3410", "PA-3400", [
-    _group("pa3410", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G", "2.5G", "5G", "10G"], "PAN-HW-PA3400-FRONT"),
-    _group("pa3410", "SFP 13-22", range(13, 23), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3400-FRONT"),
-    _group("pa3410", "SFP28 23-26", range(23, 27), ["SFP", "SFP_PLUS", "SFP28"], ["1G", "10G", "25G"], "PAN-HW-PA3400-FRONT", notes="RS-FEC is documented; ConfigHop does not configure FEC."),
-], ["PAN-HW-PA3400-OVERVIEW", "PAN-HW-PA3400-FRONT", "PAN-COMPAT-PANOS-BY-MODEL"], "10.2")
-
-PA5410 = _profile("paloalto-pa-5410", "PA-5410", "PA-5400", [
-    _group("pa5410", "RJ45 1-8", range(1, 9), ["RJ45"], ["10M", "100M", "1G", "2.5G", "5G", "10G"], "PAN-HW-PA5400-FRONT"),
-    _group("pa5410", "SFP 9-20", range(9, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA5400-FRONT"),
-    _group("pa5410", "SFP28 21-24", range(21, 25), ["SFP", "SFP_PLUS", "SFP28"], ["1G", "10G", "25G"], "PAN-HW-PA5400-FRONT", notes="Remote endpoint RS-FEC is documented; ConfigHop does not configure FEC."),
-    _group("pa5410", "Breakout 25-40", range(25, 41), ["QSFP_PLUS", "QSFP28"], ["10G", "25G"], "PAN-COMPAT-BREAKOUT", PortAvailability.BREAKOUT_CHILD, RequiredCondition.BREAKOUT_MODE),
-    _group("pa5410", "Conditional QSFP 41-44", range(41, 45), ["QSFP_PLUS", "QSFP28"], ["40G", "100G"], "PAN-HW-PA5400-FRONT", PortAvailability.NATIVE_CONDITIONAL, RequiredCondition.MANUAL_NATIVE_PORT_SPEED, notes="Auto speed defaults to breakout; native mode requires an explicit 40G or 100G target speed."),
-], ["PAN-HW-PA5400-OVERVIEW", "PAN-HW-PA5400-FRONT", "PAN-COMPAT-PANOS-BY-MODEL", "PAN-COMPAT-BREAKOUT", "PAN-CONFIG-ETHERNET-LINK-SPEED", "PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", "PAN-CONFIG-ETHERNET-LINK-SPEED-TEST"], "10.2.0")
-
-SYNTHETIC = HardwareProfile(id="paloalto-synthetic-64", vendor="palo_alto", model="synthetic-panos-target-64",
-    profile_status=ProfileStatus.SYNTHETIC,
-    interfaces=[HardwareInterface(name=f"ethernet1/{number}", kind=HardwareKind.PHYSICAL_ETHERNET) for number in range(1, 65)],
-    notes="Development profile only; no real hardware compatibility claim.")
-
-PROFILES = {profile.id: profile for profile in [SYNTHETIC, PA3410, PA5410]}
-
-
-def get_profile(profile_id: str) -> HardwareProfile | None:
-    return PROFILES.get(profile_id)

@@ -1,6 +1,6 @@
 from collections import Counter
 
-from ..evidence.registry import NATIVE_QSFP_SPEED_XML
+from ..palo_alto_constants import NATIVE_QSFP_SPEED_XML
 from ..models.hardware import CandidateSupport, HardwareKind, HardwareProfile
 from ..models.inventory import PaloAltoInventory
 from ..models.mapping import InterfaceMapping, MigrationFinding, Severity

@@ -8,7 +8,8 @@ from confighop_api.main import create_app
 from confighop_api.services import ProjectStore
 from confighop_core import parse_palo_alto_xml
 from confighop_core.compatibility import assess, parse_version, version_support
-from confighop_core.evidence.registry import EVIDENCE, PA3410, PA5410, EvidenceRecord
+from confighop_core.evidence.registry import EVIDENCE, EvidenceRecord
+from confighop_core.hardware.palo_alto import PA3410, PA5410
 from confighop_core.models.mapping import InterfaceMapping
 
 FIXTURE = Path(__file__).parent / "fixtures/paloalto/pa_complex_synthetic.xml"
@@ -16,7 +17,7 @@ HEADERS = {"X-ConfigHop-Client": "web"}
 
 
 def test_evidence_and_exact_profiles():
-    assert len(EVIDENCE) == 9
+    assert len(EVIDENCE) == 15
     assert all(record.source_url.startswith(("https://docs.paloaltonetworks.com/", "https://github.com/PaloAltoNetworks/pan-os-python/")) for record in EVIDENCE.values())
     assert all(evidence_id in EVIDENCE for profile in [PA3410, PA5410] for evidence_id in profile.evidence_ids)
     assert [item.name for item in PA3410.interfaces] == [f"ethernet1/{n}" for n in range(1, 27)]
@@ -108,8 +109,8 @@ def test_implicit_breakout_media_review_and_speed_block():
 
 def test_api_verified_flow_and_fail_closed(tmp_path):
     with TestClient(create_app(ProjectStore())) as client:
-        assert len(client.get("/api/v1/evidence").json()) == 9
-        assert len(client.get("/api/v1/hardware-profiles").json()) == 3
+        assert len(client.get("/api/v1/evidence").json()) == 15
+        assert len(client.get("/api/v1/hardware-profiles").json()) == 12
         project = client.post("/api/v1/projects", headers=HEADERS).json()["project_id"]
         client.put(f"/api/v1/projects/{project}/source-profile", json={"profile_id": PA3410.id, "panos_train": "11.1"}, headers=HEADERS)
         client.put(f"/api/v1/projects/{project}/target-profile", json={"profile_id": PA5410.id, "panos_train": "11.1"}, headers=HEADERS)

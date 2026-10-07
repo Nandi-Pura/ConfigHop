@@ -12,7 +12,8 @@ from fastapi import Request
 
 from confighop_core import parse_palo_alto_xml, preview_interface_mappings, render_panos_candidate
 from confighop_core.compatibility import CompatibilityAssessment, assess
-from confighop_core.evidence.registry import SYNTHETIC, get_profile
+from confighop_core.hardware.registry import get_profile
+from confighop_core.hardware.palo_alto import SYNTHETIC
 from confighop_core.dependencies import build_dependency_index
 from confighop_core.errors import ConfigParseError
 from confighop_core.models.dependency import ReferenceType
@@ -172,6 +173,8 @@ def profile_summary(profile_id: str = PROFILE_ID) -> ProfileSummary:
     if profile is None:
         raise ServiceError("TARGET_PROFILE_NOT_FOUND", "Target profile was not found.", 404)
     return ProfileSummary(id=profile_id, vendor=profile.vendor, model=profile.model,
+        domain=profile.domain.value, software_family=profile.software_family.value,
+        target_render_support=profile.target_render_support.value,
         profile_status=profile.profile_status.value, interface_count=len(profile.interfaces), series=profile.series,
         verified_at=profile.verified_at,
         native_interface_count=sum(item.availability.value == "NATIVE" for item in profile.interfaces),
@@ -187,7 +190,8 @@ def profile_detail(profile_id: str) -> ProfileDetail:
         raise ServiceError("TARGET_PROFILE_NOT_FOUND", "Target profile was not found.", 404)
     return ProfileDetail(**profile_summary(profile_id).model_dump(), interfaces=[item.name for item in profile.interfaces],
         port_details=[item.model_dump(mode="json") for item in profile.interfaces],
-        interface_groups=profile.interface_groups, first_supported_release=profile.first_supported_release, notes=profile.notes)
+        interface_groups=profile.interface_groups, first_supported_release=profile.first_supported_release, notes=profile.notes,
+        software_support_rules=[rule.model_dump(mode="json") for rule in profile.software_support_rules])
 
 
 async def upload_source(store: ProjectStore, project: ProjectSession, request: Request, filename: str | None) -> SourceView:
@@ -301,6 +305,7 @@ def candidate_metadata(project: ProjectSession) -> CandidateMetadata:
             source_profile_id=project.source_profile_id, target_profile_id=project.profile_id,
             source_profile_status=get_profile(project.source_profile_id).profile_status.value if get_profile(project.source_profile_id or "") else None,
             target_profile_status=get_profile(project.profile_id).profile_status.value if get_profile(project.profile_id or "") else None,
+            target_render_support=get_profile(project.profile_id).target_render_support.value if get_profile(project.profile_id or "") else None,
             effective_panos_version=project.compatibility.platform.effective_source_version,
             platform_assessment_status=project.compatibility.platform.status.value,
             hardware_assessment_status=project.compatibility.hardware.status.value,
@@ -318,6 +323,7 @@ def candidate_metadata(project: ProjectSession) -> CandidateMetadata:
         target_profile_id=project.profile_id,
         source_profile_status=get_profile(project.source_profile_id).profile_status.value if get_profile(project.source_profile_id or "") else None,
         target_profile_status=get_profile(project.profile_id).profile_status.value if get_profile(project.profile_id or "") else None,
+        target_render_support=get_profile(project.profile_id).target_render_support.value if get_profile(project.profile_id or "") else None,
         effective_panos_version=project.compatibility.platform.effective_source_version if project.compatibility else None,
         platform_assessment_status=project.compatibility.platform.status.value if project.compatibility else None,
         hardware_assessment_status=project.compatibility.hardware.status.value if project.compatibility else None,
@@ -353,6 +359,7 @@ def blocked_review_metadata(project: ProjectSession) -> CandidateMetadata:
         source_profile_id=project.source_profile_id, target_profile_id=project.profile_id,
         source_profile_status=get_profile(project.source_profile_id).profile_status.value if get_profile(project.source_profile_id or "") else None,
         target_profile_status=get_profile(project.profile_id).profile_status.value if get_profile(project.profile_id or "") else None,
+        target_render_support=get_profile(project.profile_id).target_render_support.value if get_profile(project.profile_id or "") else None,
         effective_panos_version=compatibility.platform.effective_source_version if compatibility else None,
         platform_assessment_status=compatibility.platform.status.value if compatibility else None,
         hardware_assessment_status=compatibility.hardware.status.value if compatibility else None,

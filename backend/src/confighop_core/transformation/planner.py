@@ -2,7 +2,7 @@ from collections import Counter
 from hashlib import sha256
 
 from ..mapping import preview_interface_mappings
-from ..evidence.registry import NATIVE_QSFP_SPEED_XML
+from ..palo_alto_constants import NATIVE_QSFP_SPEED_XML
 from ..models.dependency import ReferenceType
 from ..models.hardware import HardwareProfile
 from ..models.inventory import PaloAltoInventory
