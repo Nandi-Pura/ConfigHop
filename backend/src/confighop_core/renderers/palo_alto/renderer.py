@@ -9,6 +9,7 @@ from defusedxml import ElementTree as SafeET
 from defusedxml.common import DefusedXmlException
 
 from ...errors import ConfigParseError
+from ...evidence.registry import NATIVE_QSFP_SPEED_XML
 from ...models.hardware import HardwareProfile
 from ...models.inventory import PaloAltoInventory
 from ...models.mapping import MigrationPreview, PreviewStatus, Severity
@@ -90,6 +91,17 @@ def render_panos_candidate(
         for op, node, field in resolved:
             if field == "assert":
                 continue
+            if field == "link-speed":
+                speeds = node.findall("link-speed")
+                if len(speeds) > 1 or (speeds and (speeds[0].text or "").strip() != op.source_value):
+                    raise RenderFailure("OPERATION_PRECONDITION_FAILED")
+                if speeds:
+                    inverse.append((element_path(root, speeds[0]), "text", speeds[0].text or ""))
+                    speeds[0].text = op.target_value
+                else:
+                    inverse.append((element_path(root, node), "delete-link-speed", ""))
+                    ET.SubElement(node, "link-speed").text = op.target_value
+                continue
             old = node.get("name") if field == "name" else node.text
             if old is None:
                 raise RenderFailure("OPERATION_PRECONDITION_FAILED")
@@ -101,7 +113,11 @@ def render_panos_candidate(
                 trailing = len(old) - len(old.rstrip())
                 node.text = old[:leading] + op.target_value + (old[len(old)-trailing:] if trailing else "")
         for op, node, field in resolved:
-            if field == "assert":
+            if field == "link-speed":
+                speeds = node.findall("link-speed")
+                if len(speeds) != 1 or (speeds[0].text or "").strip() != op.target_value:
+                    raise RenderFailure("OPERATION_POSTCONDITION_FAILED")
+            elif field == "assert":
                 if op.operation_type == OperationType.ASSERT_AGGREGATE_MEMBERSHIP and node.get("name") != op.target_value:
                     raise RenderFailure("OPERATION_POSTCONDITION_FAILED")
                 if op.operation_type == OperationType.ASSERT_SUBINTERFACE_PARENT and node.get("name") not in {
@@ -143,7 +159,8 @@ def render_panos_candidate(
             operations_planned=len(plan.operations), operations_applied=len(plan.operations),
             postconditions_passed=True, valid=True)
         changes = [SemanticChange(category=op.operation_type.value, object_type=op.object_type,
-            object_name=op.object_name, scope=op.scope, old_value=op.source_value, new_value=op.target_value)
+            object_name=op.object_name, scope=op.scope, old_value=op.source_value,
+            new_value=next((speed for speed, xml in NATIVE_QSFP_SPEED_XML.items() if xml == op.target_value), op.target_value) if op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED else op.target_value)
             for op in plan.operations if op.operation_type not in
             (OperationType.ASSERT_AGGREGATE_MEMBERSHIP, OperationType.ASSERT_SUBINTERFACE_PARENT)]
         return CandidateRenderResult(plan=plan, validation=report,

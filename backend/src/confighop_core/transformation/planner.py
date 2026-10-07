@@ -2,6 +2,7 @@ from collections import Counter
 from hashlib import sha256
 
 from ..mapping import preview_interface_mappings
+from ..evidence.registry import NATIVE_QSFP_SPEED_XML
 from ..models.dependency import ReferenceType
 from ..models.hardware import HardwareProfile
 from ..models.inventory import PaloAltoInventory
@@ -58,10 +59,16 @@ def build_transformation_plan(
             source_value=old, target_value=new, object_type=obj_type, object_name=obj_name, scope=scope, field=field))
 
     if not findings:
+        source_ports = {item.name: item for item in inventory.physical_interfaces}
         for impact in preview.impacts:
             if impact.source_interface != impact.target_interface:
                 add(OperationType.RENAME_PHYSICAL_INTERFACE, impact.source_interface, impact.target_interface,
                     "physical_interface", impact.source_interface, "network", "name")
+            decision = next((item for item in preview.mappings if item.source_interface == impact.source_interface), None)
+            chosen = decision.target_settings.link_speed if decision and decision.target_settings else None
+            if chosen in NATIVE_QSFP_SPEED_XML:
+                add(OperationType.SET_INTERFACE_LINK_SPEED, source_ports[impact.source_interface].link_speed or "",
+                    NATIVE_QSFP_SPEED_XML[chosen], "physical_interface", impact.source_interface, "network", "link-speed")
             for child in impact.derived_subinterfaces:
                 if child.source_interface != child.target_interface:
                     add(OperationType.RENAME_SUBINTERFACE, child.source_interface, child.target_interface,

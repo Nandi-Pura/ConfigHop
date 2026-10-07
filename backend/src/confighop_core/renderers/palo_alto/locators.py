@@ -13,6 +13,8 @@ def locate(root: Element, operation: TransformationOperation) -> list[tuple[Elem
     kind = operation.operation_type
     if kind == OperationType.RENAME_PHYSICAL_INTERFACE:
         return [(item, "name") for item in _named(devices, "./network/interface/ethernet/entry", operation.source_value)]
+    if kind == OperationType.SET_INTERFACE_LINK_SPEED:
+        return [(item, "link-speed") for item in _named(devices, "./network/interface/ethernet/entry", operation.object_name)]
     if kind in (OperationType.RENAME_SUBINTERFACE, OperationType.ASSERT_SUBINTERFACE_PARENT):
         parent_name = operation.object_name if kind == OperationType.RENAME_SUBINTERFACE else operation.source_value
         child_name = operation.source_value if kind == OperationType.RENAME_SUBINTERFACE else operation.object_name

@@ -42,6 +42,7 @@ export default function FirewallApp() {
   const [candidateBytes, setCandidateBytes] = useState<number | null>(null)
   const [candidateText, setCandidateText] = useState('')
   const [targets, setTargets] = useState<Record<string, string>>({})
+  const [nativeSpeeds, setNativeSpeeds] = useState<Record<string, '40G' | '100G'>>({})
   const [preview, setPreview] = useState<MigrationPreview | null>(null)
   const [candidate, setCandidate] = useState<CandidateMetadata | null>(null)
   const [statusText, setStatusText] = useState('No PAN-OS XML source loaded')
@@ -74,7 +75,7 @@ export default function FirewallApp() {
     return () => { controller.abort(); uploadController.current?.abort(); candidateController.current?.abort() }
   }, [])
 
-  const mappings = useMemo<InterfaceMapping[]>(() => Object.entries(targets).filter(([, target]) => !!target).map(([source_interface, target_interface]) => ({ source_interface, target_interface })), [targets])
+  const mappings = useMemo<InterfaceMapping[]>(() => Object.entries(targets).filter(([, target]) => !!target).map(([source_interface, target_interface]) => ({ source_interface, target_interface, ...(nativeSpeeds[source_interface] ? { target_settings: { link_speed: nativeSpeeds[source_interface] } } : {}) })), [targets, nativeSpeeds])
   const sourceLines = useMemo(() => sourceText ? sourceText.split('\n') : [], [sourceText])
   const candidateLines = useMemo(() => candidateText ? candidateText.split('\n') : [], [candidateText])
   const impacts = useMemo(() => new Map(preview?.impacts.map((item) => [item.source_interface, item]) ?? []), [preview])
@@ -97,7 +98,7 @@ export default function FirewallApp() {
   function clearLocal() {
     serial.current++; uploadController.current?.abort(); candidateController.current?.abort()
     setInventory(null); setSourceName('No configuration loaded'); setSourceBytes(null); setSourceText('')
-    setProfile(null); setSourceProfile(null); setSourceTrain(''); setTargetTrain(''); setCompatibility(null); setTargets({}); invalidateResult(); setStatusText('No PAN-OS XML source loaded'); setErrorText(''); setTab('Overview')
+    setProfile(null); setSourceProfile(null); setSourceTrain(''); setTargetTrain(''); setCompatibility(null); setTargets({}); setNativeSpeeds({}); invalidateResult(); setStatusText('No PAN-OS XML source loaded'); setErrorText(''); setTab('Overview')
     setBusy(false)
   }
   async function upload(file: File) {
@@ -113,7 +114,7 @@ export default function FirewallApp() {
       if (current !== serial.current) return
       setInventory(nextInventory); setSourceName(uploaded.filename); setSourceBytes(uploaded.size_bytes)
       setSourceText(text)
-      setTargets({}); setCompatibility(null); invalidateResult()
+      setTargets({}); setNativeSpeeds({}); setCompatibility(null); invalidateResult()
       setStatusText(file.size <= MAX_TEXT_PREVIEW_BYTES ? 'Parsed successfully' : 'Parsed successfully; editor preview omitted because the file is large.')
     } catch (error) {
       if (current === serial.current && !(error instanceof DOMException && error.name === 'AbortError')) { setErrorText(errorMessage(error)); setStatusText('Parse failed') }
@@ -128,7 +129,7 @@ export default function FirewallApp() {
     const current = serial.current
     setBusy(false)
     invalidateResult(); setCompatibility(null); setErrorText('')
-    try { const project = await ensureProject(); await api.setProfile(project, id, train); const detail = id ? await api.getProfile(id) : null; if (current === serial.current) { if (profile?.id !== id) setTargets({}); setProfile(detail); setTargetTrain(train) } }
+    try { const project = await ensureProject(); await api.setProfile(project, id, train); const detail = id ? await api.getProfile(id) : null; if (current === serial.current) { if (profile?.id !== id) { setTargets({}); setNativeSpeeds({}) } setProfile(detail); setTargetTrain(train) } }
     catch (error) { if (current === serial.current) setErrorText(errorMessage(error)) }
   }
   async function selectSource(id: string, train = sourceTrain) {
@@ -136,8 +137,9 @@ export default function FirewallApp() {
     try { const project = await ensureProject(); await api.setSourceProfile(project, id, train); const detail = id ? await api.getProfile(id) : null; if (current === serial.current) { setSourceProfile(detail); setSourceTrain(train) } }
     catch (error) { if (current === serial.current) setErrorText(errorMessage(error)) }
   }
-  function changeTarget(source: string, target: string) { serial.current++; candidateController.current?.abort(); setBusy(false); setTargets((current) => ({ ...current, [source]: target })); setCompatibility(null); invalidateResult(); setErrorText('') }
-  function clearMappings() { serial.current++; candidateController.current?.abort(); setBusy(false); setTargets({}); setCompatibility(null); invalidateResult(); setErrorText('') }
+  function changeTarget(source: string, target: string) { serial.current++; candidateController.current?.abort(); setBusy(false); setTargets((current) => ({ ...current, [source]: target })); setNativeSpeeds((current) => { const next = { ...current }; delete next[source]; return next }); setCompatibility(null); invalidateResult(); setErrorText('') }
+  function changeNativeSpeed(source: string, speed: '' | '40G' | '100G') { serial.current++; candidateController.current?.abort(); setBusy(false); setNativeSpeeds((current) => { const next = { ...current }; if (speed) next[source] = speed; else delete next[source]; return next }); setCompatibility(null); invalidateResult(); setErrorText('') }
+  function clearMappings() { serial.current++; candidateController.current?.abort(); setBusy(false); setTargets({}); setNativeSpeeds({}); setCompatibility(null); invalidateResult(); setErrorText('') }
   useEffect(() => {
     if (suppressPreview.current) { suppressPreview.current = false; return }
     if (!projectId || !inventory || !profile) return
@@ -211,6 +213,7 @@ export default function FirewallApp() {
       suppressPreview.current = true; projectRef.current = state.project_id; setProjectId(state.project_id)
       setProjectName(saved.project_name || 'ConfigHop Firewall Project'); setSourceName(state.source_filename || 'No configuration loaded'); setSourceBytes(state.source_size_bytes)
       setTargets(Object.fromEntries((saved.mappings || []).map((item) => [item.source_interface, item.target_interface])))
+      setNativeSpeeds(Object.fromEntries((saved.mappings || []).filter((item) => item.target_settings?.link_speed).map((item) => [item.source_interface, item.target_settings!.link_speed])))
       setInventory(restoredInventory); setProfile(restoredProfile); setSourceProfile(restoredSourceProfile); setSourceTrain(state.source_panos_train || ''); setTargetTrain(state.target_panos_train || ''); setPreview(restoredPreview)
       setCompatibility(restoredPreview?.platform_assessment && restoredPreview.hardware_assessment ? { platform: restoredPreview.platform_assessment, hardware: restoredPreview.hardware_assessment, status: restoredPreview.overall_status || restoredPreview.status, findings: [...restoredPreview.platform_assessment.findings, ...restoredPreview.hardware_assessment.findings], evidence_ids: [] } : null)
       setCandidate(restoredCandidate); setCandidateBytes(state.candidate_size_bytes)
@@ -250,6 +253,8 @@ export default function FirewallApp() {
           </div></Section></div>
           <Section number="4" title="Physical Interface Mapping" subtitle="Map physical source interfaces manually; child interfaces follow the parent mapping"><div className="mapping-toolbar"><div className="search-wrap"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search interfaces..." /></div><div className="filter-group">{(['All', 'Mapped', 'Preserved', 'Review', 'Conflict'] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={`chip ${filter === item ? 'active' : ''}`}>{item === 'Conflict' ? 'Conflicts' : item} ({item === 'All' ? rows.length : counts[item]})</button>)}</div><div className="toolbar-spacer" /><button className="btn accent-outline" disabled title="Automatic mapping is not available. Interface mapping is manual."><CircleCheck size={15} /> Auto Map Suggestions</button><button className="btn secondary" onClick={clearMappings}><RotateCcw size={15} /> Clear All</button><div className="segmented"><button className={viewMode === 'Table' ? 'selected' : ''} onClick={() => setViewMode('Table')}>Table</button><button className={viewMode === 'Hardware' ? 'selected' : ''} onClick={() => setViewMode('Hardware')}>Hardware</button></div></div>
             {viewMode === 'Table' ? <div className="mapping-table-wrap"><table className="mapping-table"><thead><tr><th>#</th><th>Source Interface</th><th>Type</th><th>IP Address</th><th>Zone / Role</th><th>Used By</th><th>Suggested Target</th><th>Target Interface</th><th>Status</th><th>Hardware Check</th><th>Notes</th></tr></thead><tbody>{visibleRows.map((row) => { const hardware = compatibility?.hardware.effective_assignments.find((item) => item.source_interface === row.source); return <tr key={row.source}><td>{row.id}</td><td className="mono emphasis">{row.source}</td><td>{row.type}</td><td className="mono">{row.ip}</td><td>{row.zone}</td><td>{row.usedBy}</td><td>—</td><td><select className="table-select" value={row.target} disabled={!profile} onChange={(event) => changeTarget(row.source, event.target.value)}><option value="">Preserve {row.source}</option>{profile?.port_details.map((port) => <option key={port.name} value={port.name} disabled={port.candidate_support === 'BLOCKED'}>{port.name}{port.candidate_support === 'BLOCKED' ? ` — ${port.required_condition === 'BREAKOUT_MODE' ? 'breakout required' : 'native speed required'}` : ''}</option>)}</select></td><td><StatusBadge status={row.status} /></td><td>{hardware?.status ?? 'Pending'}<small className="hardware-target">Effective: {hardware?.target_interface ?? row.source}</small></td><td>{hardware?.findings.map((item) => item.code).join(', ') || row.notes}</td></tr> })}</tbody></table></div> : <HardwareMap rows={rows} target={profile?.model ?? 'No target profile'} />}
+            {Object.entries(targets).filter(([, target]) => profile?.port_details.some((port) => port.name === target && port.candidate_support === 'CONDITIONAL')).map(([source, target]) =>
+              <NativeSpeedChoice key={source} source={source} target={target} value={nativeSpeeds[source] || ''} onChange={(speed) => changeNativeSpeed(source, speed)} />)}
           </Section>
           <Section number="5" title="Migration Readiness" subtitle="Platform, hardware and dependency checks"><div className="readiness-grid"><Readiness label="Source Profile" detail={sourceProfile ? `${sourceProfile.model} (${sourceProfile.profile_status})` : 'Select source hardware'} ok={!!sourceProfile} /><Readiness label="Source PAN-OS" detail={compatibility?.platform.source_version_status ?? 'Select source train and upload XML'} ok={compatibility?.platform.source_version_status === 'SUPPORTED'} /><Readiness label="Target Profile" detail={profile ? `${profile.model} (${profile.profile_status})` : 'Select target hardware'} ok={!!profile} /><Readiness label="Target PAN-OS" detail={compatibility?.platform.target_version_status ?? 'Select target train'} ok={compatibility?.platform.target_version_status === 'SUPPORTED'} /><Readiness label="Hardware Assignment" detail={compatibility?.hardware.status ?? 'Pending'} ok={compatibility?.hardware.status === 'READY'} warn={compatibility?.hardware.status === 'REVIEW_REQUIRED'} /><Readiness label="Dependency Preview" detail={preview?.status ?? 'Pending'} ok={preview?.status === 'READY'} warn={preview?.status === 'REVIEW_REQUIRED'} /><div className={`readiness-summary ${ready === 'READY' ? 'good' : 'warn'}`}>{ready === 'READY' ? <CircleCheck size={19} /> : <AlertTriangle size={19} />}<div><strong>{ready ?? 'Action Required'}</strong><span>{ready === 'READY' ? 'Ready within modeled scope' : ready === 'REVIEW_REQUIRED' ? 'Engineer review required' : ready === 'BLOCKED' ? 'Review platform and hardware findings' : 'Select profiles, PAN-OS trains and source'}</span></div></div><button className="generate-btn" onClick={generate} disabled={!canGenerate}>{busy ? 'Generating…' : 'Generate Migration'} <ArrowRight size={18} /></button></div>{!!compatibility?.findings.length && <div className="preview-findings">{compatibility.findings.map((finding, index) => <div key={`${finding.code}-${index}`}><strong>{finding.severity}: {finding.code}</strong><span>{finding.message}</span></div>)}</div>}{!!preview?.findings.length && <div className="preview-findings">{preview.findings.map((finding, index) => <div key={`${finding.code}-${index}`}><strong>{finding.severity}: {finding.code}</strong><span>{finding.message}</span></div>)}</div>}</Section>
           <Section number="6" title="Migration Results" subtitle="Validated candidate and real migration analysis"><div className="results-tabs">{TABS.map((item) => <button key={item} onClick={() => setTab(item)} className={tab === item ? 'active' : ''}>{item}</button>)}</div>{candidate ? <Results tab={tab} candidate={candidate} preview={preview} compatibility={compatibility} inventory={inventory} sourceLines={sourceLines} candidateLines={candidateLines} sourceLoaded={!!sourceText} candidateLoaded={!!candidateText} candidateBytes={candidateBytes} onDownload={download} onCopy={() => navigator.clipboard.writeText(candidateText).catch(() => setErrorText('Clipboard access is unavailable.'))} onFindings={() => setTab('Findings')} /> : tab === 'Findings' && compatibility ? <SimpleTable headings={['Source', 'Severity', 'Code', 'Description', 'Interface']} rows={compatibility.findings.map((item) => ['Platform / Hardware', item.severity, item.code, item.message, item.source_interface ?? '—'])} /> : <div className="empty-results"><GitCompareArrows size={28} /><strong>No migration generated yet</strong><span>Upload PAN-OS XML, select hardware profiles and PAN-OS trains, then review manual mappings.</span></div>}</Section>
@@ -289,6 +294,10 @@ function Results({ tab, candidate, preview, compatibility, inventory, sourceLine
   if (tab === 'Candidate Configuration') return <div><div className="candidate-toolbar"><span><FileText size={14} /> confighop-candidate.xml {sizeLabel(candidateBytes)}</span><div><button className="btn secondary" disabled={!candidateLoaded} onClick={onCopy}><Clipboard size={14} /> Copy All</button><button className="btn secondary" disabled={!candidate.candidate_available} onClick={onDownload}><Download size={14} /> Download</button></div></div>{candidateLoaded ? <VirtualCodeViewer lines={candidateLines} height={350} /> : <div className="viewer-placeholder">{candidate.candidate_available ? 'Candidate generated successfully. Preview omitted because the file is large.' : 'No validated candidate is available.'}</div>}</div>
   const findings = [...(inventory?.parser_warnings.map((warning) => ['Parser', 'WARNING', warning.code, warning.message, warning.object_name || warning.object_type]) ?? []), ...(compatibility?.platform.findings.map((finding) => ['Platform', finding.severity, finding.code, finding.message, finding.source_interface || '—']) ?? []), ...(compatibility?.hardware.findings.map((finding) => ['Hardware', finding.severity, finding.code, finding.message, finding.source_interface || '—']) ?? []), ...(preview?.findings.map((finding) => ['Preview', finding.severity, finding.code, finding.message, finding.object_name || finding.source_interface || '—']) ?? []), ...candidate.findings.map((finding) => ['Renderer', finding.severity, finding.code, finding.message, '—'])]
   return <SimpleTable headings={['Source', 'Severity', 'Code', 'Description', 'Object']} rows={findings} />
+}
+
+export function NativeSpeedChoice({ source, target, value, onChange }: { source: string; target: string; value: '' | '40G' | '100G'; onChange: (value: '' | '40G' | '100G') => void }) {
+  return <div className="mapping-toolbar"><span>{source} → {target} · Native QSFP</span><label>Native Link Speed <select className="table-select" aria-label={`Native link speed for ${target}`} value={value} onChange={(event) => onChange(event.target.value as '' | '40G' | '100G')}><option value="">Select speed</option><option value="40G">40G</option><option value="100G">100G</option></select></label></div>
 }
 
 function Stat({ value, label }: { value: number; label: string }) { return <div className="stat"><strong>{value}</strong><span>{label}</span></div> }

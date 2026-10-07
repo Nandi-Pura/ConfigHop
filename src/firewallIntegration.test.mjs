@@ -66,3 +66,36 @@ test('Verified hardware selector displays official context and manual PAN-OS tra
     assert.ok(html.includes('11.1'))
   } finally { await vite.close() }
 })
+
+test('Native QSFP speed selector requires an explicit 40G or 100G choice', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  try {
+    const { NativeSpeedChoice } = await vite.ssrLoadModule('/src/FirewallApp.tsx')
+    const html = renderToStaticMarkup(React.createElement(NativeSpeedChoice,
+      { source: 'ethernet1/12', target: 'ethernet1/41', value: '', onChange() {} }))
+    assert.ok(html.includes('Native QSFP'))
+    assert.ok(html.includes('Native Link Speed'))
+    assert.ok(html.includes('40G'))
+    assert.ok(html.includes('100G'))
+    assert.ok(html.includes('Select speed'))
+    assert.ok(!html.includes('10G</option>'))
+    assert.ok(!html.includes('25G</option>'))
+    assert.ok(!html.includes('auto</option>'))
+  } finally { await vite.close() }
+})
+
+test('Native QSFP target settings are sent to the compatibility API', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  const previous = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    const { api } = await vite.ssrLoadModule('/src/api/client.ts')
+    const mappings = [{ source_interface: 'ethernet1/12', target_interface: 'ethernet1/41', target_settings: { link_speed: '100G' } }]
+    await api.compatibility('synthetic-project', mappings)
+    assert.deepEqual(JSON.parse(calls[0].init.body), { mappings })
+  } finally { globalThis.fetch = previous; await vite.close() }
+})

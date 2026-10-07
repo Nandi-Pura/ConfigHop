@@ -30,6 +30,7 @@ class MappingSupport(StrEnum):
 
 class CandidateSupport(StrEnum):
     SUPPORTED = "SUPPORTED"
+    CONDITIONAL = "CONDITIONAL"
     BLOCKED = "BLOCKED"
 
 
