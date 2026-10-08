@@ -1,0 +1,23 @@
+hostname EDGE-CISCO
+vlan 10
+ name USERS
+vlan 10
+ name DIFFERENT
+interface GigabitEthernet1/0/1
+ switchport mode access
+ switchport mode trunk
+ switchport access vlan 10
+ channel-group 10 mode active
+ channel-group 11 mode passive
+interface GigabitEthernet1/0/2
+ no switchport
+ ip address 198.51.100.2 255.255.255.0
+interface GigabitEthernet1/0/3
+ switchport mode trunk
+ switchport trunk allowed vlan 10,20-25,30
+interface GigabitEthernet1/0/4
+ switchport access vlan 4095
+ switchport trunk allowed vlan 10-9
+interface Vlan100
+ ip address 192.0.2.10 255.255.255.0
+ip dhcp snooping

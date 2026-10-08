@@ -1,0 +1,30 @@
+from .registry import EvidenceRecord
+
+
+SWITCH_EVIDENCE = {item.id: item for item in [
+    EvidenceRecord(id="CISCO-C9300-HARDWARE", vendor="cisco", source_title="Catalyst 9300 Series Switches Data Sheet",
+        source_url="https://www.cisco.com/c/en/us/products/collateral/switches/catalyst-9300-series-switches/nb-06-cat9300-ser-data-sheet-cte-en.html",
+        source_type="HARDWARE_REFERENCE", scope="C9300-48P base 48 copper ports and modular network uplinks",
+        summary="The 48P base chassis has 48 copper access ports; uplink identity depends on the installed network module.",
+        verification_level="DOCUMENTATION_VERIFIED"),
+    EvidenceRecord(id="CISCO-C9300-IOSXE-17-12", vendor="cisco", source_title="Catalyst 9300 IOS XE 17.12.x Release Notes",
+        source_url="https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/software/release/17-12/release_notes/ol-17-12-9300/introduction.html",
+        source_type="SOFTWARE_RELEASE_NOTES", scope="C9300-48P model in IOS XE 17.12.x supported hardware",
+        summary="The 17.12.x release notes list C9300-48P variants among supported Catalyst 9300 hardware.",
+        verification_level="DOCUMENTATION_VERIFIED"),
+    EvidenceRecord(id="ARUBA-JL663A-PORTS", vendor="hpe_aruba", source_title="AOS-CX 6300M Switch Port Types",
+        source_url="https://arubanetworking.hpe.com/techdocs/hpe-central/content/get-started-with-hpe-aruba-networking-central/aos-cx-6300m-switch-port-types.html",
+        source_type="HARDWARE_REFERENCE", scope="JL663A 48 1GbE ports and four SFP56 fixed ports",
+        summary="JL663A is the 6300M 48-port 1GbE and four-port SFP56 SKU.",
+        verification_level="DOCUMENTATION_VERIFIED"),
+    EvidenceRecord(id="ARUBA-JL663A-QUICKSPECS", vendor="hpe_aruba", source_title="CX 6300 Switch Series QuickSpecs",
+        source_url="https://www.hpe.com/psnow/doc/a00073540enw",
+        source_type="HARDWARE_QUICKSPECS", scope="JL663A fixed uplinks and documented transceiver speeds",
+        summary="The JL663A entry documents four SFP56 uplink ports and 1/10/25/50G transceiver options.",
+        verification_level="DOCUMENTATION_VERIFIED"),
+    EvidenceRecord(id="ARUBA-JL663A-AOSCX-10-15", vendor="hpe_aruba", source_title="AOS-CX 10.15 Fundamentals Guide Applicable Products",
+        source_url="https://arubanetworking.hpe.com/techdocs/AOS-CX/10.15/HTML/fundamentals_6300-6400/Content/GPL_Abt/app-pro-all-con1.htm",
+        source_type="SOFTWARE_GUIDE", scope="JL663A listed among AOS-CX 10.15 applicable products",
+        summary="The AOS-CX 10.15 fundamentals guide explicitly includes JL663A.",
+        verification_level="DOCUMENTATION_VERIFIED"),
+]}

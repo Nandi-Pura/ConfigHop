@@ -2,7 +2,7 @@ from datetime import date
 from enum import StrEnum
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationInfo, field_validator
 
 CHECKED_AT = date(2026, 10, 7)
 
@@ -32,9 +32,17 @@ class EvidenceRecord(BaseModel):
 
     @field_validator("source_url")
     @classmethod
-    def official_https(cls, value: str) -> str:
+    def official_https(cls, value: str, info: ValidationInfo) -> str:
         parsed = urlparse(value)
-        official = parsed.hostname in {"docs.paloaltonetworks.com", "paloaltonetworks.com", "www.paloaltonetworks.com"} or parsed.hostname == "github.com" and parsed.path.startswith("/PaloAltoNetworks/pan-os-python/")
+        vendor = info.data.get("vendor")
+        hosts = {
+            "palo_alto": {"docs.paloaltonetworks.com", "paloaltonetworks.com", "www.paloaltonetworks.com"},
+            "cisco": {"www.cisco.com"},
+            "hpe_aruba": {"arubanetworking.hpe.com", "www.hpe.com"},
+        }
+        official = parsed.hostname in hosts.get(vendor, set()) or (
+            vendor == "palo_alto" and parsed.hostname == "github.com"
+            and parsed.path.startswith("/PaloAltoNetworks/pan-os-python/"))
         if parsed.scheme != "https" or not official or parsed.username or parsed.password:
             raise ValueError("verified evidence requires an official HTTPS URL")
         return value
