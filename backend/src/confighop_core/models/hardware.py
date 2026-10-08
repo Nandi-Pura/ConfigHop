@@ -16,6 +16,8 @@ class PlatformDomain(StrEnum):
 
 class SoftwareFamily(StrEnum):
     PAN_OS = "pan_os"
+    IOS_XE = "ios_xe"
+    AOS_CX = "aos_cx"
 
 
 class TargetRenderSupport(StrEnum):
@@ -130,7 +132,7 @@ class HardwareProfile(BaseModel):
             raise ValueError("duplicate hardware interface names")
         if len({rule.train for rule in self.software_support_rules}) != len(self.software_support_rules):
             raise ValueError("duplicate software support train")
-        if self.software_support_rules:
+        if self.software_family == SoftwareFamily.PAN_OS and self.software_support_rules:
             self.supported_panos_trains = [rule.train for rule in self.software_support_rules if rule.status == SoftwareSupportStatus.SUPPORTED]
             self.verified_unsupported_panos_trains = [rule.train for rule in self.software_support_rules if rule.status == SoftwareSupportStatus.UNSUPPORTED]
         known = set(names)

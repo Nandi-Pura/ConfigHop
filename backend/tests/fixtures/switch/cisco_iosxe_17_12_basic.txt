@@ -1,0 +1,36 @@
+version 17.12
+hostname C9300-LAB
+vlan 10
+ name USERS
+vlan 20
+ name VOICE
+vlan 30
+ name SERVERS
+vlan 99
+ name MANAGEMENT
+vlan 999
+ name NATIVE
+spanning-tree mode rapid-pvst
+interface GigabitEthernet1/0/1
+ description User desk
+ switchport mode access
+ switchport access vlan 10
+ switchport voice vlan 20
+ spanning-tree portfast
+ no shutdown
+interface GigabitEthernet1/0/2
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 10,20,30,99,999
+ channel-group 10 mode active
+interface Port-channel10
+ description Lab LAG
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 10,20,30,99,999
+interface Vlan99
+ description Management
+ ip address 192.0.2.10 255.255.255.0
+ip route 0.0.0.0 0.0.0.0 192.0.2.1
+router ospf 1
+ network 192.0.2.0 0.0.0.255 area 0

@@ -1,0 +1,33 @@
+hostname CX6300-LAB
+vlan 10
+ name USERS
+vlan 20
+ name VOICE
+vlan 30
+ name SERVERS
+vlan 99
+ name MANAGEMENT
+vlan 999
+ name NATIVE
+spanning-tree mode mstp
+interface 1/1/1
+ description User desk
+ no routing
+ vlan access 10
+ spanning-tree port-type admin-edge
+ no shutdown
+interface 1/1/2
+ no routing
+ lag 10
+interface lag 10
+ description Lab LAG
+ no routing
+ vlan trunk native 999
+ vlan trunk allowed 10,20,30,99,999
+ lacp mode active
+interface vlan 99
+ description Management
+ ip address 192.0.2.10/24
+ip route 0.0.0.0/0 192.0.2.1
+vsx
+ system-mac 00:00:00:00:00:01
