@@ -57,10 +57,10 @@ def preview_interface_mappings(
             identities = {mapping.source_interface: mapping.target_interface}
             for child in children[mapping.source_interface]:
                 prefix = f"{child.parent_interface}."
-                if not child.name.startswith(prefix):
-                    local_findings.append(MigrationFinding(code="PARTIAL_DEPENDENCY_COVERAGE", severity=Severity.WARNING,
+                if not child.name.startswith(prefix) or not child.name[len(prefix):].isdigit():
+                    local_findings.append(MigrationFinding(code="SUBINTERFACE_IDENTITY_INVALID", severity=Severity.ERROR,
                         source_interface=mapping.source_interface, target_interface=mapping.target_interface,
-                        message="A child interface name cannot be derived from its parent identity."))
+                        message="A child interface name cannot be derived safely from its parent identity."))
                     continue
                 suffix = child.name[len(prefix):]
                 target_name = f"{mapping.target_interface}.{suffix}"

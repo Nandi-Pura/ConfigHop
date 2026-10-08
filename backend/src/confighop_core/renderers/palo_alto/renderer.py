@@ -22,6 +22,7 @@ from ...transformation import build_transformation_plan
 from ...validation import expected_inventory, preservation_audit
 from ...validation.candidate import element_path
 from .locators import locate
+from .references import unmodeled_interface_references
 
 
 class RenderFailure(Exception):
@@ -88,6 +89,13 @@ def render_panos_candidate(
             if len(matches) != op.expected_occurrences:
                 raise RenderFailure("LOCATOR_NOT_FOUND" if not matches else "LOCATOR_AMBIGUOUS")
             resolved.append((op, matches[0][0], matches[0][1]))
+
+        unknown = unmodeled_interface_references(root, plan, resolved)
+        if unknown:
+            plan.findings.extend(RenderFinding(code="UNMODELED_INTERFACE_REFERENCE", severity=Severity.ERROR,
+                message=f"Changed interface identity has an unmodeled XML occurrence: {location}.")
+                for location in unknown)
+            return _blocked(plan)
 
         inverse = []
         for op, node, field in resolved:

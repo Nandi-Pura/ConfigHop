@@ -108,6 +108,43 @@ def test_same_name_noop_and_exact_refs(tmp_path):
     assert b"<dynamic-routing>synthetic-only</dynamic-routing>" in candidate_bytes
 
 
+def test_unmodeled_dynamic_routing_reference_blocks_without_output(tmp_path):
+    source = tmp_path / "source.xml"
+    source.write_bytes(small_xml("ethernet1/5").replace(
+        b"<dynamic-routing>synthetic-only</dynamic-routing>",
+        b"<dynamic-routing><ospf><interface>ethernet1/5</interface></ospf></dynamic-routing>"))
+    output = tmp_path / "candidate.xml"
+    result = run(source, output, ("ethernet1/5", "ethernet1/50"))
+    assert result.status == PreviewStatus.BLOCKED
+    assert not output.exists()
+    assert any(finding.code == "UNMODELED_INTERFACE_REFERENCE" and
+        "ethernet1/5" in finding.message and "/dynamic-routing/ospf/interface" in finding.message
+        for finding in result.plan.findings)
+
+
+def test_unmodeled_derived_subinterface_reference_blocks(tmp_path):
+    source = tmp_path / "source.xml"
+    source.write_bytes(COMPLEX.read_bytes().replace(
+        b"<unrelated-feature>",
+        b"<unrelated-feature><ospf><interface>ethernet1/12.262</interface></ospf>", 1))
+    result = run(source, tmp_path / "candidate.xml", ("ethernet1/12", "ethernet1/50"))
+    assert result.status == PreviewStatus.BLOCKED
+    assert any(finding.code == "UNMODELED_INTERFACE_REFERENCE" and
+        "ethernet1/12.262" in finding.message for finding in result.plan.findings)
+    assert not (tmp_path / "candidate.xml").exists()
+
+
+def test_nonsemantic_interface_text_and_safe_unknown_subtree_are_preserved(tmp_path):
+    source = tmp_path / "source.xml"
+    source.write_bytes(small_xml("ethernet1/5").replace(
+        b"<comment>ethernet1/5-body</comment>", b"<comment>ethernet1/5</comment><description>ethernet1/5</description>"))
+    result = run(source, tmp_path / "candidate.xml", ("ethernet1/5", "ethernet1/50"))
+    assert result.validation.valid is True
+    content = (tmp_path / "candidate.xml").read_bytes()
+    assert b"<comment>ethernet1/5</comment>" in content
+    assert b"<unknown-feature><value>preserve-me</value></unknown-feature>" in content
+
+
 def test_suffix_tag_nat_and_unknown_config(tmp_path):
     source = tmp_path / "source.xml"
     data = COMPLEX.read_text(encoding="utf-8")
