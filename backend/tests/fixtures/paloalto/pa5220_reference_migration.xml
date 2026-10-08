@@ -1,0 +1,27 @@
+<config version="11.1" detail-version="11.1.4">
+  <shared><address><entry name="DOC-NET"><ip-netmask>192.0.2.0/24</ip-netmask><description>Documentation network</description></entry></address><service><entry name="WEB"><protocol><tcp><port>443</port></tcp></protocol></entry></service></shared>
+  <devices><entry name="localhost.localdomain">
+    <network><interface>
+      <ethernet>
+        <entry name="ethernet1/1"><link-speed>1000</link-speed><layer3/></entry>
+        <entry name="ethernet1/5"><comment>Synthetic trunk</comment><layer3><units>
+          <entry name="ethernet1/5.100"><tag>100</tag><ip><entry name="198.51.100.1/24"/></ip><interface-management-profile>allow-ping</interface-management-profile><comment>Trust unit</comment><adjust-tcp-mss><enable>yes</enable></adjust-tcp-mss></entry>
+          <entry name="ethernet1/5.200"><tag>200</tag><ip><entry name="203.0.113.1/24"/></ip></entry>
+        </units></layer3></entry>
+        <entry name="ethernet1/6"><aggregate-group>ae1</aggregate-group></entry>
+        <entry name="ethernet1/21"><link-speed>40000</link-speed><layer3/></entry>
+      </ethernet>
+      <aggregate-ethernet><entry name="ae1"><layer3><ip><entry name="192.0.2.1/24"/></ip><interface-management-profile>allow-ping</interface-management-profile></layer3></entry></aggregate-ethernet>
+    </interface>
+    <virtual-router><entry name="default"><interface><member>ethernet1/5.100</member><member>ethernet1/5.200</member><member>ae1</member></interface><routing-table><ip><static-route>
+      <entry name="default-route"><destination>0.0.0.0/0</destination><interface>ethernet1/5.100</interface><nexthop><ip-address>198.51.100.2</ip-address></nexthop><metric>10</metric><bfd><profile>None</profile></bfd></entry>
+      <entry name="dmz-route"><destination>203.0.113.0/24</destination><interface>ethernet1/5.200</interface><nexthop><ip-address>203.0.113.2</ip-address></nexthop></entry>
+    </static-route></ip></routing-table></entry></virtual-router></network>
+    <vsys><entry name="vsys1">
+      <zone><entry name="TRUST"><network><layer3><member>ethernet1/5.100</member></layer3></network></entry><entry name="DMZ"><network><layer3><member>ethernet1/5.200</member></layer3></network></entry><entry name="UNTRUST"><network><layer3><member>ethernet1/21</member></layer3></network></entry></zone>
+      <rulebase><security><rules><entry name="allow-doc" uuid="00000000-0000-4000-8000-000000000001"><from><member>TRUST</member></from><to><member>DMZ</member></to><source><member>DOC-NET</member></source><destination><member>any</member></destination><application><member>web-browsing</member></application><service><member>WEB</member></service><action>allow</action><disabled>no</disabled><description>Synthetic security rule</description></entry></rules></security>
+      <nat><rules><entry name="nat-interface" uuid="00000000-0000-4000-8000-000000000002"><source-translation><dynamic-ip-and-port><interface-address><interface>ethernet1/5.100</interface></interface-address></dynamic-ip-and-port></source-translation></entry><entry name="nat-static"><destination-translation><translated-address>192.0.2.10</translated-address></destination-translation></entry></rules></nat></rulebase>
+    </entry></vsys>
+    <unmodeled-safe><setting>synthetic-preserved</setting></unmodeled-safe>
+  </entry></devices>
+</config>
