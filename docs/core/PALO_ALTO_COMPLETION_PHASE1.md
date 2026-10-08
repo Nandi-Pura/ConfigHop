@@ -23,7 +23,36 @@ Effective explicit and implicit assignments are checked against source and targe
 
 ## PA-5200 qualification
 
-PA-5220, PA-5250, PA-5260 and PA-5280 retain `ANALYSIS_ONLY`. Their official hardware profiles are documentation verified, but this phase has not established model-specific target rendering and preservation qualification for each model. No PA-5410 QSFP rule is inherited by these models. Renderer-supported targets remain PA-3410 and PA-5410; nine real targets remain analysis only.
+Each model was checked independently against Q1–Q31 in the Phase 1B gate. Q1–Q7 (exact profile, port/media/speed evidence and PAN-OS rules), Q8–Q10 (no unmodeled activation or PA-5410 breakout/native-mode inheritance), Q11–Q23 (generic renderer mechanics on a test-only copy of each profile) and Q24–Q29 (negative hardware/version behavior) passed the bounded synthetic checks. Q30 **fails**: the current renderer has no PA-5200-specific treatment for source manual `link-speed` on target RJ45 ports 1–4. The [official PA-5200 front-panel reference](https://docs.paloaltonetworks.com/hardware/pa-5200-hardware-reference/pa-5200-series-firewall-overview/pa-5200-front-panel) says those ports use auto-negotiated speed and duplex only. The qualification test proves the generic renderer would preserve `<link-speed>1000</link-speed>` on target `ethernet1/1`. Q31 confirms the official hardware evidence supports this restriction; it does not support treating the current output as qualified. The test-only profile copy does not alter the catalog or enable API candidates.
+
+| Model | Hardware and PAN-OS | Generic renderer and preservation | Negative tests | Result | Specific reason |
+| --- | --- | --- | --- | --- | --- |
+| PA-5220 | Verified 40G QSFP+ and 11.1 support | Bounded rewrite passes with test-only render flag | Invalid port, collision, speed, media, source mismatch, version and stale reference checked | `ANALYSIS_ONLY` | Q30: auto-only RJ45 target can inherit a manual source speed |
+| PA-5250 | Verified 40/100G QSFP and 11.1 support | Same mechanics checked independently | Same model-specific negative set checked | `ANALYSIS_ONLY` | Q30: auto-only RJ45 target can inherit a manual source speed |
+| PA-5260 | Verified 40/100G QSFP and 11.1 support | Same mechanics checked independently | Same model-specific negative set checked | `ANALYSIS_ONLY` | Q30: auto-only RJ45 target can inherit a manual source speed |
+| PA-5280 | Verified 40/100G QSFP and 11.1 support | Same mechanics checked independently | Same model-specific negative set checked | `ANALYSIS_ONLY` | Q30: auto-only RJ45 target can inherit a manual source speed |
+
+No PA-5410 QSFP rule is inherited by these models. Renderer-supported targets remain PA-3410 and PA-5410; nine real targets remain analysis only. Hardware documentation and synthetic tests do not constitute device validation.
+
+## Reference scenario matrix
+
+| Scenario | Expected | Actual | Result |
+| --- | --- | --- | --- |
+| A Copper identity | READY, candidate | READY; no rename operation | PASS |
+| B SFP rename and children | Valid candidate, aggregate review | Compatibility READY; preview REVIEW_REQUIRED for aggregate; candidate valid after review | PASS |
+| C Native 40G | REVIEW_REQUIRED; `40000` | Review required; `40000`; semantic diff `40G` | PASS |
+| D Native 100G | REVIEW_REQUIRED; `100000` | Review required; speed-change finding; semantic diff `100G` | PASS |
+| E Breakout child | BLOCKED | `BREAKOUT_MODE_REQUIRED`; no download | PASS |
+| F Unknown semantic reference | BLOCKED | `UNMODELED_INTERFACE_REFERENCE` with path; no output | PASS |
+| G Implicit missing target | BLOCKED | `TARGET_INTERFACE_NOT_FOUND`; no download | PASS |
+| H1 Two explicit sources, one target | BLOCKED | Hardware collision; no candidate | PASS |
+| H2 Explicit versus implicit collision | BLOCKED | Hardware and final-name collision; no candidate | PASS |
+| I Source profile mismatch | BLOCKED | `SOURCE_HARDWARE_PROFILE_MISMATCH`; no download | PASS |
+| J Derived child collision | BLOCKED | `TARGET_SUBINTERFACE_NAME_COLLISION`; no output | PASS |
+| K Safe unknown subtree | Preserved | Candidate valid; subtree unchanged | PASS |
+| L Description/comment identity | Preserved | Candidate valid; text unchanged | PASS |
+
+The API reference test creates a project, selects both profiles, uploads synthetic XML, assesses compatibility, previews and generates with explicit review, downloads and reparses the candidate, and verifies source bytes. Separate API tests prove `allow_review=true` cannot bypass breakout, stale unknown references, source mismatch, missing target or collision blocks. Multiple unknown-reference findings follow XML document order.
 
 ## Explicit limitations
 
