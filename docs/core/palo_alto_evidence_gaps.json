@@ -145,7 +145,8 @@
       "title": "Multi-Gig target link serialization",
       "series": "PA-1400",
       "source_phases": [
-        "PHASE4"
+        "PHASE4",
+        "PHASE6A_RESEARCH"
       ],
       "affected_models": [
         "PA-1410",
@@ -169,16 +170,16 @@
         "PAN-CONFIG-ETHERNET-LINK-SPEED"
       ],
       "current_known_behavior": "Physical ports support 2.5G and 5G; generic SDK exposes link-speed.",
-      "evidence_limit": "Physical rates and generic fields do not prove target values or auto/omission semantics.",
-      "missing_fact": "Accepted 2.5G/5G values, duplex rule, defaults, and exact exported XML on each model.",
+      "evidence_limit": "Current English PA-1400 front-panel page proves 2.5G/5G physical rates but does not state an RJ45 auto-only restriction. An official Chinese hardware PDF copyrighted 2023 says RJ45 speed and duplex are auto-only, but its revision is historical/localized and does not establish current behavior or XML. Generic PAN-OS 11.x help, CLI, API, and SDK cannot establish PA-1410/1420 values or defaults.",
+      "missing_fact": "For PA-1410 ports 9-12 and PA-1420 ports 5-8/9-12 on supported PAN-OS trains: whether speed and duplex are auto-only or configurable; exact 2.5G/5G representation if configurable; and independent omitted/default versus explicit-auto XML and manual-value behavior.",
       "why_blocking": "The renderer cannot safely normalize or preserve source link values on these groups.",
       "resolution_requirements": [
-        "OFFICIAL_DOCUMENTATION_NEEDED"
+        "VENDOR_CONFIRMATION_NEEDED"
       ],
-      "required_evidence": "Official exact-model 2.5G and 5G exported XML or config hierarchy including duplex/default behavior.",
-      "next_action": "Obtain PA-1410 and PA-1420 examples for each Multi-Gig group.",
+      "required_evidence": "Current authoritative PA-1410/PA-1420 model- and train-specific statement reconciling the historical Chinese auto-only wording with current English documentation, plus accepted/exported 2.5G, 5G, auto, and omitted speed/duplex XML or an explicit statement that manual rates are unsupported.",
+      "next_action": "Ask Palo Alto Networks TAC/Engineering to reconcile the 2023 Chinese hardware PDF with the current English page and provide per-model/per-train exact speed and duplex XML/default/acceptance behavior for the three Multi-Gig groups.",
       "future_renderer_dependency": "Set/remove link-speed and normalize duplex only after exact evidence.",
-      "notes": "",
+      "notes": "OFFICIAL_SOURCE_DISCREPANCY: historical Chinese PDF asserts auto-only RJ45; current English page is silent, not an explicit contradiction. Neither source proves XML. PoE remains a separate P1 gap.",
       "shared_gap_key": "MULTIGIG_LINK_XML"
     },
     {
@@ -272,7 +273,8 @@
       "title": "PA3200 auto-only RJ45 speed and duplex",
       "series": "PA-3200",
       "source_phases": [
-        "PHASE3"
+        "PHASE3",
+        "PHASE6A_RESEARCH"
       ],
       "affected_models": [
         "PA-3220",
@@ -297,16 +299,16 @@
         "PAN-CONFIG-ETHERNET-LINK-SPEED"
       ],
       "current_known_behavior": "Hardware requires automatic speed and duplex; generic SDK exposes direct child nodes.",
-      "evidence_limit": "Neither proves exact-model omission versus explicit auto or acceptance of a retained manual source pair.",
-      "missing_fact": "Canonical target speed and duplex XML, including absent/default behavior, for every exact model.",
+      "evidence_limit": "Official PA-3200 hardware establishes auto-only speed and duplex. PAN-OS 10.2/11.1 web help, 11.1 CLI hierarchy, XML API/XPath guidance, and pinned SDK describe generic fields or methods but do not establish PA-3220/3250/3260 accepted XML, omission defaults, or manual-value handling.",
+      "missing_fact": "For PA-3220, PA-3250, and PA-3260 ports 1-12 on each supported PAN-OS train: whether speed and duplex must each be omitted, explicitly auto, or represented otherwise; whether manual nodes are rejected, ignored, or normalized.",
       "why_blocking": "Generic renderer preserves source manual settings and could produce an invalid auto-only target.",
       "resolution_requirements": [
-        "OFFICIAL_DOCUMENTATION_NEEDED"
+        "VENDOR_CONFIRMATION_NEEDED"
       ],
-      "required_evidence": "Official exact-model export or XML/API reference showing omitted versus explicit auto for both speed and duplex.",
-      "next_action": "Seek vendor-authored exports for each model; compare speed and duplex separately.",
+      "required_evidence": "Authoritative TAC/Engineering answer or vendor-authored exact-model export/acceptance matrix for PAN-OS 10.1, 10.2, 11.0, and 11.1, independently covering link-speed and link-duplex default, explicit auto, and manual values on RJ45 1-12.",
+      "next_action": "Ask Palo Alto Networks TAC/Engineering for per-model and per-train accepted/exported speed and duplex XML, omission defaults, and manual-value behavior; retain candidate blocking until a deterministic rule is established.",
       "future_renderer_dependency": "Remove or set both link nodes with preservation inverse after evidence closure.",
-      "notes": "",
+      "notes": "Phase 6A public-source review found no model-specific serialization/default proof. PAN-OS 11.2 CLI changes are not applicable to modeled PA-3200 trains.",
       "shared_gap_key": "AUTO_NEGOTIATION_XML"
     },
     {
@@ -436,7 +438,8 @@
       "title": "PA5200 auto-only RJ45 speed and duplex",
       "series": "PA-5200",
       "source_phases": [
-        "PHASE2"
+        "PHASE2",
+        "PHASE6A_RESEARCH"
       ],
       "affected_models": [
         "PA-5220",
@@ -463,16 +466,16 @@
         "PAN-CONFIG-ETHERNET-LINK-SPEED"
       ],
       "current_known_behavior": "Hardware requires automatic speed and duplex; generic SDK exposes direct child nodes.",
-      "evidence_limit": "Neither proves exact-model omission versus explicit auto or acceptance of a retained manual source pair.",
-      "missing_fact": "Canonical target speed and duplex XML, including absent/default behavior, for every exact model.",
+      "evidence_limit": "Official PA-5200 hardware establishes auto-only speed and duplex. Version-matched web help, CLI hierarchy/change log, XML API/XPath guidance, and pinned SDK show generic controls but not PA-5220/5250/5260/5280 accepted XML or defaults. The PAN-OS 11.2 CLI change does not prove a model-specific XML rule.",
+      "missing_fact": "For each PA-5200 model ports 1-4 and supported PAN-OS trains 10.1 through 11.2: independent link-speed and link-duplex omission versus explicit auto rule, and whether manual source values are rejected, ignored, or normalized.",
       "why_blocking": "Generic renderer preserves source manual settings and could produce an invalid auto-only target.",
       "resolution_requirements": [
-        "OFFICIAL_DOCUMENTATION_NEEDED"
+        "VENDOR_CONFIRMATION_NEEDED"
       ],
-      "required_evidence": "Official exact-model export or XML/API reference showing omitted versus explicit auto for both speed and duplex.",
-      "next_action": "Seek vendor-authored exports for each model; compare speed and duplex separately.",
+      "required_evidence": "Authoritative TAC/Engineering answer or vendor-authored exact-model export/acceptance matrix for PA-5220/5250/5260/5280 RJ45 1-4 across supported PAN-OS trains, independently covering speed and duplex omission, explicit auto, and manual values.",
+      "next_action": "Ask Palo Alto Networks TAC/Engineering for model- and train-specific accepted/exported speed and duplex nodes and manual-value behavior; keep candidates blocked.",
       "future_renderer_dependency": "Remove or set both link nodes with preservation inverse after evidence closure.",
-      "notes": "",
+      "notes": "Phase 6A public-source review did not establish exact target serialization. PAN-OS 11.2 changed generic CLI option presentation; no XML/default inference follows.",
       "shared_gap_key": "AUTO_NEGOTIATION_XML"
     },
     {
