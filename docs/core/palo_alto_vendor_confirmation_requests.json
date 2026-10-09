@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "closure_state": "AWAITING_VENDOR",
+  "allowed_closure_states": ["AWAITING_VENDOR", "PARTIALLY_CONFIRMED", "READY_FOR_RENDERER_DESIGN", "BLOCKED_BY_VENDOR_AMBIGUITY"],
+  "allowed_request_statuses": ["REQUEST_READY", "SUBMITTED", "RESPONSE_RECEIVED", "EVALUATED"],
+  "allowed_response_statuses": ["NOT_RECEIVED", "SUFFICIENT", "PARTIAL", "CONFLICTING", "OUT_OF_SCOPE", "UNVERIFIABLE"],
+  "requests": [
+    {
+      "id": "PAN-VC-PA1400-MULTIGIG",
+      "gap_id": "PAN-GAP-PA1400-MULTIGIG",
+      "title": "PA-1400 Multi-Gig speed and duplex configuration semantics",
+      "request_status": "REQUEST_READY",
+      "response_status": "NOT_RECEIVED",
+      "priority": "P0",
+      "affected_models": ["PA-1410", "PA-1420"],
+      "affected_port_groups": ["pa1410-Multi-Gig PoE 9-12", "pa1420-Multi-Gig 5-8", "pa1420-Multi-Gig PoE 9-12"],
+      "panos_scope": ["11.0", "11.1", "11.2", "12.1.2+", "12.2"],
+      "known_facts": [
+        "The current official English PA-1400 front-panel page lists 2.5G and 5G physical rates for these ports but does not specify whether speed and duplex settings are auto-only.",
+        "The official Simplified Chinese PA-1400 hardware PDF, copyright 2023, says RJ45 speed and duplex are auto-negotiated only; its applicability to current hardware and PAN-OS trains is unknown.",
+        "Physical rates do not establish configurable values, exported XML, or defaults. The source difference is unresolved, not a proven contradiction."
+      ],
+      "unresolved_questions": [
+        "Are link-speed and link-duplex auto-only on PA-1410 ethernet1/9-1/12 and PA-1420 ethernet1/5-1/12? Answer each field independently.",
+        "If manual speed is allowed, what exact accepted configuration value represents 2.5G and what exported XML is produced?",
+        "If manual speed is allowed, what exact accepted configuration value represents 5G and what exported XML is produced?",
+        "For default/auto speed, is link-speed omitted, explicitly auto, or represented otherwise in exported and accepted XML?",
+        "For default/auto duplex, is link-duplex omitted, explicitly auto, or represented otherwise in exported and accepted XML?",
+        "If manual speed or duplex is unsupported, are such nodes rejected, ignored, normalized to auto, preserved but functionally ignored, or handled another way?",
+        "Are the answers identical for PA-1410 and PA-1420, and for PoE-capable versus non-PoE Multi-Gig groups with respect only to speed and duplex?",
+        "Do answers vary across PAN-OS 11.0, 11.1, 11.2, 12.1.2+, and 12.2; what are exact boundaries?",
+        "Which current authoritative behavior reconciles the English page's silence and the 2023 Chinese reference's auto-only wording?"
+      ],
+      "requested_vendor_artifacts": ["Official exact-model, exact-train sanitized exported XML for default/auto and, if supported, manual 2.5G and 5G speed and duplex", "Official Engineering or TAC model/port/PAN-OS behavior matrix and authoritative documentation revision"],
+      "acceptance_criteria": {
+        "SUFFICIENT": "Verifiable official answer resolves auto-only versus manual capability; if manual, exact 2.5G/5G values and exported XML; independent speed and duplex defaults, accepted/failure behavior, exact model/port/train scope, and the source discrepancy, enough for deterministic renderer design.",
+        "PARTIAL": "Some requested semantics or model/port/train applicability remain unanswered, including a reply that gives only physical rates or only speed.",
+        "CONFLICTING": "Verifiable official responses assert incompatible behavior for the same model, port, and train."
+      },
+      "insufficient_response_examples": ["The port supports 2.5G and 5G.", "Auto is recommended.", "A generic CLI syntax or GUI screenshot without exact model, version, and exported XML."],
+      "submission_body": "We are validating configuration migration behavior between supported Palo Alto Networks firewall models and need authoritative confirmation of exact PAN-OS configuration semantics. For PA-1410 ethernet1/9-1/12 and PA-1420 ethernet1/5-1/12 on PAN-OS 11.0, 11.1, 11.2, 12.1.2+, and 12.2, are link-speed and link-duplex independently auto-only? The current English PA-1400 front-panel page lists 2.5G/5G physical rates but is silent on this restriction; an official Simplified Chinese PA-1400 PDF copyrighted 2023 says RJ45 speed and duplex are auto-negotiated only. Please clarify the currently authoritative model/version behavior without assuming a contradiction. If manual speed is supported, specify the exact accepted 2.5G and 5G values and exported XML for each. For both speed and duplex, specify whether default/auto is an omitted node, explicit auto, or another XML representation; explain rejection, normalization, ignoring, or preservation of unsupported manual values. Please identify differences between PA-1410 and PA-1420, PoE-capable and non-PoE Multi-Gig groups only as to link settings, and PAN-OS trains. An official exact-model sanitized XML export and/or Engineering model/port/version matrix would resolve this. No customer configuration is included.",
+      "response_intake_requirements": ["Verify official provenance, response date, responder role, exact models, ports, and PAN-OS versions.", "Sanitize before any repository entry; retain safe technical statement, public URL or private-source marker, and artifact hash/reference while excluding customer details, credentials, serials, personal contacts, and private case URLs.", "Evaluate all acceptance criteria; do not change evidence or renderer support from request status alone."],
+      "notes": "PoE configuration semantics belong to a separate P1 gap. No request was submitted or answered.",
+      "case_number": null,
+      "submitted_at": null,
+      "response_received_at": null
+    },
+    {
+      "id": "PAN-VC-PA3200-AUTO-RJ45",
+      "gap_id": "PAN-GAP-PA3200-AUTO-RJ45",
+      "title": "PA-3200 auto-negotiated RJ45 speed and duplex XML",
+      "request_status": "REQUEST_READY",
+      "response_status": "NOT_RECEIVED",
+      "priority": "P0",
+      "affected_models": ["PA-3220", "PA-3250", "PA-3260"],
+      "affected_port_groups": ["pa3220-RJ45 1-12", "pa3250-RJ45 1-12", "pa3260-RJ45 1-12"],
+      "panos_scope": ["10.1", "10.2", "11.0", "11.1"],
+      "known_facts": ["Official PA-3200 hardware documentation says RJ45 ethernet1/1-1/12 auto-negotiates both speed and duplex.", "Generic PAN-OS documentation exposes link-speed and link-duplex controls but does not establish exact PA-3200 XML, default, or manual-value behavior."],
+      "unresolved_questions": [
+        "For PA-3220 RJ45 ethernet1/1-1/12, is default/auto link-speed omitted, explicit <link-speed>auto</link-speed>, or another accepted/exported representation?",
+        "Independently, is default/auto link-duplex omitted, explicit <link-duplex>auto</link-duplex>, or another accepted/exported representation?",
+        "What happens to a manual link-speed node: rejection, ignoring, normalization to auto, preservation without effect, or another documented behavior?",
+        "Independently, what happens to a manual link-duplex node?",
+        "Are these answers identical on PA-3220, PA-3250, and PA-3260; if not, what differs?",
+        "Are these answers identical across PAN-OS 10.1, 10.2, 11.0, and 11.1; if not, identify exact version boundaries."
+      ],
+      "requested_vendor_artifacts": ["Sanitized official exported interface XML from an exact supported target at default/auto speed and duplex", "Official configuration/API XPath and accepted-value example or Engineering model/port/PAN-OS behavior matrix"],
+      "acceptance_criteria": {
+        "SUFFICIENT": "Verifiable official answer specifies independently accepted/exported speed and duplex nodes, omission/explicit-auto defaults, manual-value acceptance or failure, and applicability to all three models, RJ45 1-12, and all scoped trains, enough for deterministic renderer design.",
+        "PARTIAL": "Speed or duplex, default, manual-value behavior, or exact model/port/train scope remains unresolved.",
+        "CONFLICTING": "Verifiable official responses assert incompatible behavior for the same model, port, and train."
+      },
+      "insufficient_response_examples": ["These ports auto-negotiate.", "Auto is recommended.", "Generic link-speed CLI syntax without exact exported XML and duplex behavior."],
+      "submission_body": "We are validating configuration migration behavior between supported Palo Alto Networks firewall models and need authoritative confirmation of exact PAN-OS configuration semantics. Official PA-3200 hardware documentation says RJ45 ethernet1/1-1/12 auto-negotiates speed and duplex. For PA-3220, PA-3250, and PA-3260 on PAN-OS 10.1, 10.2, 11.0, and 11.1, please answer independently for link-speed and link-duplex: when left at default/auto, is the accepted and exported XML node omitted, explicitly auto, or represented otherwise? If a configuration supplies a manual speed or duplex value, is it rejected, ignored, normalized to auto, preserved without effect, or handled otherwise? Please confirm whether answers apply identically to all three models and trains, or state exact differences and version boundaries. We request a sanitized exact-model exported interface XML showing both defaults and/or an official Engineering model/port/version behavior matrix. Generic CLI syntax does not settle target XML behavior. No customer configuration is included.",
+      "response_intake_requirements": ["Verify official provenance, response date, responder role, exact models, ports, and PAN-OS versions.", "Sanitize before any repository entry; retain safe technical statement, public URL or private-source marker, and artifact hash/reference while excluding customer details, credentials, serials, personal contacts, and private case URLs.", "Evaluate speed and duplex independently; do not change evidence or renderer support from request status alone."],
+      "notes": "No request was submitted or answered.",
+      "case_number": null,
+      "submitted_at": null,
+      "response_received_at": null
+    },
+    {
+      "id": "PAN-VC-PA5200-AUTO-RJ45",
+      "gap_id": "PAN-GAP-PA5200-AUTO-RJ45",
+      "title": "PA-5200 auto-negotiated RJ45 speed and duplex XML",
+      "request_status": "REQUEST_READY",
+      "response_status": "NOT_RECEIVED",
+      "priority": "P0",
+      "affected_models": ["PA-5220", "PA-5250", "PA-5260", "PA-5280"],
+      "affected_port_groups": ["pa5220-RJ45 1-4", "pa5250-RJ45 1-4", "pa5260-RJ45 1-4", "pa5280-RJ45 1-4"],
+      "panos_scope": ["10.1", "10.2", "11.0", "11.1", "11.2"],
+      "known_facts": ["Official PA-5200 hardware documentation says RJ45 ethernet1/1-1/4 auto-negotiates speed and duplex.", "PAN-OS 11.2 CLI change documentation mentions an auto option presentation change; it does not establish a change in configuration XML.", "Generic PAN-OS controls do not establish exact PA-5200 XML, default, or manual-value behavior."],
+      "unresolved_questions": [
+        "What is the accepted/exported link-speed default on RJ45 ethernet1/1-1/4: omitted, explicit auto, or another representation?",
+        "Independently, what is the accepted/exported link-duplex default: omitted, explicit auto, or another representation?",
+        "What happens to a manual link-speed value: rejection, ignoring, normalization to auto, preservation without effect, or another behavior?",
+        "Independently, what happens to a manual link-duplex value?",
+        "Are answers identical on PA-5220, PA-5250, PA-5260, and PA-5280; if not, specify differences?",
+        "Are answers identical on PAN-OS 10.1, 10.2, 11.0, 11.1, and 11.2; if not, specify boundaries?",
+        "Did the PAN-OS 11.2 CLI auto-option presentation change affect configuration XML or only the CLI presentation? Please confirm either outcome explicitly."
+      ],
+      "requested_vendor_artifacts": ["Sanitized official exact-model exported XML showing default/auto speed and duplex", "Official Engineering model/port/PAN-OS behavior matrix, explicitly covering all four models and 11.2"],
+      "acceptance_criteria": {
+        "SUFFICIENT": "Verifiable official answer specifies independently accepted/exported speed and duplex nodes, omission/explicit-auto defaults, manual-value acceptance or failure, all four models/RJ45 1-4/scoped trains, and whether 11.2 changed XML or only CLI presentation, enough for deterministic renderer design.",
+        "PARTIAL": "Speed or duplex, default, manual-value behavior, model/port/train scope, or 11.2 XML versus CLI question remains unresolved.",
+        "CONFLICTING": "Verifiable official responses assert incompatible behavior for the same model, port, and train."
+      },
+      "insufficient_response_examples": ["The port supports auto-negotiation.", "The 11.2 CLI offers auto.", "One model's XML generalized to four models without explicit confirmation."],
+      "submission_body": "We are validating configuration migration behavior between supported Palo Alto Networks firewall models and need authoritative confirmation of exact PAN-OS configuration semantics. Official PA-5200 documentation says RJ45 ethernet1/1-1/4 auto-negotiates speed and duplex. For PA-5220, PA-5250, PA-5260, and PA-5280 on PAN-OS 10.1, 10.2, 11.0, 11.1, and 11.2, please answer independently for link-speed and link-duplex: when left at default/auto, is the accepted/exported XML node omitted, explicitly auto, or represented otherwise? If a manual speed or duplex value is supplied, is it rejected, ignored, normalized, preserved without effect, or handled otherwise? Please confirm whether all four models and all listed trains behave identically, or identify exact boundaries. PAN-OS 11.2 documentation describes a CLI auto-option presentation change: did this change configuration XML, or only CLI presentation? We do not assume an XML change. Please provide sanitized exact-model exported XML for both fields and/or an Engineering model/port/version matrix. No customer configuration is included.",
+      "response_intake_requirements": ["Verify official provenance, response date, responder role, exact models, ports, and PAN-OS versions.", "Sanitize before any repository entry; retain safe technical statement, public URL or private-source marker, and artifact hash/reference while excluding customer details, credentials, serials, personal contacts, and private case URLs.", "Evaluate speed, duplex, and 11.2 boundary; do not change evidence or renderer support from request status alone."],
+      "notes": "No request was submitted or answered.",
+      "case_number": null,
+      "submitted_at": null,
+      "response_received_at": null
+    }
+  ]
+}
