@@ -1,0 +1,609 @@
+{
+  "schema_version": 1,
+  "catalog": {
+    "verified_models": 11,
+    "renderer_supported_models": [
+      "PA-3410",
+      "PA-5410"
+    ],
+    "analysis_only_models": [
+      "PA-1410",
+      "PA-1420",
+      "PA-3220",
+      "PA-3250",
+      "PA-3260",
+      "PA-5220",
+      "PA-5250",
+      "PA-5260",
+      "PA-5280"
+    ]
+  },
+  "source_phases": [
+    "PHASE2",
+    "PHASE3",
+    "PHASE4"
+  ],
+  "allowed_gap_types": [
+    "EXACT_XML_SERIALIZATION",
+    "MODEL_SPECIFIC_ACCEPTANCE",
+    "TARGET_HARDWARE_STATE",
+    "OPTIC_DEPENDENCY",
+    "POE_SEMANTICS",
+    "HA_REMAP_SEMANTICS",
+    "REFERENCE_REWRITE",
+    "OPERATOR_INPUT",
+    "RENDERER_CAPABILITY",
+    "DEVICE_BEHAVIOR",
+    "SCOPE_BOUNDARY"
+  ],
+  "allowed_resolution_requirements": [
+    "OFFICIAL_DOCUMENTATION_NEEDED",
+    "VENDOR_CONFIRMATION_NEEDED",
+    "DEVICE_VALIDATION_NEEDED",
+    "OPERATOR_CONTEXT_NEEDED",
+    "RENDERER_MODELING_NEEDED",
+    "REFERENCE_MODELING_NEEDED",
+    "KEEP_OUT_OF_SCOPE"
+  ],
+  "allowed_statuses": [
+    "OPEN",
+    "EVIDENCE_PARTIAL",
+    "EVIDENCE_READY",
+    "DEFERRED"
+  ],
+  "allowed_priorities": [
+    "P0",
+    "P1",
+    "P2"
+  ],
+  "gaps": [
+    {
+      "id": "PAN-GAP-PA1400-BASE-RJ45",
+      "title": "PA-1400 base RJ45 link settings",
+      "series": "PA-1400",
+      "source_phases": [
+        "PHASE4"
+      ],
+      "affected_models": [
+        "PA-1410",
+        "PA-1420"
+      ],
+      "affected_port_groups": [
+        "pa1410-RJ45 1-8",
+        "pa1420-RJ45 1-4"
+      ],
+      "semantic_area": "link speed and duplex",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA1400-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "The ports support 10M, 100M and 1G; generic SDK has direct link nodes.",
+      "evidence_limit": "Neither source establishes PA-1400 acceptance, defaults, or exported speed/duplex nodes.",
+      "missing_fact": "Whether omitted, auto, or numeric speed/duplex nodes are valid on each exact group.",
+      "why_blocking": "Preserving source manual fields may yield an invalid target candidate.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official PA-1410 and PA-1420 interface export/config reference covering default and manual speed and duplex.",
+      "next_action": "Request exact-model XML examples for both base RJ45 groups.",
+      "future_renderer_dependency": "Controlled speed/duplex normalization or explicit preservation after qualification.",
+      "notes": "",
+      "shared_gap_key": "BASE_RJ45_XML"
+    },
+    {
+      "id": "PAN-GAP-PA1400-HA1-REMAP",
+      "title": "Optical data-port HA1 remapping",
+      "series": "PA-1400",
+      "source_phases": [
+        "PHASE4"
+      ],
+      "affected_models": [
+        "PA-1410",
+        "PA-1420"
+      ],
+      "affected_port_groups": [
+        "pa1410-SFP 13-18",
+        "pa1410-SFP+ 19-22",
+        "pa1420-SFP 13-14",
+        "pa1420-SFP+ 15-22"
+      ],
+      "semantic_area": "HA1 remap and references",
+      "gap_types": [
+        "HA_REMAP_SEMANTICS",
+        "REFERENCE_REWRITE",
+        "EXACT_XML_SERIALIZATION"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA1400-FRONT"
+      ],
+      "current_known_behavior": "Optical dataplane ports can be repurposed for HA1.",
+      "evidence_limit": "Hardware evidence does not describe the exported remap node or references during interface rename.",
+      "missing_fact": "Exact remap XML, its dependency path, and whether rename must rewrite or block it.",
+      "why_blocking": "A candidate could silently retain a stale HA reference.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED",
+        "VENDOR_CONFIRMATION_NEEDED"
+      ],
+      "required_evidence": "Official PA-1400 HA1 remap XML/config hierarchy plus reference semantics for a renamed optical port.",
+      "next_action": "Seek a vendor-authored remap export or TAC hierarchy answer; define a future synthetic reference test.",
+      "future_renderer_dependency": "HA remap parser and reference rewrite or explicit blocker after evidence closure.",
+      "notes": "",
+      "shared_gap_key": "HA1_REMAP_XML"
+    },
+    {
+      "id": "PAN-GAP-PA1400-MULTIGIG",
+      "title": "Multi-Gig target link serialization",
+      "series": "PA-1400",
+      "source_phases": [
+        "PHASE4"
+      ],
+      "affected_models": [
+        "PA-1410",
+        "PA-1420"
+      ],
+      "affected_port_groups": [
+        "pa1410-Multi-Gig PoE 9-12",
+        "pa1420-Multi-Gig 5-8",
+        "pa1420-Multi-Gig PoE 9-12"
+      ],
+      "semantic_area": "2.5G/5G speed and duplex",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P0",
+      "existing_evidence_ids": [
+        "PAN-HW-PA1400-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "Physical ports support 2.5G and 5G; generic SDK exposes link-speed.",
+      "evidence_limit": "Physical rates and generic fields do not prove target values or auto/omission semantics.",
+      "missing_fact": "Accepted 2.5G/5G values, duplex rule, defaults, and exact exported XML on each model.",
+      "why_blocking": "The renderer cannot safely normalize or preserve source link values on these groups.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official exact-model 2.5G and 5G exported XML or config hierarchy including duplex/default behavior.",
+      "next_action": "Obtain PA-1410 and PA-1420 examples for each Multi-Gig group.",
+      "future_renderer_dependency": "Set/remove link-speed and normalize duplex only after exact evidence.",
+      "notes": "",
+      "shared_gap_key": "MULTIGIG_LINK_XML"
+    },
+    {
+      "id": "PAN-GAP-PA1400-OPTICAL",
+      "title": "PA-1400 optical link and optic state",
+      "series": "PA-1400",
+      "source_phases": [
+        "PHASE4"
+      ],
+      "affected_models": [
+        "PA-1410",
+        "PA-1420"
+      ],
+      "affected_port_groups": [
+        "pa1410-SFP 13-18",
+        "pa1410-SFP+ 19-22",
+        "pa1420-SFP 13-14",
+        "pa1420-SFP+ 15-22"
+      ],
+      "semantic_area": "optical link speed and duplex",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "OPTIC_DEPENDENCY",
+        "TARGET_HARDWARE_STATE",
+        "OPERATOR_INPUT"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA1400-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "SFP groups are 1G; SFP+ groups may be 1G or 10G by optic.",
+      "evidence_limit": "No exact export/acceptance rule or target installed-optic identity is established.",
+      "missing_fact": "Valid speed/duplex XML per group and which target optic/rate is intended.",
+      "why_blocking": "Source-side speed cannot establish the target transceiver or valid target XML.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED",
+        "OPERATOR_CONTEXT_NEEDED"
+      ],
+      "required_evidence": "Official PA-1400 optical XML examples for 1G/10G and target optic/rate supplied by operator where selectable.",
+      "next_action": "Research exact-model optical exports; define minimum optic/rate input before implementation.",
+      "future_renderer_dependency": "Optic context input and qualified link-setting operation.",
+      "notes": "",
+      "shared_gap_key": "OPTIC_DEPENDENT_LINK_XML"
+    },
+    {
+      "id": "PAN-GAP-PA1400-POE",
+      "title": "PoE configuration and interface references",
+      "series": "PA-1400",
+      "source_phases": [
+        "PHASE4"
+      ],
+      "affected_models": [
+        "PA-1410",
+        "PA-1420"
+      ],
+      "affected_port_groups": [
+        "pa1410-Multi-Gig PoE 9-12",
+        "pa1420-Multi-Gig PoE 9-12"
+      ],
+      "semantic_area": "PoE state and power budget",
+      "gap_types": [
+        "POE_SEMANTICS",
+        "REFERENCE_REWRITE",
+        "EXACT_XML_SERIALIZATION"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA1400-FRONT"
+      ],
+      "current_known_behavior": "Ports 9-12 support PoE; official PoE guidance describes per-port controls and shared budget.",
+      "evidence_limit": "Registered front-panel evidence does not prove exported PoE XML, rename references, or preservation behavior.",
+      "missing_fact": "PoE hierarchy, interface reference form, defaults, and rename/preservation effects.",
+      "why_blocking": "Blind subtree movement could alter power behavior or leave an old interface reference.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED",
+        "VENDOR_CONFIRMATION_NEEDED"
+      ],
+      "required_evidence": "Official PoE XML/config hierarchy showing port enable, reserved power, budget, and renamed interface references.",
+      "next_action": "Request a vendor-authored PA-1400 PoE export and document reference behavior.",
+      "future_renderer_dependency": "PoE semantic parser and reference/preservation model after evidence closure.",
+      "notes": "",
+      "shared_gap_key": "POE_XML"
+    },
+    {
+      "id": "PAN-GAP-PA3200-AUTO-RJ45",
+      "title": "PA3200 auto-only RJ45 speed and duplex",
+      "series": "PA-3200",
+      "source_phases": [
+        "PHASE3"
+      ],
+      "affected_models": [
+        "PA-3220",
+        "PA-3250",
+        "PA-3260"
+      ],
+      "affected_port_groups": [
+        "pa3220-RJ45 1-12",
+        "pa3250-RJ45 1-12",
+        "pa3260-RJ45 1-12"
+      ],
+      "semantic_area": "auto-negotiated link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P0",
+      "existing_evidence_ids": [
+        "PAN-HW-PA3200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "Hardware requires automatic speed and duplex; generic SDK exposes direct child nodes.",
+      "evidence_limit": "Neither proves exact-model omission versus explicit auto or acceptance of a retained manual source pair.",
+      "missing_fact": "Canonical target speed and duplex XML, including absent/default behavior, for every exact model.",
+      "why_blocking": "Generic renderer preserves source manual settings and could produce an invalid auto-only target.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official exact-model export or XML/API reference showing omitted versus explicit auto for both speed and duplex.",
+      "next_action": "Seek vendor-authored exports for each model; compare speed and duplex separately.",
+      "future_renderer_dependency": "Remove or set both link nodes with preservation inverse after evidence closure.",
+      "notes": "",
+      "shared_gap_key": "AUTO_NEGOTIATION_XML"
+    },
+    {
+      "id": "PAN-GAP-PA3200-OPTICAL-1G",
+      "title": "PA-3220 fixed 1G SFP XML",
+      "series": "PA-3200",
+      "source_phases": [
+        "PHASE3"
+      ],
+      "affected_models": [
+        "PA-3220"
+      ],
+      "affected_port_groups": [
+        "pa3220-SFP 13-16"
+      ],
+      "semantic_area": "1G SFP link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE",
+        "OPTIC_DEPENDENCY"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA3200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "PA-3220 ports 13-16 are 1G SFP.",
+      "evidence_limit": "The physical rate and generic SDK do not prove numeric, auto, or omitted XML.",
+      "missing_fact": "Accepted speed/duplex XML and default behavior with a 1G optic installed.",
+      "why_blocking": "A source setting may be incompatible despite the 1G hardware limit.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official PA-3220 ports 13-16 1G optic export or XML/API reference.",
+      "next_action": "Find a PA-3220 1G SFP configuration export and acceptance rule.",
+      "future_renderer_dependency": "Qualified optical link normalization.",
+      "notes": "",
+      "shared_gap_key": "OPTIC_DEPENDENT_LINK_XML"
+    },
+    {
+      "id": "PAN-GAP-PA3200-OPTICAL-MIXED",
+      "title": "PA-3200 1G/10G SFP+ XML",
+      "series": "PA-3200",
+      "source_phases": [
+        "PHASE3"
+      ],
+      "affected_models": [
+        "PA-3220",
+        "PA-3250",
+        "PA-3260"
+      ],
+      "affected_port_groups": [
+        "pa3220-SFP+ 17-20",
+        "pa3250-SFP+ 13-20",
+        "pa3260-SFP+ 13-20"
+      ],
+      "semantic_area": "optic-dependent link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "OPTIC_DEPENDENCY",
+        "TARGET_HARDWARE_STATE",
+        "OPERATOR_INPUT"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA3200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "These groups support 1G or 10G according to transceiver.",
+      "evidence_limit": "No model-specific accepted XML or target optic state is known.",
+      "missing_fact": "Valid speed/duplex representation and intended target optic/rate for each model.",
+      "why_blocking": "Source XML cannot identify target transceiver or guarantee valid link settings.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED",
+        "OPERATOR_CONTEXT_NEEDED"
+      ],
+      "required_evidence": "Official exact-model 1G/10G optical exports and operator target optic/rate.",
+      "next_action": "Collect model-specific optical examples and define minimum target optic/rate input.",
+      "future_renderer_dependency": "Optic context and qualified optical link operation.",
+      "notes": "",
+      "shared_gap_key": "OPTIC_DEPENDENT_LINK_XML"
+    },
+    {
+      "id": "PAN-GAP-PA3200-QSFP-40G",
+      "title": "PA-3260 40G QSFP+ XML",
+      "series": "PA-3200",
+      "source_phases": [
+        "PHASE3"
+      ],
+      "affected_models": [
+        "PA-3260"
+      ],
+      "affected_port_groups": [
+        "pa3260-QSFP+ 21-24"
+      ],
+      "semantic_area": "40G QSFP+ link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA3200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "PA-3260 ports 21-24 are 40G QSFP+.",
+      "evidence_limit": "PA-5410 numeric speed behavior does not establish PA-3260 acceptance.",
+      "missing_fact": "Whether 40000, auto, or omission is accepted/canonical and what duplex node is valid.",
+      "why_blocking": "Cross-model inheritance could emit unsupported link fields.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official PA-3260 QSFP+ exported XML or exact-model XML/API reference for speed and duplex.",
+      "next_action": "Obtain the PA-3260 native 40G export; do not infer PA-5410 behavior.",
+      "future_renderer_dependency": "Qualified fixed-QSFP link operation.",
+      "notes": "",
+      "shared_gap_key": "FIXED_QSFP_LINK_XML"
+    },
+    {
+      "id": "PAN-GAP-PA5200-AUTO-RJ45",
+      "title": "PA5200 auto-only RJ45 speed and duplex",
+      "series": "PA-5200",
+      "source_phases": [
+        "PHASE2"
+      ],
+      "affected_models": [
+        "PA-5220",
+        "PA-5250",
+        "PA-5260",
+        "PA-5280"
+      ],
+      "affected_port_groups": [
+        "pa5220-RJ45 1-4",
+        "pa5250-RJ45 1-4",
+        "pa5260-RJ45 1-4",
+        "pa5280-RJ45 1-4"
+      ],
+      "semantic_area": "auto-negotiated link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P0",
+      "existing_evidence_ids": [
+        "PAN-HW-PA5200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "Hardware requires automatic speed and duplex; generic SDK exposes direct child nodes.",
+      "evidence_limit": "Neither proves exact-model omission versus explicit auto or acceptance of a retained manual source pair.",
+      "missing_fact": "Canonical target speed and duplex XML, including absent/default behavior, for every exact model.",
+      "why_blocking": "Generic renderer preserves source manual settings and could produce an invalid auto-only target.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official exact-model export or XML/API reference showing omitted versus explicit auto for both speed and duplex.",
+      "next_action": "Seek vendor-authored exports for each model; compare speed and duplex separately.",
+      "future_renderer_dependency": "Remove or set both link nodes with preservation inverse after evidence closure.",
+      "notes": "",
+      "shared_gap_key": "AUTO_NEGOTIATION_XML"
+    },
+    {
+      "id": "PAN-GAP-PA5200-OPTICAL",
+      "title": "PA-5200 1G/10G SFP+ XML",
+      "series": "PA-5200",
+      "source_phases": [
+        "PHASE2"
+      ],
+      "affected_models": [
+        "PA-5220",
+        "PA-5250",
+        "PA-5260",
+        "PA-5280"
+      ],
+      "affected_port_groups": [
+        "pa5220-SFP+ 5-20",
+        "pa5250-SFP+ 5-20",
+        "pa5260-SFP+ 5-20",
+        "pa5280-SFP+ 5-20"
+      ],
+      "semantic_area": "optic-dependent link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "OPTIC_DEPENDENCY",
+        "TARGET_HARDWARE_STATE",
+        "OPERATOR_INPUT"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA5200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "Ports 5-20 support 1G/10G according to transceiver.",
+      "evidence_limit": "No accepted target XML or installed target optic is established.",
+      "missing_fact": "Valid speed/duplex representation and intended optic/rate on each model.",
+      "why_blocking": "Source setting cannot establish the target transceiver.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED",
+        "OPERATOR_CONTEXT_NEEDED"
+      ],
+      "required_evidence": "Official exact-model 1G/10G optical exports and operator target optic/rate.",
+      "next_action": "Collect PA-5200 optical examples and define minimum optic/rate context.",
+      "future_renderer_dependency": "Optic context and qualified optical link operation.",
+      "notes": "",
+      "shared_gap_key": "OPTIC_DEPENDENT_LINK_XML"
+    },
+    {
+      "id": "PAN-GAP-PA5200-QSFP-40-100G",
+      "title": "PA-5200 40G/100G QSFP XML",
+      "series": "PA-5200",
+      "source_phases": [
+        "PHASE2"
+      ],
+      "affected_models": [
+        "PA-5250",
+        "PA-5260",
+        "PA-5280"
+      ],
+      "affected_port_groups": [
+        "pa5250-QSFP 21-24",
+        "pa5260-QSFP 21-24",
+        "pa5280-QSFP 21-24"
+      ],
+      "semantic_area": "optic-dependent QSFP link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "OPTIC_DEPENDENCY",
+        "TARGET_HARDWARE_STATE",
+        "OPERATOR_INPUT"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA5200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "These QSFP+/QSFP28 groups support 40G or 100G according to transceiver.",
+      "evidence_limit": "No exact-model numeric/auto/omitted XML or target optic state is established.",
+      "missing_fact": "Accepted XML and intended target optic/rate for each model; no PA-5410 inheritance.",
+      "why_blocking": "Wrong speed or optic assumption could invalidate the candidate.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED",
+        "OPERATOR_CONTEXT_NEEDED"
+      ],
+      "required_evidence": "Official 40G and 100G exports for each exact model plus operator target optic/rate.",
+      "next_action": "Collect per-model exports and define target optic/rate context.",
+      "future_renderer_dependency": "Optic context and qualified QSFP link operation.",
+      "notes": "",
+      "shared_gap_key": "OPTIC_DEPENDENT_QSFP_XML"
+    },
+    {
+      "id": "PAN-GAP-PA5200-QSFP-40G",
+      "title": "PA-5220 40G-only QSFP+ XML",
+      "series": "PA-5200",
+      "source_phases": [
+        "PHASE2"
+      ],
+      "affected_models": [
+        "PA-5220"
+      ],
+      "affected_port_groups": [
+        "pa5220-QSFP 21-24"
+      ],
+      "semantic_area": "fixed 40G QSFP+ link settings",
+      "gap_types": [
+        "EXACT_XML_SERIALIZATION",
+        "MODEL_SPECIFIC_ACCEPTANCE"
+      ],
+      "blocking": true,
+      "status": "EVIDENCE_PARTIAL",
+      "priority": "P1",
+      "existing_evidence_ids": [
+        "PAN-HW-PA5200-FRONT",
+        "PAN-CONFIG-ETHERNET-LINK-SPEED"
+      ],
+      "current_known_behavior": "PA-5220 ports 21-24 support 40G only.",
+      "evidence_limit": "PA-5410 and PA-3260 behavior cannot prove PA-5220 XML.",
+      "missing_fact": "Accepted/canonical 40G speed and duplex representation, including omission.",
+      "why_blocking": "A numeric 40000 value may not be valid on this exact model.",
+      "resolution_requirements": [
+        "OFFICIAL_DOCUMENTATION_NEEDED"
+      ],
+      "required_evidence": "Official PA-5220 QSFP+ 40G export or exact-model XML/API reference.",
+      "next_action": "Obtain PA-5220 40G export and record speed/duplex defaults.",
+      "future_renderer_dependency": "Qualified fixed-QSFP link operation.",
+      "notes": "",
+      "shared_gap_key": "FIXED_QSFP_LINK_XML"
+    }
+  ]
+}
