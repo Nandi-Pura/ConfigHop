@@ -67,7 +67,7 @@ def test_evidence_gap_catalog():
         assert gap["resolution_requirements"] and set(gap["resolution_requirements"]) <= set(data["allowed_resolution_requirements"])
         assert gap["status"] in data["allowed_statuses"]
         assert gap["priority"] in data["allowed_priorities"]
-        assert set(gap["source_phases"]) <= {"PHASE2", "PHASE3", "PHASE4", "PHASE5_RESEARCH"}
+        assert set(gap["source_phases"]) <= {"PHASE2", "PHASE3", "PHASE4", "PHASE5_RESEARCH", "PHASE6A_RESEARCH"}
         assert gap["existing_evidence_ids"] and set(gap["existing_evidence_ids"]) <= EVIDENCE.keys()
         assert all(gap[key] for key in ("current_known_behavior", "evidence_limit", "missing_fact", "why_blocking", "required_evidence", "next_action", "future_renderer_dependency"))
         assert gap["blocking"] is True and gap["status"] in {"OPEN", "EVIDENCE_PARTIAL", "EVIDENCE_READY"}
