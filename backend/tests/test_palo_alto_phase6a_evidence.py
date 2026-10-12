@@ -20,7 +20,8 @@ def test_phase6a_p0_evidence_ceiling():
     assert len(set().union(*P0_GROUPS.values())) == 10
     profiles = {p.model: p for p in list_profiles(vendor="palo_alto", profile_status=ProfileStatus.VERIFIED)}
     assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.SUPPORTED} == {"PA-3410", "PA-5410"}
-    assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY} == {"PA-1410", "PA-1420", "PA-3220", "PA-3250", "PA-3260", "PA-5220", "PA-5250", "PA-5260", "PA-5280"}
+    assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.SCOPED} == {"PA-3220", "PA-3250", "PA-3260", "PA-5220", "PA-5250", "PA-5260", "PA-5280"}
+    assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY} == {"PA-1410", "PA-1420"}
     for gap_id, expected_groups in P0_GROUPS.items():
         gap = gaps[gap_id]
         assert set(gap["affected_port_groups"]) == expected_groups

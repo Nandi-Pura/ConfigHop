@@ -27,10 +27,11 @@ def _group(profile: str, key: str, numbers: range, media: list[str], speeds: lis
         raise ValueError("breakout topology must assign every child explicitly")
     names = [f"ethernet1/{number}" for number in numbers]
     blocked = condition != RequiredCondition.NONE
+    scoped = condition in {RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT, RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED}
     group = HardwareInterfaceGroup(id=f"{profile}-{key}", label=key, interface_names=names,
         media_capabilities=media, speed_capabilities=speeds, availability=availability,
-        mapping_support=MappingSupport.CONDITIONAL if availability == PortAvailability.NATIVE_CONDITIONAL else MappingSupport.UNSUPPORTED if blocked else MappingSupport.SUPPORTED,
-        candidate_support=CandidateSupport.CONDITIONAL if condition == RequiredCondition.MANUAL_NATIVE_PORT_SPEED else CandidateSupport.BLOCKED if blocked else CandidateSupport.SUPPORTED,
+        mapping_support=MappingSupport.CONDITIONAL if availability == PortAvailability.NATIVE_CONDITIONAL else MappingSupport.SUPPORTED if scoped or not blocked else MappingSupport.UNSUPPORTED,
+        candidate_support=CandidateSupport.CONDITIONAL if condition in {RequiredCondition.MANUAL_NATIVE_PORT_SPEED, RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT} else CandidateSupport.BLOCKED if blocked else CandidateSupport.SUPPORTED,
         required_condition=condition, evidence_ids=[evidence], notes=notes)
     interfaces = [HardwareInterface(name=name, kind=HardwareKind.PHYSICAL_ETHERNET,
         speed_capabilities=speeds, media_capabilities=media, media=media[0], availability=availability,
@@ -66,10 +67,10 @@ PA5410 = _profile("paloalto-pa-5410", "PA-5410", "PA-5400", [
 ], ["PAN-HW-PA5400-OVERVIEW", "PAN-HW-PA5400-FRONT", "PAN-COMPAT-PANOS-BY-MODEL", "PAN-COMPAT-BREAKOUT", "PAN-CONFIG-ETHERNET-LINK-SPEED", "PAN-CONFIG-ETHERNET-LINK-SPEED-VALUES", "PAN-CONFIG-ETHERNET-LINK-SPEED-TEST"], "10.2.0")
 
 
-def _new(model: str, series: str, first: str, groups: list[tuple[HardwareInterfaceGroup, list[HardwareInterface]]], rules: list[SoftwareSupportRule]) -> HardwareProfile:
+def _new(model: str, series: str, first: str, groups: list[tuple[HardwareInterfaceGroup, list[HardwareInterface]]], rules: list[SoftwareSupportRule], render: TargetRenderSupport = TargetRenderSupport.ANALYSIS_ONLY) -> HardwareProfile:
     prefix = f"PAN-HW-{series.replace('-', '')}"
     return _profile(f"paloalto-{model.lower()}", model, series, groups,
-        [f"{prefix}-OVERVIEW", f"{prefix}-FRONT", MATRIX], first, rules, TargetRenderSupport.ANALYSIS_ONLY)
+        [f"{prefix}-OVERVIEW", f"{prefix}-FRONT", MATRIX], first, rules, render)
 
 
 PA1410 = _new("PA-1410", "PA-1400", "11.0", [
@@ -88,30 +89,30 @@ PA1420 = _new("PA-1420", "PA-1400", "11.0", [
 ], RULES_1400)
 
 PA3220 = _new("PA-3220", "PA-3200", "8.1", [
-    _group("pa3220", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G"], "PAN-HW-PA3200-FRONT"),
-    _group("pa3220", "SFP 13-16", range(13, 17), ["SFP"], ["1G"], "PAN-HW-PA3200-FRONT"),
-    _group("pa3220", "SFP+ 17-20", range(17, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3200-FRONT"),
-], RULES_3200)
+    _group("pa3220", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT),
+    _group("pa3220", "SFP 13-16", range(13, 17), ["SFP"], ["1G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+    _group("pa3220", "SFP+ 17-20", range(17, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+], RULES_3200, TargetRenderSupport.SCOPED)
 
 PA3250 = _new("PA-3250", "PA-3200", "8.1", [
-    _group("pa3250", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G"], "PAN-HW-PA3200-FRONT"),
-    _group("pa3250", "SFP+ 13-20", range(13, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3200-FRONT"),
-], RULES_3200)
+    _group("pa3250", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT),
+    _group("pa3250", "SFP+ 13-20", range(13, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+], RULES_3200, TargetRenderSupport.SCOPED)
 
 PA3260 = _new("PA-3260", "PA-3200", "8.1", [
-    _group("pa3260", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G"], "PAN-HW-PA3200-FRONT"),
-    _group("pa3260", "SFP+ 13-20", range(13, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3200-FRONT"),
-    _group("pa3260", "QSFP+ 21-24", range(21, 25), ["QSFP_PLUS"], ["40G"], "PAN-HW-PA3200-FRONT"),
-], RULES_3200)
+    _group("pa3260", "RJ45 1-12", range(1, 13), ["RJ45"], ["10M", "100M", "1G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT),
+    _group("pa3260", "SFP+ 13-20", range(13, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+    _group("pa3260", "QSFP+ 21-24", range(21, 25), ["QSFP_PLUS"], ["40G"], "PAN-HW-PA3200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+], RULES_3200, TargetRenderSupport.SCOPED)
 
 
 def _pa5200(model: str, first: str, speeds: list[str], media: list[str]) -> HardwareProfile:
     key = model.lower().replace("-", "")
     return _new(model, "PA-5200", first, [
-        _group(key, "RJ45 1-4", range(1, 5), ["RJ45"], ["100M", "1G", "10G"], "PAN-HW-PA5200-FRONT"),
-        _group(key, "SFP+ 5-20", range(5, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA5200-FRONT"),
-        _group(key, "QSFP 21-24", range(21, 25), media, speeds, "PAN-HW-PA5200-FRONT"),
-    ], RULES_5200)
+        _group(key, "RJ45 1-4", range(1, 5), ["RJ45"], ["100M", "1G", "10G"], "PAN-HW-PA5200-FRONT", condition=RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT),
+        _group(key, "SFP+ 5-20", range(5, 21), ["SFP", "SFP_PLUS"], ["1G", "10G"], "PAN-HW-PA5200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+        _group(key, "QSFP 21-24", range(21, 25), media, speeds, "PAN-HW-PA5200-FRONT", condition=RequiredCondition.TARGET_LINK_SERIALIZATION_UNVERIFIED),
+    ], RULES_5200, TargetRenderSupport.SCOPED)
 
 
 PA5220 = _pa5200("PA-5220", "8.0", ["40G"], ["QSFP_PLUS"])

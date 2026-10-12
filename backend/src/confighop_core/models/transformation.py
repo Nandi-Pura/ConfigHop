@@ -41,6 +41,7 @@ class TransformationPlan(BaseModel):
     target_profile_vendor: str
     target_profile_model: str
     target_profile_status: str
+    target_render_support: str = "SUPPORTED"
     preview_status: PreviewStatus
     operations: list[TransformationOperation] = Field(default_factory=list)
     findings: list[RenderFinding] = Field(default_factory=list)

@@ -50,7 +50,8 @@ def test_evidence_gap_catalog():
     profiles = {p.model: p for p in list_profiles(vendor="palo_alto", profile_status=ProfileStatus.VERIFIED)}
     assert set(profiles) == ANALYSIS | SUPPORTED
     assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.SUPPORTED} == SUPPORTED
-    assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY} == ANALYSIS
+    assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.SCOPED} == ANALYSIS - {"PA-1410", "PA-1420"}
+    assert {m for m, p in profiles.items() if p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY} == {"PA-1410", "PA-1420"}
     registry_groups = {group.id for model in ANALYSIS for group in profiles[model].interface_groups}
     assert len(FROZEN_EXPECTED_GROUPS) == 29
     assert registry_groups == FROZEN_EXPECTED_GROUPS

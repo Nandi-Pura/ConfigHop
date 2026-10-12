@@ -6,9 +6,10 @@ from pydantic import BaseModel, Field
 
 from .hardware.registry import get_profile
 from .palo_alto_constants import NATIVE_QSFP_EVIDENCE, NATIVE_QSFP_SPEED_XML
-from .models.hardware import CandidateSupport, PortAvailability, TargetRenderSupport, SoftwareSupportStatus
+from .models.hardware import CandidateSupport, PortAvailability, RequiredCondition, TargetRenderSupport, SoftwareSupportStatus
 from .models.inventory import PaloAltoInventory
 from .models.mapping import InterfaceMapping, Severity
+from .render_scope import scoped_render_findings
 
 
 class AssessmentStatus(StrEnum):
@@ -181,6 +182,11 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
     source_ports = {item.name: item for item in source.interfaces} if source else {}
     target_ports = {item.name: item for item in target.interfaces} if target else {}
     hardware_findings: list[Finding] = []
+    if target:
+        hardware_findings.extend(Finding(code=item.code, severity=item.severity, message=item.message,
+            source_interface=item.source_interface, target_interface=item.target_interface,
+            evidence_ids=target_ports[item.target_interface].evidence_ids if item.target_interface in target_ports else [])
+            for item in scoped_render_findings(inventory, mappings, target))
     source_names = {item.name for item in inventory.physical_interfaces}
     source_counts = Counter(item.source_interface for item in mappings)
     for mapping in mappings:
@@ -201,26 +207,26 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
             findings.append(_finding("TARGET_INTERFACE_NOT_FOUND", "Effective target interface is absent from the selected hardware profile.", source=item.name, target=target_name, evidence=target.evidence_ids))
         if target_counts[target_name] > 1:
             findings.append(_finding("TARGET_HARDWARE_PROFILE_MISMATCH", "Multiple source interfaces resolve to this target identity.", source=item.name, target=target_name))
-        if target_port and target_port.candidate_support == CandidateSupport.BLOCKED:
-            if target_port.availability == PortAvailability.BREAKOUT_CHILD:
+        if target_port and target_port.candidate_support == CandidateSupport.BLOCKED and target.target_render_support != TargetRenderSupport.SCOPED:
+            if target_port.required_condition == RequiredCondition.BREAKOUT_MODE:
                 findings.append(_finding("BREAKOUT_MODE_REQUIRED", "This breakout child requires target QSFP breakout configuration that ConfigHop does not render.", source=item.name, target=target_name, evidence=target_port.evidence_ids))
             else:
                 findings.append(_finding("TARGET_NATIVE_PORT_MODE_REQUIRED", "This native QSFP target requires explicit speed configuration that ConfigHop does not render.", source=item.name, target=target_name, evidence=target_port.evidence_ids))
         settings = decisions.get(item.name)
         chosen = settings.link_speed if settings else None
-        native = bool(target_port and target_port.candidate_support == CandidateSupport.CONDITIONAL)
+        native = bool(target_port and target_port.required_condition == RequiredCondition.MANUAL_NATIVE_PORT_SPEED)
         if native and chosen is None:
             findings.append(_finding("TARGET_NATIVE_PORT_MODE_REQUIRED", "Select 40G or 100G for the native QSFP target.", source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
         elif native and chosen not in NATIVE_QSFP_SPEED_XML:
             findings.append(_finding("TARGET_LINK_SPEED_UNSUPPORTED", "The selected speed cannot configure this native QSFP target.", source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
-        elif settings is not None and not native:
+        elif settings is not None and chosen is not None and not native and not (target_port and target_port.required_condition == RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT):
             findings.append(_finding("TARGET_INTERFACE_SETTING_NOT_APPLICABLE", "Native QSFP target speed does not apply to this interface.", source=item.name, target=target_name))
         speed = _configured_speed(item.link_speed)
         if native and chosen in NATIVE_QSFP_SPEED_XML:
             findings.append(_finding("PHYSICAL_LINK_CHANGE_REQUIRED", "Target speed was selected explicitly; verify optics, cabling and peer compatibility before deployment.", severity=Severity.WARNING, source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
             if speed and speed != chosen:
                 findings.append(_finding("TARGET_LINK_SPEED_CHANGED", "Configured source link speed differs from the selected target speed.", severity=Severity.WARNING, source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
-        if source_port and target_port and target_port.candidate_support == CandidateSupport.SUPPORTED and source_port.speed_capabilities and target_port.speed_capabilities:
+        if source_port and target_port and source_port.speed_capabilities and target_port.speed_capabilities and not native:
             if speed == "UNKNOWN":
                 findings.append(_finding("CONFIGURED_SPEED_NOT_VERIFIED", "Configured source speed could not be normalized.", severity=Severity.WARNING, source=item.name, target=target_name))
             elif speed and speed not in target_port.speed_capabilities:
@@ -230,7 +236,7 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
             elif not speed and not set(source_port.speed_capabilities) <= set(target_port.speed_capabilities):
                 findings.append(_finding("SPEED_CAPABILITY_NARROWED", "Target port supports fewer speeds; verify the actual link speed.", severity=Severity.WARNING, source=item.name, target=target_name))
             if not set(source_port.media_capabilities) & set(target_port.media_capabilities):
-                findings.append(_finding("MEDIA_CHANGE_REVIEW", "Physical media changes; verify cabling and transceiver plan.", severity=Severity.WARNING, source=item.name, target=target_name))
+                findings.append(_finding("TARGET_MEDIA_INCOMPATIBLE" if target.target_render_support == TargetRenderSupport.SCOPED else "MEDIA_CHANGE_REVIEW", "Source and target physical media differ.", severity=Severity.ERROR if target.target_render_support == TargetRenderSupport.SCOPED else Severity.WARNING, source=item.name, target=target_name))
         hardware_findings.extend(findings)
         assignments.append(InterfaceAssessment(source_interface=item.name, target_interface=target_name,
             explicit_mapping=item.name in explicit, configured_source_speed=item.link_speed,

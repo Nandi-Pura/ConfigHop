@@ -20,13 +20,13 @@ MODELS = {"5220": ("40G",), "5250": ("40G", "100G"),
 def test_each_pa5200_hardware_software_and_mode_boundary(model, speeds):
     profile = get_profile(f"paloalto-pa-{model}")
     assert profile.profile_status == ProfileStatus.VERIFIED
-    assert profile.target_render_support == TargetRenderSupport.ANALYSIS_ONLY
+    assert profile.target_render_support == TargetRenderSupport.SCOPED
     assert [port.name for port in profile.interfaces] == [f"ethernet1/{i}" for i in range(1, 25)]
     assert {port.media for port in profile.interfaces[:4]} == {"RJ45"}
     assert {port.media for port in profile.interfaces[4:20]} == {"SFP"}
     assert tuple(profile.interfaces[20].speed_capabilities) == speeds
-    assert all(port.candidate_support == CandidateSupport.SUPPORTED for port in profile.interfaces)
-    assert all(port.required_condition == "NONE" for port in profile.interfaces)
+    assert all(port.candidate_support == CandidateSupport.CONDITIONAL for port in profile.interfaces[:4])
+    assert all(port.candidate_support == CandidateSupport.BLOCKED for port in profile.interfaces[4:])
     assert all(port.parent_interface is None for port in profile.interfaces)
     assert version_support(profile.id, "11.1.4") == "SUPPORTED"
     assert version_support(profile.id, "12.1.2") == "UNSUPPORTED"
@@ -95,7 +95,7 @@ def test_each_pa5200_negative_hardware_and_version_gates(model, tmp_path):
     assert "TARGET_SPEED_UNSUPPORTED" in {finding.code for finding in speed.findings}
     media = assess(inventory, "paloalto-pa-5220", "11.1", profile_id, "11.1",
         [InterfaceMapping(source_interface="ethernet1/1", target_interface="ethernet1/5")])
-    assert "MEDIA_CHANGE_REVIEW" in {finding.code for finding in media.findings}
+    assert "TARGET_MEDIA_INCOMPATIBLE" in {finding.code for finding in media.findings}
     mismatch = source.read_bytes().replace(b'entry name="ethernet1/21"', b'entry name="ethernet1/25"')
     source.write_bytes(mismatch)
     assert "SOURCE_HARDWARE_PROFILE_MISMATCH" in {finding.code for finding in assess(

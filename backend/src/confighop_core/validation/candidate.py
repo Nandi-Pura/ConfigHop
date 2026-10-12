@@ -23,6 +23,7 @@ def expected_inventory(source: PaloAltoInventory, plan: TransformationPlan) -> P
         for op in plan.operations:
             if op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED and op.object_name == source_name:
                 item.link_speed = op.target_value
+                item.link_speed_explicit = True
     for item in expected.subinterfaces:
         item.name = children.get(item.name, item.name)
         item.parent_interface = physical.get(item.parent_interface, item.parent_interface)

@@ -11,8 +11,11 @@ class PhysicalInterface(BaseModel):
     mode: InterfaceMode
     comment: str | None = None
     link_state: str | None = None
+    link_state_explicit: bool = False
     link_speed: str | None = None
+    link_speed_explicit: bool = False
     link_duplex: str | None = None
+    link_duplex_explicit: bool = False
     aggregate_group: str | None = None
     ip_addresses: list[str] = Field(default_factory=list)
     management_profile: str | None = None

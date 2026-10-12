@@ -4,7 +4,7 @@ from hashlib import sha256
 from ..mapping import preview_interface_mappings
 from ..palo_alto_constants import NATIVE_QSFP_SPEED_XML
 from ..models.dependency import ReferenceType
-from ..models.hardware import HardwareProfile
+from ..models.hardware import HardwareProfile, TargetRenderSupport
 from ..models.inventory import PaloAltoInventory
 from ..models.mapping import ChangeAction, MigrationPreview, PreviewStatus, Severity
 from ..models.transformation import OperationType, RenderFinding, TransformationOperation, TransformationPlan
@@ -66,6 +66,8 @@ def build_transformation_plan(
                     "physical_interface", impact.source_interface, "network", "name")
             decision = next((item for item in preview.mappings if item.source_interface == impact.source_interface), None)
             chosen = decision.target_settings.link_speed if decision and decision.target_settings else None
+            if target_profile.target_render_support == TargetRenderSupport.SCOPED and chosen is not None:
+                error("TARGET_AUTO_ONLY_LINK_SETTING_NOT_APPLICABLE", "Scoped rendering cannot write target link speed.")
             if chosen in NATIVE_QSFP_SPEED_XML:
                 add(OperationType.SET_INTERFACE_LINK_SPEED, source_ports[impact.source_interface].link_speed or "",
                     NATIVE_QSFP_SPEED_XML[chosen], "physical_interface", impact.source_interface, "network", "link-speed")
@@ -78,8 +80,13 @@ def build_transformation_plan(
                     continue
                 add(_REF_OPERATIONS[change.reference_type], change.old_value, change.new_value,
                     change.object_type, change.object_name, change.scope, change.field)
+    if target_profile.target_render_support == TargetRenderSupport.SCOPED and any(
+        op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED or op.field == "link-duplex" for op in operations
+    ):
+        error("TARGET_AUTO_ONLY_LINK_SERIALIZATION_UNVERIFIED", "Scoped rendering cannot write link settings.")
     status = PreviewStatus.BLOCKED if findings else preview.status
     return TransformationPlan(source_sha256=sha256(source_bytes).hexdigest(),
         source_inventory_sha256=inventory_digest(inventory), target_profile_vendor=target_profile.vendor,
         target_profile_model=target_profile.model, target_profile_status=target_profile.profile_status.value,
+        target_render_support=target_profile.target_render_support.value,
         preview_status=preview.status, operations=operations, findings=findings, status=status)

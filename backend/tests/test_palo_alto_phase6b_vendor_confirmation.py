@@ -104,6 +104,7 @@ def test_phase6b_request_package_and_frozen_production_state():
     }
     profiles = list_profiles(vendor="palo_alto", profile_status=ProfileStatus.VERIFIED)
     assert {p.model for p in profiles if p.target_render_support == TargetRenderSupport.SUPPORTED} == {"PA-3410", "PA-5410"}
-    assert {p.model for p in profiles if p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY} == {
-        "PA-1410", "PA-1420", "PA-3220", "PA-3250", "PA-3260", "PA-5220", "PA-5250", "PA-5260", "PA-5280",
+    assert {p.model for p in profiles if p.target_render_support == TargetRenderSupport.SCOPED} == {
+        "PA-3220", "PA-3250", "PA-3260", "PA-5220", "PA-5250", "PA-5260", "PA-5280",
     }
+    assert {p.model for p in profiles if p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY} == {"PA-1410", "PA-1420"}

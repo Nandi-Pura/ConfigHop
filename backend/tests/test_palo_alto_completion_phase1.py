@@ -94,5 +94,5 @@ def test_malformed_subinterface_identity_blocks_parent_rename(tmp_path):
 @pytest.mark.parametrize("model", ["5220", "5250", "5260", "5280"])
 def test_pa5200_target_promotion_remains_model_specific(model):
     profile = get_profile(f"paloalto-pa-{model}")
-    assert profile.target_render_support == TargetRenderSupport.ANALYSIS_ONLY
+    assert profile.target_render_support == TargetRenderSupport.SCOPED
     assert all(port.name not in {"ethernet1/41", "ethernet1/25"} for port in profile.interfaces)

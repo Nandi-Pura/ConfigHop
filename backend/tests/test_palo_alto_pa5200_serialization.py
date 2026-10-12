@@ -45,12 +45,12 @@ def test_each_target_group_remains_fail_closed_without_serialization_proof(
     before = source.read_bytes()
     inventory = parse_palo_alto_xml(source)
     profile = get_profile(f"paloalto-pa-{model}")
-    assert profile.target_render_support == TargetRenderSupport.ANALYSIS_ONLY
+    assert profile.target_render_support == TargetRenderSupport.SCOPED
     preview = preview_interface_mappings(inventory, [], profile)
     output = tmp_path / "candidate.xml"
     blocked = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True)
     assert blocked.status == PreviewStatus.BLOCKED
-    assert "TARGET_PROFILE_RENDERING_NOT_VERIFIED" in {finding.code for finding in blocked.plan.findings}
+    assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {finding.code for finding in preview.findings}
     assert not output.exists()
     assert source.read_bytes() == before
 
@@ -78,6 +78,6 @@ def test_each_pa5200_api_target_blocks_manual_rj45_settings(model):
             json={"mappings": [], "allow_review": True}, headers=HEADERS).json()
         assert result["status"] == "BLOCKED"
         assert not result["candidate_available"]
-        assert "TARGET_PROFILE_RENDERING_NOT_VERIFIED" in {finding["code"] for finding in result["findings"]}
+        assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {finding["code"] for finding in result["findings"]}
         assert client.get(f"/api/v1/projects/{project}/candidate/download").status_code == 409
         assert client.get(f"/api/v1/projects/{project}/source").content == source

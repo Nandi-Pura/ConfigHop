@@ -85,12 +85,12 @@ def test_each_pa3200_target_group_remains_unqualified(
     profile = get_profile(f"paloalto-pa-{model}")
     assert profile.model == f"PA-{model}"
     assert name in {port.name for port in profile.interfaces}
-    assert profile.target_render_support == TargetRenderSupport.ANALYSIS_ONLY
+    assert profile.target_render_support == TargetRenderSupport.SCOPED
     output = tmp_path / "candidate.xml"
     preview = preview_interface_mappings(inventory, [], profile)
     blocked = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True)
     assert blocked.status == PreviewStatus.BLOCKED
-    assert "TARGET_PROFILE_RENDERING_NOT_VERIFIED" in {item.code for item in blocked.plan.findings}
+    assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {item.code for item in preview.findings}
     assert not output.exists()
     assert source.read_bytes() == before
     assert sha256(source.read_bytes()).hexdigest() == before_sha
@@ -104,7 +104,7 @@ def test_each_pa3200_target_group_remains_unqualified(
     candidate = parse_palo_alto_xml(output).physical_interfaces[0]
     assert (candidate.link_speed, candidate.link_duplex, candidate.link_state) == values
     assert source.read_bytes() == before
-    assert get_profile(f"paloalto-pa-{model}").target_render_support == TargetRenderSupport.ANALYSIS_ONLY
+    assert get_profile(f"paloalto-pa-{model}").target_render_support == TargetRenderSupport.SCOPED
 
 
 @pytest.mark.parametrize("model", ("3220", "3250", "3260"))
@@ -121,7 +121,7 @@ def test_each_real_pa3200_api_target_blocks_candidate(model):
             json={"mappings": [], "allow_review": True}, headers=HEADERS).json()
         assert result["status"] == "BLOCKED"
         assert not result["candidate_available"]
-        assert "TARGET_PROFILE_RENDERING_NOT_VERIFIED" in {item["code"] for item in result["findings"]}
+        assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {item["code"] for item in result["findings"]}
         assert client.get(f"/api/v1/projects/{project}/candidate/download").status_code == 409
         assert client.get(f"/api/v1/projects/{project}/source").content == source
 

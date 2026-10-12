@@ -58,7 +58,10 @@ def _parse_interfaces(device: Element, inventory: PaloAltoInventory) -> None:
             members_by_aggregate.setdefault(group, []).append(name)
         interface = PhysicalInterface(
             name=name, mode=mode, comment=text(entry, "comment"), link_state=text(entry, "link-state"),
+            link_state_explicit=entry.find("link-state") is not None,
             link_speed=text(entry, "link-speed"), link_duplex=text(entry, "link-duplex"), aggregate_group=group,
+            link_speed_explicit=entry.find("link-speed") is not None,
+            link_duplex_explicit=entry.find("link-duplex") is not None,
             ip_addresses=ip_addresses(entry, "./layer3/ip/entry", "physical_interface", name, inventory.warnings),
             management_profile=text(entry, "./layer3/interface-management-profile"),
         )
