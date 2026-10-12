@@ -159,6 +159,8 @@ def inventory_view(inventory: PaloAltoInventory) -> InventoryView:
             nat_references=counts[ReferenceType.NAT_INTERFACE_REFERENCE],
             aggregate_memberships=counts[ReferenceType.AGGREGATE_MEMBERSHIP], child_count=len(children))
         rows.append(PhysicalInterfaceView(name=physical.name, mode=physical.mode,
+            link_state=physical.link_state, link_speed=physical.link_speed, link_duplex=physical.link_duplex,
+            link_speed_explicit=physical.link_speed_explicit, link_duplex_explicit=physical.link_duplex_explicit,
             ip_addresses=physical.ip_addresses, management_profile=physical.management_profile,
             aggregate_group=physical.aggregate_group, subinterface_count=len(children), subinterface_names=children,
             zone_names=list(dict.fromkeys(f"{ref.scope}/{ref.object_name}" for ref in references
