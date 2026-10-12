@@ -2,7 +2,7 @@ from collections import Counter, defaultdict
 
 from ..dependencies import build_dependency_index
 from ..models.dependency import ReferenceType
-from ..models.hardware import HardwareProfile
+from ..models.hardware import HardwareProfile, TargetRenderSupport
 from ..models.inventory import PaloAltoInventory
 from ..models.mapping import (
     ChangeAction, CoverageStatus, DependencyCoverage, DerivedSubinterfaceMapping,
@@ -10,6 +10,7 @@ from ..models.mapping import (
     MigrationPreview, MigrationSummary, PreviewStatus, ReferenceChange, Severity,
 )
 from .validator import validate_mappings
+from ..render_scope import scoped_render_findings
 
 
 _GAPS = {
@@ -23,8 +24,10 @@ def preview_interface_mappings(
     inventory: PaloAltoInventory, mappings: list[InterfaceMapping], target_profile: HardwareProfile,
 ) -> MigrationPreview:
     findings = validate_mappings(inventory, mappings, target_profile)
+    findings.extend(scoped_render_findings(inventory, mappings, target_profile))
     errors = {(finding.source_interface, finding.target_interface) for finding in findings if finding.severity == Severity.ERROR}
-    global_error = any(finding.code == "MULTI_DEVICE_INVENTORY_UNSUPPORTED" for finding in findings)
+    global_error = any(finding.code in {"MULTI_DEVICE_INVENTORY_UNSUPPORTED", "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED"}
+        for finding in findings)
     physical = {interface.name: interface for interface in inventory.physical_interfaces}
     children = defaultdict(list)
     for child in inventory.subinterfaces:
@@ -40,13 +43,13 @@ def preview_interface_mappings(
         if not invalid and source:
             if source.mode in _GAPS:
                 gaps.append(_GAPS[source.mode])
-                local_findings.append(MigrationFinding(code="PARTIAL_DEPENDENCY_COVERAGE", severity=Severity.WARNING,
+                local_findings.append(MigrationFinding(code="PARTIAL_DEPENDENCY_COVERAGE", severity=Severity.ERROR if target_profile.target_render_support == TargetRenderSupport.SCOPED else Severity.WARNING,
                     source_interface=mapping.source_interface, target_interface=mapping.target_interface,
                     message="Dependency coverage is partial for this interface mode."))
             if source.aggregate_group:
                 if _GAPS["aggregate_member"] not in gaps:
                     gaps.append(_GAPS["aggregate_member"])
-                local_findings.append(MigrationFinding(code="AGGREGATE_MEMBER_REVIEW", severity=Severity.WARNING,
+                local_findings.append(MigrationFinding(code="AGGREGATE_MEMBER_REVIEW", severity=Severity.ERROR if target_profile.target_render_support == TargetRenderSupport.SCOPED else Severity.WARNING,
                     source_interface=mapping.source_interface, target_interface=mapping.target_interface,
                     message="Aggregate member compatibility requires engineer review."))
         coverage = DependencyCoverage(status=CoverageStatus.PARTIAL if gaps else CoverageStatus.SUPPORTED,

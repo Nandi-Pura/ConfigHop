@@ -69,8 +69,13 @@ def render_panos_candidate(
     except OSError:
         data = b""
     plan = build_transformation_plan(data, source_inventory, preview, target_profile, allow_review=allow_review)
-    if target_profile.target_render_support != TargetRenderSupport.SUPPORTED:
+    if target_profile.target_render_support == TargetRenderSupport.ANALYSIS_ONLY:
         return _blocked(plan, "TARGET_PROFILE_RENDERING_NOT_VERIFIED")
+    if target_profile.target_render_support == TargetRenderSupport.SCOPED and (
+        plan.target_render_support != TargetRenderSupport.SCOPED.value
+        or any(op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED or op.field == "link-duplex" for op in plan.operations)
+    ):
+        return _blocked(plan, "TARGET_AUTO_ONLY_LINK_SERIALIZATION_UNVERIFIED")
     if plan.status == PreviewStatus.BLOCKED:
         return _blocked(plan)
     if source.resolve() == output.resolve():

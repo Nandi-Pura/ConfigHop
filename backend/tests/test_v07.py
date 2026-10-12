@@ -22,7 +22,8 @@ def test_registry_identity_order_and_filters():
         "PA-1410", "PA-1420", "PA-3220", "PA-3250", "PA-3260", "PA-3410",
         "PA-5220", "PA-5250", "PA-5260", "PA-5280", "PA-5410"]
     assert len(list_profiles(profile_status=ProfileStatus.SYNTHETIC)) == 1
-    assert len(list_profiles(target_render_support=TargetRenderSupport.ANALYSIS_ONLY)) == 9
+    assert len(list_profiles(target_render_support=TargetRenderSupport.ANALYSIS_ONLY)) == 2
+    assert len(list_profiles(target_render_support=TargetRenderSupport.SCOPED)) == 7
     assert len(list_profiles(domain=PlatformDomain.FIREWALL)) == 12
     assert not list_profiles(domain=PlatformDomain.SWITCH)
     assert len(list_profiles(vendor="palo_alto", series="PA-5200")) == 4
@@ -58,7 +59,7 @@ def test_profile_validation_rejects_duplicate_rules_and_missing_parent():
 def test_exact_model_ports(model, count, groups):
     p = get_profile(f"paloalto-{model.lower()}")
     assert len(p.interfaces) == count
-    assert p.target_render_support == TargetRenderSupport.ANALYSIS_ONLY
+    assert p.target_render_support == (TargetRenderSupport.ANALYSIS_ONLY if p.series == "PA-1400" else TargetRenderSupport.SCOPED)
     ports = {i.name: i for i in p.interfaces}
     for number, speeds in groups:
         assert ports[f"ethernet1/{number}"].speed_capabilities == speeds
@@ -100,12 +101,12 @@ def test_api_catalog_and_analysis_only_gate():
         assert len(catalog) == 12
         detail = client.get("/api/v1/hardware-profiles/paloalto-pa-5250").json()
         assert detail["domain"] == "firewall" and detail["software_family"] == "pan_os"
-        assert detail["target_render_support"] == "ANALYSIS_ONLY"
+        assert detail["target_render_support"] == "SCOPED"
         assert len(detail["software_support_rules"]) == 7
         caps = client.get("/api/v1/capabilities").json()
         assert len(caps["verified_hardware_profiles"]) == 11
         assert len(caps["candidate_render_profiles"]) == 2
-        assert len(caps["analysis_only_target_profiles"]) == 9
+        assert len(caps["analysis_only_target_profiles"]) == 2
         assert caps["domains"]["switch"]["backend_enabled"] is False
         project = client.post("/api/v1/projects", headers=HEADERS).json()["project_id"]
         for role, profile in (("source", "paloalto-pa-5410"), ("target", "paloalto-pa-5250")):
@@ -118,10 +119,10 @@ def test_api_catalog_and_analysis_only_gate():
         result = client.post(f"/api/v1/projects/{project}/compatibility", json=mapping, headers=HEADERS).json()
         assert result["status"] == "BLOCKED"
         assert result["platform"]["target_version_status"] == "SUPPORTED"
-        assert "TARGET_PROFILE_RENDERING_NOT_VERIFIED" in {f["code"] for f in result["findings"]}
+        assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {f["code"] for f in result["findings"]}
         candidate = client.post(f"/api/v1/projects/{project}/candidate", json={**mapping, "allow_review": True}, headers=HEADERS).json()
         assert not candidate["candidate_available"]
-        assert candidate["target_render_support"] == "ANALYSIS_ONLY"
+        assert candidate["target_render_support"] == "SCOPED"
         assert client.get(f"/api/v1/projects/{project}/candidate/download").status_code == 409
 
 

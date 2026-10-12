@@ -22,6 +22,7 @@ class SoftwareFamily(StrEnum):
 
 class TargetRenderSupport(StrEnum):
     SUPPORTED = "SUPPORTED"
+    SCOPED = "SCOPED"
     ANALYSIS_ONLY = "ANALYSIS_ONLY"
 
 
@@ -66,6 +67,8 @@ class RequiredCondition(StrEnum):
     NONE = "NONE"
     BREAKOUT_MODE = "BREAKOUT_MODE"
     MANUAL_NATIVE_PORT_SPEED = "MANUAL_NATIVE_PORT_SPEED"
+    AUTO_ONLY_LINK_FIELDS_ABSENT = "AUTO_ONLY_LINK_FIELDS_ABSENT"
+    TARGET_LINK_SERIALIZATION_UNVERIFIED = "TARGET_LINK_SERIALIZATION_UNVERIFIED"
 
 
 class HardwareInterfaceGroup(BaseModel):
