@@ -113,6 +113,8 @@
 .scope-detail-reason strong,.scope-detail-evidence strong{width:100%}
 .scope-detail-reason small{display:block;width:100%;color:var(--muted)}
 .scope-detail-evidence span{font-family:monospace;overflow-wrap:anywhere}
+.optic-rate-choice{flex-wrap:wrap;gap:8px}
+.optic-rate-choice small{color:var(--muted);font-size:10px}
 .generate-wrap{display:flex;flex-direction:column;gap:4px;min-width:0}
 .generate-wrap .generate-btn{margin:0}
 .generate-wrap small{font-size:9px;color:var(--warning)}

@@ -46,9 +46,17 @@ class TargetLinkSpeed(StrEnum):
     TWENTY_FIVE_G = "25G"
 
 
+class TargetOpticRate(StrEnum):
+    ONE_G = "1G"
+    TEN_G = "10G"
+    FORTY_G = "40G"
+    HUNDRED_G = "100G"
+
+
 class TargetInterfaceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     link_speed: TargetLinkSpeed | str | None = None
+    optic_rate: TargetOpticRate | None = None
 
 
 class InterfaceMapping(BaseModel):

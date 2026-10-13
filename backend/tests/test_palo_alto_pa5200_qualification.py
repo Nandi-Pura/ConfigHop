@@ -26,7 +26,7 @@ def test_each_pa5200_hardware_software_and_mode_boundary(model, speeds):
     assert {port.media for port in profile.interfaces[4:20]} == {"SFP"}
     assert tuple(profile.interfaces[20].speed_capabilities) == speeds
     assert all(port.candidate_support == CandidateSupport.CONDITIONAL for port in profile.interfaces[:4])
-    assert all(port.candidate_support == CandidateSupport.BLOCKED for port in profile.interfaces[4:])
+    assert all(port.candidate_support == CandidateSupport.CONDITIONAL for port in profile.interfaces[4:])
     assert all(port.parent_interface is None for port in profile.interfaces)
     assert version_support(profile.id, "11.1.4") == "SUPPORTED"
     assert version_support(profile.id, "12.1.2") == "UNSUPPORTED"

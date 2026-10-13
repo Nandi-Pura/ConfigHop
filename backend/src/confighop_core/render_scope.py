@@ -19,6 +19,10 @@ def scoped_render_findings(
         findings.append(MigrationFinding(code=code, severity=Severity.ERROR, message=message,
             source_interface=source, target_interface=destination))
 
+    def warning(code: str, message: str, source: str, destination: str) -> None:
+        findings.append(MigrationFinding(code=code, severity=Severity.WARNING, message=message,
+            source_interface=source, target_interface=destination))
+
     for interface in inventory.physical_interfaces:
         active = bool(interface.mode != "unknown" or interface.aggregate_group or interface.ip_addresses
             or interface.management_profile or interface.subinterface_names or interface.link_state_explicit
@@ -49,6 +53,24 @@ def scoped_render_findings(
             if mapping and mapping.target_settings and mapping.target_settings.link_speed is not None:
                 error("TARGET_AUTO_ONLY_LINK_SETTING_NOT_APPLICABLE",
                     "Scoped auto-only RJ45 rendering cannot set target link speed.", interface.name, destination)
+        elif port.required_condition == RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT:
+            settings = mapping.target_settings if mapping else None
+            rate = settings.optic_rate if settings else None
+            if interface.link_speed_explicit or interface.link_duplex_explicit:
+                error("TARGET_OPTICAL_LINK_SERIALIZATION_UNVERIFIED",
+                    "Explicit source speed or duplex XML requires an unqualified optical serialization decision.", interface.name, destination)
+            if settings and settings.link_speed is not None:
+                error("TARGET_OPTICAL_LINK_SETTING_NOT_APPLICABLE",
+                    "Optic rate is physical context; target link speed cannot be serialized on this path.", interface.name, destination)
+            if rate is None:
+                error("TARGET_OPTIC_RATE_REQUIRED", "Select the installed target optic rate.", interface.name, destination)
+            elif rate not in port.speed_capabilities:
+                error("TARGET_OPTIC_RATE_UNSUPPORTED", "Selected optic rate is unsupported by the target port.", interface.name, destination)
+            elif not any(item.severity == Severity.ERROR and item.source_interface == interface.name
+                         and item.target_interface == destination for item in findings):
+                warning("PHYSICAL_OPTIC_VERIFICATION_REQUIRED",
+                    "Verify that the installed target transceiver, cabling, and remote peer match the selected optic rate before deployment.",
+                    interface.name, destination)
         else:
             error("TARGET_INTERFACE_GROUP_RENDERING_UNQUALIFIED",
                 f"Target group {groups.get(destination, destination)} is outside the scoped render policy.", interface.name, destination)

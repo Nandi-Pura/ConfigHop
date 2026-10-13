@@ -40,6 +40,9 @@ def validate_mappings(
         elif target.kind != HardwareKind.PHYSICAL_ETHERNET:
             error("TARGET_INTERFACE_TYPE_UNSUPPORTED", "Target interface is not physical Ethernet.")
         chosen = mapping.target_settings.link_speed if mapping.target_settings else None
+        optic_rate = mapping.target_settings.optic_rate if mapping.target_settings else None
+        if optic_rate is not None and (not target or target.required_condition != RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT):
+            error("TARGET_OPTIC_RATE_NOT_APPLICABLE", "Optic rate context applies only to qualified optical targets.")
         if target and target.required_condition == RequiredCondition.MANUAL_NATIVE_PORT_SPEED:
             if chosen is None:
                 error("TARGET_NATIVE_PORT_MODE_REQUIRED", "Select 40G or 100G for the native QSFP target.")
@@ -51,6 +54,9 @@ def validate_mappings(
                     message="Verify optics, cabling and peer compatibility before deployment."))
         elif target and target.required_condition == RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT and chosen is not None:
             error("TARGET_AUTO_ONLY_LINK_SETTING_NOT_APPLICABLE", "Scoped auto-only RJ45 rendering cannot set target link speed.")
+        elif target and target.required_condition == RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT:
+            if chosen is not None:
+                error("TARGET_OPTICAL_LINK_SETTING_NOT_APPLICABLE", "Optic context does not configure target link speed.")
         elif mapping.target_settings is not None and chosen is not None:
             error("TARGET_INTERFACE_SETTING_NOT_APPLICABLE", "Native QSFP target speed does not apply to this interface.")
     return findings

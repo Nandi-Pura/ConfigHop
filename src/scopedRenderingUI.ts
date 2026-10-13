@@ -1,4 +1,4 @@
-import type { CompatibilityFinding, HardwarePort, HardwareProfileSummary, MigrationFinding, MigrationPreview, PhysicalInterfaceView, TargetRenderSupport } from './api/types'
+import type { CompatibilityFinding, HardwarePort, HardwareProfileSummary, InterfaceMapping, MigrationFinding, MigrationPreview, PhysicalInterfaceView, TargetOpticRate, TargetRenderSupport } from './api/types'
 
 export type RenderScope = 'SAFE_PATH' | 'REVIEW' | 'BLOCKED' | 'PENDING' | 'FULL' | 'ANALYSIS_ONLY'
 export type RowFinding = CompatibilityFinding | MigrationFinding
@@ -15,14 +15,28 @@ const findingLabels: Record<string, string> = {
   SCOPED_TARGET_DEPENDENCY_COVERAGE_INSUFFICIENT: 'Dependency Coverage Insufficient',
   TARGET_MEDIA_INCOMPATIBLE: 'Physical Media Incompatible',
   UNMODELED_INTERFACE_REFERENCE: 'Unmodeled Interface Reference',
+  TARGET_OPTIC_RATE_REQUIRED: 'Target Optic Rate Required',
+  TARGET_OPTIC_RATE_UNSUPPORTED: 'Target Optic Rate Unsupported',
+  TARGET_OPTICAL_LINK_SERIALIZATION_UNVERIFIED: 'Optical Link Serialization Unverified',
+  TARGET_OPTICAL_LINK_SETTING_NOT_APPLICABLE: 'Optical Link Setting Not Applicable',
+  PHYSICAL_OPTIC_VERIFICATION_REQUIRED: 'Verify Target Optic / Cabling',
 }
 
 export const scopeLabel = (scope: RenderScope) => labels[scope]
 export const targetRenderLabel = (support?: TargetRenderSupport) => support === 'SCOPED' ? 'Hardware Verified · Scoped Rendering' : support === 'ANALYSIS_ONLY' ? 'Hardware Verified · Analysis Only' : support === 'SUPPORTED' ? 'Hardware Verified · Renderer Supported' : 'Verified Profile'
 export const shouldShowNativeSpeedChoice = (port?: HardwarePort) => port?.required_condition === 'MANUAL_NATIVE_PORT_SPEED'
+export const shouldShowOpticRateChoice = (port?: HardwarePort) => port?.required_condition === 'OPTIC_CONTEXT_LINK_FIELDS_ABSENT'
+export const interfaceMappings = (targets: Record<string, string>, nativeSpeeds: Record<string, '40G' | '100G'>, opticRates: Record<string, TargetOpticRate>): InterfaceMapping[] =>
+  Object.entries(targets).filter(([, target]) => !!target).map(([source_interface, target_interface]) => ({ source_interface, target_interface,
+    ...(nativeSpeeds[source_interface] ? { target_settings: { link_speed: nativeSpeeds[source_interface] } } : opticRates[source_interface] ? { target_settings: { optic_rate: opticRates[source_interface] } } : {}) }))
+export const restoredOpticRates = (mappings: InterfaceMapping[]): Record<string, TargetOpticRate> => Object.fromEntries(mappings.flatMap((item) => item.target_settings?.optic_rate ? [[item.source_interface, item.target_settings.optic_rate]] : []))
+export const sameMappingDecisions = (left: InterfaceMapping[], right: InterfaceMapping[]): boolean => left.length === right.length && left.every((item) => {
+  const match = right.find((other) => other.source_interface === item.source_interface)
+  return match?.target_interface === item.target_interface && (match.target_settings?.link_speed ?? null) === (item.target_settings?.link_speed ?? null) && (match.target_settings?.optic_rate ?? null) === (item.target_settings?.optic_rate ?? null)
+})
 export const canSelectPortForAnalysis = (port: HardwarePort, support?: TargetRenderSupport) => port.candidate_support !== 'BLOCKED' || support === 'SCOPED' && port.required_condition === 'TARGET_LINK_SERIALIZATION_UNVERIFIED'
 export const sourceLinkFact = (value: string | null, explicit: boolean) => explicit ? `${value ?? '(empty)'} · explicit` : 'Default / absent'
-export const targetCapability = (condition?: HardwarePort['required_condition']) => condition === 'AUTO_ONLY_LINK_FIELDS_ABSENT' ? 'Auto-negotiation only' : condition === 'TARGET_LINK_SERIALIZATION_UNVERIFIED' ? 'Rendering qualification pending' : condition === 'MANUAL_NATIVE_PORT_SPEED' ? 'Explicit native speed required' : condition === 'BREAKOUT_MODE' ? 'Breakout mode required' : 'Profile supported'
+export const targetCapability = (condition?: HardwarePort['required_condition']) => condition === 'AUTO_ONLY_LINK_FIELDS_ABSENT' ? 'Auto-negotiation only' : condition === 'OPTIC_CONTEXT_LINK_FIELDS_ABSENT' ? 'Optic-dependent · operator rate context required' : condition === 'TARGET_LINK_SERIALIZATION_UNVERIFIED' ? 'Rendering qualification pending' : condition === 'MANUAL_NATIVE_PORT_SPEED' ? 'Explicit native speed required' : condition === 'BREAKOUT_MODE' ? 'Breakout mode required' : 'Profile supported'
 
 export function findingLabel(finding: RowFinding, source?: PhysicalInterfaceView): string {
   if (finding.code === 'TARGET_AUTO_ONLY_LINK_SERIALIZATION_UNVERIFIED' && source) {
@@ -63,6 +77,7 @@ export function rowRenderScope(profile: HardwareProfileSummary | null, port: Har
   if (findings.some((item) => item.severity === 'ERROR')) return 'BLOCKED'
   if (findings.some((item) => item.severity === 'WARNING')) return 'REVIEW'
   if (port?.required_condition === 'TARGET_LINK_SERIALIZATION_UNVERIFIED') return 'BLOCKED'
+  if (port?.required_condition === 'OPTIC_CONTEXT_LINK_FIELDS_ABSENT') return 'PENDING'
   return port?.required_condition === 'AUTO_ONLY_LINK_FIELDS_ABSENT' ? 'SAFE_PATH' : 'PENDING'
 }
 
@@ -71,6 +86,6 @@ export function scopedReadiness(profile: HardwareProfileSummary | null, preview:
   const status = preview?.overall_status ?? preview?.status
   if (!status) return { status: 'PENDING', detail: 'Awaiting current backend preview' }
   if (status === 'BLOCKED') return { status, detail: blockedRows ? `${blockedRows} interface${blockedRows === 1 ? '' : 's'} blocked · resolve mapping findings` : 'Backend findings block candidate generation' }
-  if (status === 'REVIEW_REQUIRED') return { status, detail: 'Engineer review required' }
+  if (status === 'REVIEW_REQUIRED') return { status, detail: preview?.findings.some((item) => item.code === 'PHYSICAL_OPTIC_VERIFICATION_REQUIRED') ? 'Optic context supplied · physical verification required' : 'Engineer review required' }
   return { status, detail: `${activeRows} interfaces qualified · 0 blocked` }
 }

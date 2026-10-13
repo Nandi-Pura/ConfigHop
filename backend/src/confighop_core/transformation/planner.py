@@ -4,7 +4,7 @@ from hashlib import sha256
 from ..mapping import preview_interface_mappings
 from ..palo_alto_constants import NATIVE_QSFP_SPEED_XML
 from ..models.dependency import ReferenceType
-from ..models.hardware import HardwareProfile, TargetRenderSupport
+from ..models.hardware import HardwareProfile, RequiredCondition, TargetRenderSupport
 from ..models.inventory import PaloAltoInventory
 from ..models.mapping import ChangeAction, MigrationPreview, PreviewStatus, Severity
 from ..models.transformation import OperationType, RenderFinding, TransformationOperation, TransformationPlan
@@ -67,8 +67,10 @@ def build_transformation_plan(
             decision = next((item for item in preview.mappings if item.source_interface == impact.source_interface), None)
             chosen = decision.target_settings.link_speed if decision and decision.target_settings else None
             if target_profile.target_render_support == TargetRenderSupport.SCOPED and chosen is not None:
-                error("TARGET_AUTO_ONLY_LINK_SETTING_NOT_APPLICABLE", "Scoped rendering cannot write target link speed.")
-            if chosen in NATIVE_QSFP_SPEED_XML:
+                port = next((item for item in target_profile.interfaces if item.name == impact.target_interface), None)
+                code = "TARGET_OPTICAL_LINK_SETTING_NOT_APPLICABLE" if port and port.required_condition == RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT else "TARGET_AUTO_ONLY_LINK_SETTING_NOT_APPLICABLE"
+                error(code, "Scoped rendering cannot write target link speed.")
+            if chosen in NATIVE_QSFP_SPEED_XML and target_profile.target_render_support != TargetRenderSupport.SCOPED:
                 add(OperationType.SET_INTERFACE_LINK_SPEED, source_ports[impact.source_interface].link_speed or "",
                     NATIVE_QSFP_SPEED_XML[chosen], "physical_interface", impact.source_interface, "network", "link-speed")
             for child in impact.derived_subinterfaces:

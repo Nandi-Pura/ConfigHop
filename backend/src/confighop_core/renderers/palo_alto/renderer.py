@@ -10,7 +10,7 @@ from defusedxml.common import DefusedXmlException
 
 from ...errors import ConfigParseError
 from ...palo_alto_constants import NATIVE_QSFP_SPEED_XML
-from ...models.hardware import HardwareProfile, TargetRenderSupport
+from ...models.hardware import HardwareProfile, RequiredCondition, TargetRenderSupport
 from ...models.inventory import PaloAltoInventory
 from ...models.mapping import MigrationPreview, PreviewStatus, Severity
 from ...models.transformation import (
@@ -76,6 +76,23 @@ def render_panos_candidate(
         or any(op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED or op.field == "link-duplex" for op in plan.operations)
     ):
         return _blocked(plan, "TARGET_AUTO_ONLY_LINK_SERIALIZATION_UNVERIFIED")
+    if target_profile.target_render_support == TargetRenderSupport.SCOPED:
+        source_ports = {item.name: item for item in source_inventory.physical_interfaces}
+        target_ports = {item.name: item for item in target_profile.interfaces}
+        for mapping in preview.mappings:
+            port = target_ports.get(mapping.target_interface)
+            if not port or port.required_condition != RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT:
+                continue
+            source_port = source_ports.get(mapping.source_interface)
+            settings = mapping.target_settings
+            if not source_port or source_port.link_speed_explicit or source_port.link_duplex_explicit:
+                return _blocked(plan, "TARGET_OPTICAL_LINK_SERIALIZATION_UNVERIFIED")
+            if settings and settings.link_speed is not None:
+                return _blocked(plan, "TARGET_OPTICAL_LINK_SETTING_NOT_APPLICABLE")
+            if not settings or settings.optic_rate is None:
+                return _blocked(plan, "TARGET_OPTIC_RATE_REQUIRED")
+            if settings.optic_rate not in port.speed_capabilities:
+                return _blocked(plan, "TARGET_OPTIC_RATE_UNSUPPORTED")
     if plan.status == PreviewStatus.BLOCKED:
         return _blocked(plan)
     if source.resolve() == output.resolve():
