@@ -46,6 +46,11 @@ class DependencySummary(BaseModel):
 class PhysicalInterfaceView(BaseModel):
     name: str
     mode: str
+    link_state: str | None
+    link_speed: str | None
+    link_duplex: str | None
+    link_speed_explicit: bool
+    link_duplex_explicit: bool
     ip_addresses: list[str]
     management_profile: str | None
     aggregate_group: str | None

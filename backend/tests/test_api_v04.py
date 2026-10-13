@@ -40,6 +40,24 @@ def mappings(target="ethernet1/50"):
     return {"mappings": [{"source_interface": "ethernet1/12", "target_interface": target}]}
 
 
+@pytest.mark.parametrize("settings,speed,duplex,speed_explicit,duplex_explicit", [
+    ("", None, None, False, False),
+    ("<link-speed>auto</link-speed><link-duplex>auto</link-duplex>", "auto", "auto", True, True),
+    ("<link-speed>1000</link-speed><link-duplex>full</link-duplex>", "1000", "full", True, True),
+])
+def test_inventory_exposes_link_node_presence(api, settings, speed, duplex, speed_explicit, duplex_explicit):
+    client, _store = api
+    project_id = project(client)
+    source = (f'<config version="11.1"><devices><entry name="localhost.localdomain">'
+        f'<network><interface><ethernet><entry name="ethernet1/1">{settings}'
+        f'<link-state>up</link-state><layer3/></entry></ethernet></interface></network>'
+        f'</entry></devices></config>').encode()
+    assert upload(client, project_id, source).status_code == 200
+    row = client.get(f"/api/v1/projects/{project_id}/inventory").json()["physical_interfaces"][0]
+    assert (row["link_state"], row["link_speed"], row["link_duplex"]) == ("up", speed, duplex)
+    assert (row["link_speed_explicit"], row["link_duplex_explicit"]) == (speed_explicit, duplex_explicit)
+
+
 def test_api_end_to_end(api, tmp_path):
     client, _store = api
     assert client.get("/api/v1/health").json() == {"status": "ok", "service": "confighop-api", "api_version": "v1"}

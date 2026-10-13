@@ -1,4 +1,6 @@
 export type PreviewStatus = 'READY' | 'REVIEW_REQUIRED' | 'BLOCKED'
+export type TargetRenderSupport = 'SUPPORTED' | 'SCOPED' | 'ANALYSIS_ONLY'
+export type RequiredCondition = 'NONE' | 'BREAKOUT_MODE' | 'MANUAL_NATIVE_PORT_SPEED' | 'AUTO_ONLY_LINK_FIELDS_ABSENT' | 'TARGET_LINK_SERIALIZATION_UNVERIFIED'
 export type ProjectStatus = 'EMPTY' | 'SOURCE_READY' | 'PREVIEW_READY' | 'PREVIEW_REVIEW_REQUIRED' | 'PREVIEW_BLOCKED' | 'CANDIDATE_READY'
 
 export interface ProjectState {
@@ -46,6 +48,11 @@ export interface DependencySummary {
 export interface PhysicalInterfaceView {
   name: string
   mode: string
+  link_state: string | null
+  link_speed: string | null
+  link_duplex: string | null
+  link_speed_explicit: boolean
+  link_duplex_explicit: boolean
   ip_addresses: string[]
   management_profile: string | null
   aggregate_group: string | null
@@ -61,12 +68,12 @@ export interface InventoryView {
   physical_interfaces: PhysicalInterfaceView[]
   parser_warnings: ParserWarning[]
 }
-export interface HardwareProfileSummary { id: string; vendor: string; model: string; series: string | null; profile_status: string; target_render_support?: 'SUPPORTED' | 'ANALYSIS_ONLY'; interface_count: number; verified_at: string | null; candidate_ready_interface_count: number; native_interface_count: number; conditional_interface_count: number; breakout_interface_count: number; supported_panos_trains: string[]; evidence_ids: string[] }
-export interface HardwarePort { name: string; availability: 'NATIVE' | 'NATIVE_CONDITIONAL' | 'BREAKOUT_CHILD'; candidate_support: 'SUPPORTED' | 'CONDITIONAL' | 'BLOCKED'; required_condition: string; parent_interface: string | null; speed_capabilities: string[]; media_capabilities: string[]; evidence_ids: string[] }
+export interface HardwareProfileSummary { id: string; vendor: string; model: string; series: string | null; profile_status: string; target_render_support?: TargetRenderSupport; interface_count: number; verified_at: string | null; candidate_ready_interface_count: number; native_interface_count: number; conditional_interface_count: number; breakout_interface_count: number; supported_panos_trains: string[]; evidence_ids: string[] }
+export interface HardwarePort { name: string; availability: 'NATIVE' | 'NATIVE_CONDITIONAL' | 'BREAKOUT_CHILD'; candidate_support: 'SUPPORTED' | 'CONDITIONAL' | 'BLOCKED'; required_condition: RequiredCondition; parent_interface: string | null; speed_capabilities: string[]; media_capabilities: string[]; evidence_ids: string[] }
 export interface HardwareProfileDetail extends HardwareProfileSummary { interfaces: string[]; port_details: HardwarePort[]; first_supported_release: string | null; notes: string | null }
 export interface EvidenceRecord { id: string; source_title: string; source_url: string; source_type: string; checked_at: string; scope: string; summary: string; status: string }
 export interface CompatibilityFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; message: string; source_interface: string | null; target_interface: string | null; evidence_ids: string[] }
-export interface InterfaceAssessment { source_interface: string; target_interface: string; explicit_mapping: boolean; configured_source_speed: string | null; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
+export interface InterfaceAssessment { source_interface: string; target_interface: string; explicit_mapping: boolean; configured_source_speed: string | null; source_speed_capabilities: string[]; target_speed_capabilities: string[]; source_media_capabilities: string[]; target_media_capabilities: string[]; target_availability: HardwarePort['availability'] | null; candidate_support: HardwarePort['candidate_support'] | null; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
 export interface CompatibilityAssessment { platform: { status: PreviewStatus; effective_source_version: string | null; source_version_status: string; target_version_status: string; findings: CompatibilityFinding[] }; hardware: { status: PreviewStatus; effective_assignments: InterfaceAssessment[]; findings: CompatibilityFinding[] }; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
 export interface InterfaceMapping { source_interface: string; target_interface: string; target_settings?: { link_speed: '40G' | '100G' } }
 export interface MigrationFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; scope: string; source_interface: string | null; target_interface: string | null; object_type: string | null; object_name: string | null; message: string }
@@ -103,6 +110,7 @@ export interface CandidateMetadata {
   target_profile_id: string | null
   source_profile_status: string | null
   target_profile_status: string | null
+  target_render_support: TargetRenderSupport | null
   effective_panos_version: string | null
   platform_assessment_status: string | null
   hardware_assessment_status: string | null
