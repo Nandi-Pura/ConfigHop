@@ -1,6 +1,12 @@
 export type SwitchPlatform = { vendor: string; hardware: { model: string; series: string }; software: { product: string; version: string; train: string } }
 export type SwitchPort = { id: number; source: string; mode: string; vlan: string; speed: string; lag: string; suggested: string; target: string; status: 'Mapped' | 'Review' | 'Unmapped'; notes: string }
 
+import type { SwitchEvidence, SwitchPlatformSelection } from './switch/types.ts'
+import { CX6300M_48G } from './switch/aruba/cx6300.ts'
+import { AOS_CX_RELEASES } from './switch/catalog.ts'
+import { buildSelection } from './switch/compatibility.ts'
+export type { SwitchEvidence, SwitchPlatformSelection }
+
 const models: Record<string, Record<string, string[]>> = {
   Cisco: {
     'Catalyst 9200 Series': ['C9200-24P', 'C9200-48P', 'C9200L-24P-4G', 'C9200L-48P-4G'],
@@ -35,6 +41,10 @@ export const switchCatalog: SwitchPlatform[] = Object.entries(models).flatMap(([
 export const switchSource = switchCatalog.find((item) => item.hardware.model === 'C9300-48P' && item.software.version === '17.12')!
 export const switchTarget = switchCatalog.find((item) => item.hardware.model === 'CX 6300M 48G' && item.software.version === '10.15')!
 export const switchOsLabel = (item: SwitchPlatform) => `${item.software.product} ${item.software.version}`
+
+export { ARUBA_HARDWARE, getArubaSeries, getArubaHardwareBySeries, getArubaHardwareById, getCompatibleOs, evaluateCompatibility, AOS_CX_RELEASES } from './switch/catalog.ts'
+export { compatibilityLabel, compatibilityClass, buildSelection, compareVersions, isVersionAtOrAboveFloor } from './switch/compatibility.ts'
+export const switchTargetAruba = buildSelection(CX6300M_48G, AOS_CX_RELEASES.find((release) => release.id === 'aos-cx-10.13')!)
 
 export const switchConfig = `version 17.12.3
 hostname C9300-CORE

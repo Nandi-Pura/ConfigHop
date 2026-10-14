@@ -150,3 +150,6 @@
 .deployment-blockers li strong{color:#f48b89}.deployment-blockers li span{overflow-wrap:anywhere}.deployment-validation{margin-top:8px!important}
 .deployment-limit{margin:0;line-height:1.45}
 @media(max-width:1024px){.deployment-summary{grid-template-columns:1fr}.deployment-plan{padding:9px}}
+.warn-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(244,189,47,.15);color:var(--warning);border:1px solid rgba(244,189,47,.3)}
+.error-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(242,89,89,.15);color:var(--danger);border:1px solid rgba(242,89,89,.3)}
+.unknown-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(145,160,173,.15);color:var(--muted);border:1px solid rgba(145,160,173,.3)}
