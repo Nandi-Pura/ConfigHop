@@ -1,6 +1,7 @@
 export type PreviewStatus = 'READY' | 'REVIEW_REQUIRED' | 'BLOCKED'
 export type TargetRenderSupport = 'SUPPORTED' | 'SCOPED' | 'ANALYSIS_ONLY'
-export type RequiredCondition = 'NONE' | 'BREAKOUT_MODE' | 'MANUAL_NATIVE_PORT_SPEED' | 'AUTO_ONLY_LINK_FIELDS_ABSENT' | 'TARGET_LINK_SERIALIZATION_UNVERIFIED'
+export type RequiredCondition = 'NONE' | 'BREAKOUT_MODE' | 'MANUAL_NATIVE_PORT_SPEED' | 'AUTO_ONLY_LINK_FIELDS_ABSENT' | 'OPTIC_CONTEXT_LINK_FIELDS_ABSENT' | 'TARGET_LINK_SERIALIZATION_UNVERIFIED'
+export type TargetOpticRate = '1G' | '10G' | '40G' | '100G'
 export type ProjectStatus = 'EMPTY' | 'SOURCE_READY' | 'PREVIEW_READY' | 'PREVIEW_REVIEW_REQUIRED' | 'PREVIEW_BLOCKED' | 'CANDIDATE_READY'
 
 export interface ProjectState {
@@ -75,7 +76,7 @@ export interface EvidenceRecord { id: string; source_title: string; source_url: 
 export interface CompatibilityFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; message: string; source_interface: string | null; target_interface: string | null; evidence_ids: string[] }
 export interface InterfaceAssessment { source_interface: string; target_interface: string; explicit_mapping: boolean; configured_source_speed: string | null; source_speed_capabilities: string[]; target_speed_capabilities: string[]; source_media_capabilities: string[]; target_media_capabilities: string[]; target_availability: HardwarePort['availability'] | null; candidate_support: HardwarePort['candidate_support'] | null; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
 export interface CompatibilityAssessment { platform: { status: PreviewStatus; effective_source_version: string | null; source_version_status: string; target_version_status: string; findings: CompatibilityFinding[] }; hardware: { status: PreviewStatus; effective_assignments: InterfaceAssessment[]; findings: CompatibilityFinding[] }; status: PreviewStatus; findings: CompatibilityFinding[]; evidence_ids: string[] }
-export interface InterfaceMapping { source_interface: string; target_interface: string; target_settings?: { link_speed: '40G' | '100G' } }
+export interface InterfaceMapping { source_interface: string; target_interface: string; target_settings?: { link_speed?: '40G' | '100G'; optic_rate?: TargetOpticRate } }
 export interface MigrationFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; scope: string; source_interface: string | null; target_interface: string | null; object_type: string | null; object_name: string | null; message: string }
 export interface ReferenceChange { reference_type: string; object_type: string; object_name: string; scope: string; field: string; old_value: string; new_value: string; action: string; status: string }
 export interface MappingImpact { source_interface: string; target_interface: string; mapping_status: string; derived_subinterfaces: { source_interface: string; target_interface: string; tag: number | null }[]; reference_changes: ReferenceChange[]; findings: MigrationFinding[] }

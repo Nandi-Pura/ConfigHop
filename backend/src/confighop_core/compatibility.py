@@ -214,12 +214,16 @@ def assess(inventory: PaloAltoInventory, source_profile_id: str | None, source_t
                 findings.append(_finding("TARGET_NATIVE_PORT_MODE_REQUIRED", "This native QSFP target requires explicit speed configuration that ConfigHop does not render.", source=item.name, target=target_name, evidence=target_port.evidence_ids))
         settings = decisions.get(item.name)
         chosen = settings.link_speed if settings else None
+        optic_rate = settings.optic_rate if settings else None
         native = bool(target_port and target_port.required_condition == RequiredCondition.MANUAL_NATIVE_PORT_SPEED)
+        optical = bool(target_port and target_port.required_condition == RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT)
+        if optic_rate is not None and not optical:
+            findings.append(_finding("TARGET_OPTIC_RATE_NOT_APPLICABLE", "Optic rate context applies only to qualified optical targets.", source=item.name, target=target_name))
         if native and chosen is None:
             findings.append(_finding("TARGET_NATIVE_PORT_MODE_REQUIRED", "Select 40G or 100G for the native QSFP target.", source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
         elif native and chosen not in NATIVE_QSFP_SPEED_XML:
             findings.append(_finding("TARGET_LINK_SPEED_UNSUPPORTED", "The selected speed cannot configure this native QSFP target.", source=item.name, target=target_name, evidence=NATIVE_QSFP_EVIDENCE))
-        elif settings is not None and chosen is not None and not native and not (target_port and target_port.required_condition == RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT):
+        elif settings is not None and chosen is not None and not native and not optical and not (target_port and target_port.required_condition == RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT):
             findings.append(_finding("TARGET_INTERFACE_SETTING_NOT_APPLICABLE", "Native QSFP target speed does not apply to this interface.", source=item.name, target=target_name))
         speed = _configured_speed(item.link_speed)
         if native and chosen in NATIVE_QSFP_SPEED_XML:

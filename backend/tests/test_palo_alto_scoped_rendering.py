@@ -29,7 +29,8 @@ def run(tmp_path: Path, model: str, data: bytes, destination="ethernet1/2", sett
     mappings = [InterfaceMapping(source_interface=inventory.physical_interfaces[0].name,
         target_interface=destination, target_settings=settings)] if mapped else []
     preview = preview_interface_mappings(inventory, mappings, profile)
-    result = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True)
+    result = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True,
+        source_profile_id=profile.id, source_panos_train="11.1", target_panos_train="11.1")
     assert source.read_bytes() == data
     if result.status == PreviewStatus.BLOCKED:
         assert not output.exists()
@@ -69,13 +70,13 @@ def test_target_link_setting_blocks(model, tmp_path):
 
 @pytest.mark.parametrize("model", SCOPED)
 @pytest.mark.parametrize("port", (5, 21))
-def test_optical_or_qsfp_blocks(model, port, tmp_path):
+def test_optical_or_qsfp_without_context_blocks(model, port, tmp_path):
     if model in {"3220", "3250"} and port == 21:
         return
     optical_port = 13 if model in {"3220", "3250", "3260"} and port == 5 else port
     _, preview, result, _ = run(tmp_path, model, xml(), destination=f"ethernet1/{optical_port}")
     assert result.status == PreviewStatus.BLOCKED
-    assert "TARGET_INTERFACE_GROUP_RENDERING_UNQUALIFIED" in {f.code for f in preview.findings}
+    assert "TARGET_OPTIC_RATE_REQUIRED" in {f.code for f in preview.findings}
 
 
 @pytest.mark.parametrize("model", SCOPED)

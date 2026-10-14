@@ -8,9 +8,11 @@ from xml.etree import ElementTree as ET
 from defusedxml import ElementTree as SafeET
 from defusedxml.common import DefusedXmlException
 
+from ...compatibility import AssessmentStatus, assess
 from ...errors import ConfigParseError
+from ...hardware.registry import get_profile
 from ...palo_alto_constants import NATIVE_QSFP_SPEED_XML
-from ...models.hardware import HardwareProfile, TargetRenderSupport
+from ...models.hardware import HardwareProfile, RequiredCondition, TargetRenderSupport
 from ...models.inventory import PaloAltoInventory
 from ...models.mapping import MigrationPreview, PreviewStatus, Severity
 from ...models.transformation import (
@@ -45,10 +47,14 @@ def _safe_tree(data: bytes) -> ET.Element:
     return root
 
 
-def _blocked(plan: TransformationPlan, code: str | None = None) -> CandidateRenderResult:
+def _blocked(plan: TransformationPlan, code: str | None = None,
+             findings: list[RenderFinding] | None = None) -> CandidateRenderResult:
     finding = [RenderFinding(code=code, severity=Severity.ERROR, message="Candidate generation was blocked.")] if code else []
     plan = plan.model_copy(deep=True)
     plan.findings.extend(finding)
+    for item in findings or []:
+        if not any(existing.code == item.code and existing.message == item.message for existing in plan.findings):
+            plan.findings.append(item)
     plan.status = PreviewStatus.BLOCKED
     report = CandidateValidationReport(source_sha256=plan.source_sha256,
         operations_planned=len(plan.operations), findings=plan.findings)
@@ -58,7 +64,8 @@ def _blocked(plan: TransformationPlan, code: str | None = None) -> CandidateRend
 def render_panos_candidate(
     source_path: str | Path, source_inventory: PaloAltoInventory, preview: MigrationPreview,
     target_profile: HardwareProfile, output_path: str | Path, *, allow_review: bool = False,
-    force: bool = False,
+    force: bool = False, source_profile_id: str | None = None,
+    source_panos_train: str | None = None, target_panos_train: str | None = None,
 ) -> CandidateRenderResult:
     source = Path(source_path)
     output = Path(output_path)
@@ -69,13 +76,47 @@ def render_panos_candidate(
     except OSError:
         data = b""
     plan = build_transformation_plan(data, source_inventory, preview, target_profile, allow_review=allow_review)
+    registered_target = get_profile(target_profile.id)
+    if registered_target is not None and registered_target.model_dump() != target_profile.model_dump():
+        return _blocked(plan, "TARGET_PROFILE_CONTEXT_MISMATCH")
     if target_profile.target_render_support == TargetRenderSupport.ANALYSIS_ONLY:
         return _blocked(plan, "TARGET_PROFILE_RENDERING_NOT_VERIFIED")
+    if target_profile.target_render_support == TargetRenderSupport.SCOPED:
+        if not source_profile_id or not source_panos_train or not target_panos_train:
+            return _blocked(plan, "SCOPED_RENDER_CONTEXT_REQUIRED")
+        if registered_target is None:
+            return _blocked(plan, "TARGET_PROFILE_CONTEXT_MISMATCH")
+        compatibility = assess(source_inventory, source_profile_id, source_panos_train,
+            target_profile.id, target_panos_train, preview.mappings)
+        if compatibility.status == AssessmentStatus.BLOCKED:
+            return _blocked(plan, findings=[RenderFinding(code=item.code, severity=item.severity,
+                message=f"{item.source_interface or 'source'} -> {item.target_interface or 'target'}: {item.message}"
+                if item.source_interface or item.target_interface else item.message)
+                for item in compatibility.findings if item.severity == Severity.ERROR])
+        if compatibility.status == AssessmentStatus.REVIEW_REQUIRED and not allow_review:
+            return _blocked(plan, "REVIEW_APPROVAL_REQUIRED")
     if target_profile.target_render_support == TargetRenderSupport.SCOPED and (
         plan.target_render_support != TargetRenderSupport.SCOPED.value
         or any(op.operation_type == OperationType.SET_INTERFACE_LINK_SPEED or op.field == "link-duplex" for op in plan.operations)
     ):
         return _blocked(plan, "TARGET_AUTO_ONLY_LINK_SERIALIZATION_UNVERIFIED")
+    if target_profile.target_render_support == TargetRenderSupport.SCOPED:
+        source_ports = {item.name: item for item in source_inventory.physical_interfaces}
+        target_ports = {item.name: item for item in target_profile.interfaces}
+        for mapping in preview.mappings:
+            port = target_ports.get(mapping.target_interface)
+            if not port or port.required_condition != RequiredCondition.OPTIC_CONTEXT_LINK_FIELDS_ABSENT:
+                continue
+            source_port = source_ports.get(mapping.source_interface)
+            settings = mapping.target_settings
+            if not source_port or source_port.link_speed_explicit or source_port.link_duplex_explicit:
+                return _blocked(plan, "TARGET_OPTICAL_LINK_SERIALIZATION_UNVERIFIED")
+            if settings and settings.link_speed is not None:
+                return _blocked(plan, "TARGET_OPTICAL_LINK_SETTING_NOT_APPLICABLE")
+            if not settings or settings.optic_rate is None:
+                return _blocked(plan, "TARGET_OPTIC_RATE_REQUIRED")
+            if settings.optic_rate not in port.speed_capabilities:
+                return _blocked(plan, "TARGET_OPTIC_RATE_UNSUPPORTED")
     if plan.status == PreviewStatus.BLOCKED:
         return _blocked(plan)
     if source.resolve() == output.resolve():

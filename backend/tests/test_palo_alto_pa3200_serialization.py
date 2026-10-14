@@ -88,7 +88,8 @@ def test_each_pa3200_target_group_remains_unqualified(
     assert profile.target_render_support == TargetRenderSupport.SCOPED
     output = tmp_path / "candidate.xml"
     preview = preview_interface_mappings(inventory, [], profile)
-    blocked = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True)
+    blocked = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True,
+        source_profile_id=profile.id, source_panos_train="11.1", target_panos_train="11.1")
     assert blocked.status == PreviewStatus.BLOCKED
     assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {item.code for item in preview.findings}
     assert not output.exists()
@@ -96,7 +97,8 @@ def test_each_pa3200_target_group_remains_unqualified(
     assert sha256(source.read_bytes()).hexdigest() == before_sha
 
     # This isolated copy exposes generic mechanics without changing the registry.
-    probe = profile.model_copy(update={"target_render_support": TargetRenderSupport.SUPPORTED})
+    probe = profile.model_copy(update={"id": f"test-only-pa-{model}",
+        "target_render_support": TargetRenderSupport.SUPPORTED})
     probe_preview = preview_interface_mappings(inventory, [], probe)
     rendered = render_panos_candidate(source, inventory, probe_preview, probe, output, allow_review=True)
     assert rendered.validation.valid

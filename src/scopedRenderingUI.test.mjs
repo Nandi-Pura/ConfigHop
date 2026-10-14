@@ -65,3 +65,55 @@ test('target platform card distinguishes supported, scoped, and analysis only', 
     }
   } finally { await vite.close() }
 })
+
+test('optic context stays separate from native speed through UI, payload, and saved mappings', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  const previousFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    const ui = await vite.ssrLoadModule('/src/scopedRenderingUI.ts')
+    const { OpticRateChoice } = await vite.ssrLoadModule('/src/FirewallApp.tsx')
+    const { api } = await vite.ssrLoadModule('/src/api/client.ts')
+    const optical = { required_condition: 'OPTIC_CONTEXT_LINK_FIELDS_ABSENT' }
+    const native = { required_condition: 'MANUAL_NATIVE_PORT_SPEED' }
+    const rj45 = { required_condition: 'AUTO_ONLY_LINK_FIELDS_ABSENT' }
+    assert.equal(ui.shouldShowOpticRateChoice(optical), true)
+    assert.equal(ui.shouldShowNativeSpeedChoice(optical), false)
+    assert.equal(ui.shouldShowOpticRateChoice(native), false)
+    assert.equal(ui.shouldShowNativeSpeedChoice(native), true)
+    assert.equal(ui.shouldShowOpticRateChoice(rj45), false)
+    assert.equal(ui.shouldShowNativeSpeedChoice(rj45), false)
+    for (const [rates, included, excluded] of [
+      [['1G'], ['1G'], ['10G', '40G', '100G']],
+      [['1G', '10G'], ['1G', '10G'], ['40G', '100G']],
+      [['40G'], ['40G'], ['1G', '10G', '100G']],
+      [['40G', '100G'], ['40G', '100G'], ['1G', '10G']],
+    ]) {
+      const html = renderToStaticMarkup(React.createElement(OpticRateChoice, { source: 'ethernet1/5', target: 'ethernet1/6', rates, value: '', onChange() {} }))
+      assert.ok(html.includes('Installed Target Optic Rate'))
+      assert.ok(html.includes('Select optic rate'))
+      assert.ok(html.includes('not written to candidate XML'))
+      for (const rate of included) assert.ok(html.includes(`>${rate}</option>`))
+      for (const rate of excluded) assert.ok(!html.includes(`>${rate}</option>`))
+    }
+    const mappings = ui.interfaceMappings({ 'ethernet1/5': 'ethernet1/6' }, {}, { 'ethernet1/5': '10G' })
+    assert.deepEqual(mappings[0].target_settings, { optic_rate: '10G' })
+    assert.deepEqual(ui.restoredOpticRates(JSON.parse(JSON.stringify(mappings))), { 'ethernet1/5': '10G' })
+    assert.equal(ui.sameMappingDecisions(mappings, [{ ...mappings[0], target_settings: { optic_rate: '10G', link_speed: null } }]), true)
+    assert.equal(ui.sameMappingDecisions(mappings, [{ ...mappings[0], target_settings: { optic_rate: '1G' } }]), false)
+    assert.deepEqual(ui.interfaceMappings({ 'ethernet1/5': 'ethernet1/41' }, { 'ethernet1/5': '100G' }, {} )[0].target_settings, { link_speed: '100G' })
+    await api.preview('synthetic-project', mappings)
+    assert.deepEqual(JSON.parse(calls[0].init.body).mappings[0].target_settings, { optic_rate: '10G' })
+    const preview = { overall_status: 'REVIEW_REQUIRED', impacts: [], findings: [], hardware_assessment: { effective_assignments: [], findings: [] } }
+    const warning = { code: 'PHYSICAL_OPTIC_VERIFICATION_REQUIRED', message: 'Verify target optics', severity: 'WARNING' }
+    assert.equal(ui.rowRenderScope({ target_render_support: 'SCOPED' }, optical, null, []), 'PENDING')
+    assert.equal(ui.rowRenderScope({ target_render_support: 'SCOPED' }, optical, preview, [warning]), 'REVIEW')
+    assert.equal(ui.findingLabel(warning), 'Verify Target Optic / Cabling')
+    assert.equal(ui.findingLabel({ ...warning, code: 'TARGET_OPTIC_RATE_REQUIRED', severity: 'ERROR' }), 'Target Optic Rate Required')
+    assert.equal(ui.rowRenderScope({ target_render_support: 'SCOPED' }, optical, preview, [{ ...warning, code: 'TARGET_OPTIC_RATE_REQUIRED', severity: 'ERROR' }]), 'BLOCKED')
+  } finally { globalThis.fetch = previousFetch; await vite.close() }
+})

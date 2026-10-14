@@ -88,7 +88,8 @@ def test_pa1400_qualification_probe_does_not_enable_real_target(
     assert sha256(source.read_bytes()).hexdigest() == before_sha
 
     # Isolated mechanical probe; it supplies no target XML qualification evidence.
-    probe = profile.model_copy(update={"target_render_support": TargetRenderSupport.SUPPORTED})
+    probe = profile.model_copy(update={"id": f"test-only-pa-{model}",
+        "target_render_support": TargetRenderSupport.SUPPORTED})
     rendered = render_panos_candidate(source, inventory,
         preview_interface_mappings(inventory, [], probe), probe, output, allow_review=True)
     assert rendered.validation.valid
