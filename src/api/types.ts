@@ -89,10 +89,17 @@ export interface MigrationPreview {
   overall_status?: PreviewStatus
   platform_assessment?: CompatibilityAssessment['platform'] | null
   hardware_assessment?: CompatibilityAssessment['hardware'] | null
+  deployment_plan?: DeploymentPlan | null
 }
 export interface RenderFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; message: string }
 export interface TransformationOperation { sequence: number; operation_type: string; source_value: string; target_value: string; object_type: string; object_name: string; scope: string; field: string; expected_occurrences: number }
 export interface TransformationPlan { source_sha256: string; source_inventory_sha256: string; target_profile_vendor: string; target_profile_model: string; target_profile_status: string; preview_status: PreviewStatus; operations: TransformationOperation[]; findings: RenderFinding[]; status: PreviewStatus }
+export type RequirementCategory = 'PHYSICAL_OPTIC' | 'CABLING' | 'REMOTE_PEER' | 'INTERFACE_VALIDATION' | 'DEPENDENCY_BOUNDARY' | 'CONFIGURATION_VALIDATION' | 'ROLLBACK_PREPARATION' | 'POST_CHANGE_VERIFICATION'
+export type RequirementPhase = 'PRE_CHANGE' | 'CUTOVER' | 'POST_CHANGE'
+export type VerificationStatus = 'NOT_VERIFIED' | 'ENGINEER_ACTION_REQUIRED' | 'BLOCKED' | 'INFORMATIONAL'
+export interface DeploymentRequirement { id: string; category: RequirementCategory; phase: RequirementPhase; source_interface: string | null; target_interface: string | null; title: string; description: string; status: VerificationStatus; target_port_type: string | null; target_rate_capabilities: string[]; selected_optic_rate: TargetOpticRate | null; source_configured_speed: string | null; finding_codes: string[]; evidence_ids: string[]; operator_action_required: boolean }
+export interface DeploymentBlocker { code: string; message: string; source_interface: string | null; target_interface: string | null; evidence_ids: string[] }
+export interface DeploymentPlan { source_profile_id: string; target_profile_id: string; target_render_support: TargetRenderSupport; source_panos_train: string; target_panos_train: string; assessment_status: PreviewStatus; candidate_validation: { candidate_parse_ok: boolean; expected_inventory_match: boolean; preservation_audit_ok: boolean; operations_applied: number; valid: boolean } | null; physical_verification_status: VerificationStatus; configuration_operations: TransformationOperation[]; deployment_requirements: DeploymentRequirement[]; blockers: DeploymentBlocker[]; review_findings: DeploymentBlocker[]; evidence_ids: string[]; unavailable_evidence_ids: string[] }
 export interface SemanticChange { category: string; object_type: string; object_name: string; scope: string; old_value: string; new_value: string; status: string }
 export interface SemanticMigrationDiff { changes: SemanticChange[] }
 export interface CandidateMetadata {
@@ -116,5 +123,6 @@ export interface CandidateMetadata {
   platform_assessment_status: string | null
   hardware_assessment_status: string | null
   evidence_ids: string[]
+  deployment_plan?: DeploymentPlan | null
 }
 export interface ApiError { error: { code: string; message: string } }

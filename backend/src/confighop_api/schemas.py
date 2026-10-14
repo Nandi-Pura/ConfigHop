@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from confighop_core.models.common import ParserWarning
 from confighop_core.compatibility import CompatibilityAssessment, HardwareAssessment, PlatformAssessment
+from confighop_core.deployment import DeploymentPlan
 from confighop_core.models.hardware import HardwareInterfaceGroup
 from confighop_core.models.mapping import InterfaceMapping, MigrationPreview, PreviewStatus
 from confighop_core.models.transformation import (
@@ -135,6 +136,7 @@ class PreviewView(MigrationPreview):
     platform_assessment: PlatformAssessment | None = None
     hardware_assessment: HardwareAssessment | None = None
     overall_status: str | None = None
+    deployment_plan: DeploymentPlan | None = None
 
 
 class PreviewRequest(BaseModel):
@@ -166,6 +168,7 @@ class CandidateMetadata(BaseModel):
     platform_assessment_status: str | None = None
     hardware_assessment_status: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+    deployment_plan: DeploymentPlan | None = None
 
 
 class HealthView(BaseModel):
