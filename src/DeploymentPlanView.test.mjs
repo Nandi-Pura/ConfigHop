@@ -37,6 +37,17 @@ test('migration plan separates candidate operations from unverified physical tas
     assert.match(blocked, /NOT AVAILABLE/)
     assert.match(blocked, /No candidate is implied by this preview/)
     assert.doesNotMatch(blocked, /RENAME_INTERFACE/)
+    const references = [
+      { id: 'blocked-unmodeled_interface_reference:d21f2304b65e7709903c2889e07f6e56aa3d1d9bc3b82608ed5aac9d9f17c635', description: 'Unmodeled OSPF reference' },
+      { id: 'blocked-unmodeled_interface_reference:866e3e80600e909bdaf48cfad16c5a83940a5346159451d6b8e3c89f8e69f0f7', description: 'Unmodeled BGP reference' },
+    ].map((item) => ({ ...requirement, ...item, title: 'Unmodeled Interface Reference',
+      category: 'DEPENDENCY_BOUNDARY', status: 'BLOCKED', finding_codes: ['UNMODELED_INTERFACE_REFERENCE'], evidence_ids: [] }))
+    assert.equal(new Set(references.map((item) => item.id)).size, 2)
+    const multiple = render({ ...plan, candidate_validation: null, configuration_operations: [],
+      assessment_status: 'BLOCKED', deployment_requirements: references })
+    assert.match(multiple, /Unmodeled OSPF reference/)
+    assert.match(multiple, /Unmodeled BGP reference/)
+    assert.equal((multiple.match(/Unmodeled Interface Reference/g) ?? []).length, 2)
   } finally {
     await vite.close()
   }

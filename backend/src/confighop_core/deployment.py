@@ -1,6 +1,9 @@
 """Read-only operational guidance derived from a current migration preview."""
 
+from collections import Counter
 from enum import StrEnum
+from hashlib import sha256
+import json
 
 from pydantic import BaseModel, Field
 
@@ -97,11 +100,13 @@ def build_deployment_plan(
             description: str, *, source: str | None = None, target: str | None = None,
             status: VerificationStatus = VerificationStatus.ENGINEER_ACTION_REQUIRED,
             finding_codes: list[str] | None = None, evidence_ids: list[str] | None = None,
-            optic_rate: str | None = None) -> None:
+            optic_rate: str | None = None, requirement_id: str | None = None,
+            mapping_suffix: str | None = None) -> None:
         port = ports.get(target or "")
         ids = list(dict.fromkeys(evidence_ids or []))
         evidence.update(ids)
-        requirements.append(DeploymentRequirement(id=f"{key}:{source or 'project'}:{target or 'project'}",
+        base_id = f"{key}:{source or 'project'}:{target or 'project'}"
+        requirements.append(DeploymentRequirement(id=requirement_id or (f"{base_id}:{mapping_suffix}" if mapping_suffix else base_id),
             category=category, phase=phase, source_interface=source, target_interface=target,
             title=title, description=description, status=status,
             target_port_type="/".join(port.media_capabilities) if port else None,
@@ -119,8 +124,15 @@ def build_deployment_plan(
     add("prepare-rollback", RequirementCategory.ROLLBACK_PREPARATION, RequirementPhase.PRE_CHANGE,
         "Rollback Plan Prepared", "Confirm an approved rollback procedure and retained source configuration backup before deployment.")
 
+    mapping_counts = Counter((item.source_interface, item.target_interface) for item in mappings)
+    seen_mappings: set[str] = set()
     for mapping in sorted(mappings, key=lambda item: (item.source_interface, item.target_interface)):
         source, target = mapping.source_interface, mapping.target_interface
+        mapping_data = json.dumps(mapping.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        if mapping_data in seen_mappings:
+            continue
+        seen_mappings.add(mapping_data)
+        mapping_suffix = sha256(mapping_data.encode("utf-8")).hexdigest() if mapping_counts[(source, target)] > 1 else None
         port = ports.get(target)
         if not port:
             continue
@@ -130,33 +142,33 @@ def build_deployment_plan(
             rate_label = rate or "unselected"
             add("verify-transceiver", RequirementCategory.PHYSICAL_OPTIC, RequirementPhase.PRE_CHANGE,
                 "Verify Target Transceiver", f"Verify the installed or intended transceiver on {target} supports {rate_label} operation.",
-                source=source, target=target, evidence_ids=ids, optic_rate=rate,
+                source=source, target=target, evidence_ids=ids, optic_rate=rate, mapping_suffix=mapping_suffix,
                 finding_codes=["PHYSICAL_OPTIC_VERIFICATION_REQUIRED"] if rate else ["TARGET_OPTIC_RATE_REQUIRED"])
             add("verify-optic-rate", RequirementCategory.PHYSICAL_OPTIC, RequirementPhase.PRE_CHANGE,
                 "Verify Selected Optic Rate", f"Confirm the selected {rate_label} optic rate against the installed target transceiver; actual runtime speed is unknown.",
-                source=source, target=target, evidence_ids=ids, optic_rate=rate)
+                source=source, target=target, evidence_ids=ids, optic_rate=rate, mapping_suffix=mapping_suffix)
             add("verify-cabling", RequirementCategory.CABLING, RequirementPhase.PRE_CHANGE,
                 "Verify Cabling Compatibility", f"Confirm cable, connector, and optical medium for {target} and its intended {rate_label} transceiver.",
-                source=source, target=target, evidence_ids=ids, optic_rate=rate)
+                source=source, target=target, evidence_ids=ids, optic_rate=rate, mapping_suffix=mapping_suffix)
             add("verify-peer", RequirementCategory.REMOTE_PEER, RequirementPhase.PRE_CHANGE,
                 "Verify Remote Peer", f"Confirm the connected peer supports the planned medium and {rate_label} optic rate for {target}; peer details are unknown.",
-                source=source, target=target, optic_rate=rate)
+                source=source, target=target, optic_rate=rate, mapping_suffix=mapping_suffix)
             add("baseline-interface", RequirementCategory.INTERFACE_VALIDATION, RequirementPhase.PRE_CHANGE,
                 "Record Source Interface Baseline", f"Record the observed state of {source} before cutover; ConfigHop has no live telemetry.",
-                source=source, target=target, optic_rate=rate)
+                source=source, target=target, optic_rate=rate, mapping_suffix=mapping_suffix)
         elif port.required_condition == RequiredCondition.AUTO_ONLY_LINK_FIELDS_ABSENT:
             add("verify-rj45-peer", RequirementCategory.REMOTE_PEER, RequirementPhase.CUTOVER,
                 "Verify RJ45 Link Negotiation", f"Confirm target {target} and the connected peer negotiate an operational link during cutover.",
-                source=source, target=target, evidence_ids=ids)
+                source=source, target=target, evidence_ids=ids, mapping_suffix=mapping_suffix)
         else:
             continue
         add("verify-interface", RequirementCategory.POST_CHANGE_VERIFICATION, RequirementPhase.POST_CHANGE,
             "Verify Interface State", f"Check the observed link state and interface errors on {target} after cutover; no runtime value is assumed.",
-            source=source, target=target, evidence_ids=ids, optic_rate=rate)
+            source=source, target=target, evidence_ids=ids, optic_rate=rate, mapping_suffix=mapping_suffix)
         if source in source_ports and source_ports[source].mode == "layer3":
             add("verify-layer3", RequirementCategory.POST_CHANGE_VERIFICATION, RequirementPhase.POST_CHANGE,
                 "Verify Layer3 Connectivity", f"Validate the intended Layer3 connectivity through {target} after cutover.",
-                source=source, target=target)
+                source=source, target=target, mapping_suffix=mapping_suffix)
 
     seen: set[tuple[str, str | None, str | None, str]] = set()
     for finding in [*compatibility.findings, *preview.findings,
@@ -176,11 +188,13 @@ def build_deployment_plan(
             evidence_ids=ids)
         (blockers if finding.severity == Severity.ERROR else review_findings).append(item)
         if finding.severity == Severity.ERROR and (finding.code.startswith("SCOPED_TARGET_") or finding.code == "UNMODELED_INTERFACE_REFERENCE"):
+            digest = sha256(json.dumps(key, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
             add(f"blocked-{finding.code.lower()}", RequirementCategory.DEPENDENCY_BOUNDARY,
                 RequirementPhase.PRE_CHANGE, finding.code.replace("_", " ").title(),
                 f"Resolve the unsupported migration scope: {finding.message}",
                 source=source, target=target,
-                status=VerificationStatus.BLOCKED, finding_codes=[finding.code], evidence_ids=ids)
+                status=VerificationStatus.BLOCKED, finding_codes=[finding.code], evidence_ids=ids,
+                requirement_id=f"blocked-{finding.code.lower()}:{digest}")
 
     status = PreviewStatus.BLOCKED if ((candidate is not None and candidate.status == PreviewStatus.BLOCKED)
         or compatibility.status == PreviewStatus.BLOCKED or preview.status == PreviewStatus.BLOCKED) else (

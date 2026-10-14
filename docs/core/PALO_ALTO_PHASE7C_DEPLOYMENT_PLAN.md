@@ -91,3 +91,7 @@ Synthetic tests cover optical and RJ45 requirements, fixed and mixed rate contex
 ## 19. Next milestone
 
 Gather controlled exact-device evidence for currently unresolved optical serialization behavior, then review the evidence gaps before considering any renderer expansion. No such expansion is part of Phase 7C.
+
+## Deterministic requirement identity
+
+Finding-derived dependency requirements use a SHA-256 ID from the finding's code, source interface, target interface, and message. This is the same semantic identity used to deduplicate repeated findings. Distinct OSPF and BGP unmodeled references therefore remain separate; identical findings produce one requirement. Ordinary one-to-one mapping requirements keep their existing IDs. When a blocked preview contains conflicting decisions for the same interface pair, each distinct mapping receives a deterministic suffix; an exact duplicate decision produces no duplicate physical task. IDs provide stable React row keys. This identity change does not affect migration decisions, candidate XML, or physical verification status.

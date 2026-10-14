@@ -6,11 +6,11 @@ from fastapi.testclient import TestClient
 from confighop_api.main import create_app
 from confighop_api.services import ProjectStore
 from confighop_core import parse_palo_alto_xml, preview_interface_mappings, render_panos_candidate
-from confighop_core.compatibility import assess
+from confighop_core.compatibility import Finding, assess
 from confighop_core.deployment import RequirementCategory, VerificationStatus, build_deployment_plan
 from confighop_core.evidence.registry import EVIDENCE
 from confighop_core.hardware.registry import get_profile
-from confighop_core.models.mapping import InterfaceMapping, PreviewStatus, TargetInterfaceSettings
+from confighop_core.models.mapping import InterfaceMapping, MigrationFinding, PreviewStatus, Severity, TargetInterfaceSettings
 
 
 def synthetic_xml(port: int, *, mode: str = "layer3", fields: str = "", extra: str = "") -> bytes:
@@ -56,6 +56,8 @@ def test_optical_plan_separates_valid_candidate_and_physical_work(tmp_path):
     assert "PHYSICAL_OPTIC_VERIFICATION_REQUIRED" in {item.code for item in plan.review_findings}
     assert plan.physical_verification_status == VerificationStatus.NOT_VERIFIED
     assert plan.configuration_operations == candidate.plan.operations
+    assert next(item.id for item in plan.deployment_requirements if item.title == "Verify Target Transceiver") == "verify-transceiver:ethernet1/5:ethernet1/6"
+    assert next(item.id for item in plan.deployment_requirements if item.title == "Rollback Plan Prepared") == "prepare-rollback:project:project"
     assert {"Verify Target Transceiver", "Verify Selected Optic Rate", "Verify Cabling Compatibility",
         "Verify Remote Peer", "Verify Interface State", "Rollback Plan Prepared"} <= {
             item.title for item in plan.deployment_requirements}
@@ -94,6 +96,7 @@ def test_missing_rate_and_rj45_paths(tmp_path):
     plan, _, _ = case(tmp_path, "5220", 1, 2)
     assert not any(item.category == RequirementCategory.PHYSICAL_OPTIC for item in plan.deployment_requirements)
     assert any(item.title == "Verify RJ45 Link Negotiation" for item in plan.deployment_requirements)
+    assert next(item.id for item in plan.deployment_requirements if item.title == "Verify RJ45 Link Negotiation") == "verify-rj45-peer:ethernet1/1:ethernet1/2"
 
 
 def test_blocked_media_and_dependencies_stay_blocked(tmp_path):
@@ -118,6 +121,85 @@ def test_renderer_only_unmodeled_reference_is_in_deployment_blockers(tmp_path):
     assert "UNMODELED_INTERFACE_REFERENCE" in {item.code for item in plan.blockers}
     assert any(item.category == RequirementCategory.DEPENDENCY_BOUNDARY and item.status == VerificationStatus.BLOCKED
         for item in plan.deployment_requirements)
+
+
+def test_distinct_unmodeled_ospf_bgp_findings_have_unique_requirement_ids(tmp_path):
+    extra = ('<dynamic-routing><ospf><interface>ethernet1/5</interface></ospf>'
+        '<bgp><interface>ethernet1/5</interface></bgp></dynamic-routing>')
+    plan, candidate, output = case(tmp_path, "5220", 5, 6, "10G", extra=extra, render=True)
+    findings = [item for item in candidate.plan.findings if item.code == "UNMODELED_INTERFACE_REFERENCE"]
+    blockers = [item for item in plan.blockers if item.code == "UNMODELED_INTERFACE_REFERENCE"]
+    requirements = [item for item in plan.deployment_requirements
+        if "UNMODELED_INTERFACE_REFERENCE" in item.finding_codes]
+    assert candidate.status == PreviewStatus.BLOCKED and not output.exists()
+    assert len(findings) == len(blockers) == len(requirements) == 2
+    assert any("ospf" in item.message for item in blockers)
+    assert any("bgp" in item.message for item in blockers)
+    assert all(item.category == RequirementCategory.DEPENDENCY_BOUNDARY
+        and item.status == VerificationStatus.BLOCKED for item in requirements)
+    assert len({item.id for item in requirements}) == 2
+    ids = [item.id for item in plan.deployment_requirements]
+    assert len(ids) == len(set(ids))
+
+
+def test_finding_identity_deduplicates_exact_matches_and_survives_reordering(tmp_path):
+    source = tmp_path / "source.xml"
+    source.write_bytes(synthetic_xml(1))
+    inventory = parse_palo_alto_xml(source)
+    profile = get_profile("paloalto-pa-5220")
+    mapping = InterfaceMapping(source_interface="ethernet1/1", target_interface="ethernet1/2")
+    preview = preview_interface_mappings(inventory, [mapping], profile)
+    compatibility = assess(inventory, profile.id, "11.1", profile.id, "11.1", [mapping])
+    code = "SCOPED_TARGET_DEPENDENCY_COVERAGE_INSUFFICIENT"
+    cases = [("ethernet1/1", "ethernet1/2", "OSPF reference"),
+        ("ethernet1/1", "ethernet1/2", "BGP reference"),
+        ("ethernet1/3", "ethernet1/2", "OSPF reference"),
+        ("ethernet1/1", "ethernet1/4", "OSPF reference")]
+    compatibility.findings = [Finding(code=code, severity=Severity.ERROR, source_interface=source,
+        target_interface=target, message=message) for source, target, message in cases]
+    preview.findings = [MigrationFinding(code=code, severity=Severity.ERROR, source_interface=cases[0][0],
+        target_interface=cases[0][1], message=cases[0][2])]
+    def build():
+        return build_deployment_plan(inventory, profile.id, "11.1", profile, "11.1", [mapping],
+            preview, compatibility)
+    plan = build()
+    requirements = [item for item in plan.deployment_requirements if code in item.finding_codes]
+    assert len(requirements) == len(plan.blockers) == len(cases)
+    assert {(item.source_interface, item.target_interface, item.message) for item in plan.blockers} == set(cases)
+    assert len({item.id for item in requirements}) == len(cases)
+    semantic_ids = {(item.source_interface, item.target_interface, item.description): item.id
+        for item in requirements}
+    assert semantic_ids == {(item.source_interface, item.target_interface, item.description): item.id
+        for item in build().deployment_requirements if code in item.finding_codes}
+    compatibility.findings.reverse()
+    reordered = build()
+    assert semantic_ids == {(item.source_interface, item.target_interface, item.description): item.id
+        for item in reordered.deployment_requirements if code in item.finding_codes}
+
+
+def test_conflicting_duplicate_mapping_decisions_keep_unique_requirement_ids(tmp_path):
+    source = tmp_path / "source.xml"
+    source.write_bytes(synthetic_xml(5))
+    inventory = parse_palo_alto_xml(source)
+    profile = get_profile("paloalto-pa-5220")
+    mappings = [InterfaceMapping(source_interface="ethernet1/5", target_interface="ethernet1/6",
+        target_settings=TargetInterfaceSettings(optic_rate=rate)) for rate in ("1G", "10G")]
+    preview = preview_interface_mappings(inventory, mappings, profile)
+    compatibility = assess(inventory, profile.id, "11.1", profile.id, "11.1", mappings)
+    assert preview.status == PreviewStatus.BLOCKED
+    def build(decisions):
+        return build_deployment_plan(inventory, profile.id, "11.1", profile, "11.1", decisions,
+            preview, compatibility)
+    plan = build(mappings)
+    rates = {item.selected_optic_rate: item.id for item in plan.deployment_requirements
+        if item.title == "Verify Selected Optic Rate"}
+    assert set(rates) == {"1G", "10G"} and rates["1G"] != rates["10G"]
+    ids = [item.id for item in plan.deployment_requirements]
+    assert len(ids) == len(set(ids))
+    assert rates == {item.selected_optic_rate: item.id for item in build(list(reversed(mappings))).deployment_requirements
+        if item.title == "Verify Selected Optic Rate"}
+    same = build([mappings[0], mappings[0].model_copy(deep=True)])
+    assert len([item for item in same.deployment_requirements if item.title == "Verify Selected Optic Rate"]) == 1
 
 
 def test_api_preview_and_candidate_plan_and_invalidation():
