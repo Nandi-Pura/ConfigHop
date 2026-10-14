@@ -48,14 +48,16 @@ def test_each_target_group_remains_fail_closed_without_serialization_proof(
     assert profile.target_render_support == TargetRenderSupport.SCOPED
     preview = preview_interface_mappings(inventory, [], profile)
     output = tmp_path / "candidate.xml"
-    blocked = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True)
+    blocked = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True,
+        source_profile_id=profile.id, source_panos_train="11.1", target_panos_train="11.1")
     assert blocked.status == PreviewStatus.BLOCKED
     assert "SCOPED_TARGET_ACTIVE_INTERFACE_MAPPING_REQUIRED" in {finding.code for finding in preview.findings}
     assert not output.exists()
     assert source.read_bytes() == before
 
     # A test-only override exposes what the unchanged generic renderer would preserve.
-    probe = profile.model_copy(update={"target_render_support": TargetRenderSupport.SUPPORTED})
+    probe = profile.model_copy(update={"id": f"test-only-pa-{model}",
+        "target_render_support": TargetRenderSupport.SUPPORTED})
     probe_preview = preview_interface_mappings(inventory, [], probe)
     rendered = render_panos_candidate(source, inventory, probe_preview, probe, output, allow_review=True)
     assert rendered.validation.valid

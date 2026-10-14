@@ -45,7 +45,8 @@ def case(tmp_path: Path, model: str, port: int, rate: str | None, *, fields: str
     mapping = InterfaceMapping(source_interface=f"ethernet1/{source_port}", target_interface=f"ethernet1/{port}", target_settings=settings)
     preview = preview_interface_mappings(inventory, [mapping], profile)
     compatibility = assess(inventory, profile.id, "11.1", profile.id, "11.1", [mapping])
-    result = render_panos_candidate(source, inventory, preview, profile, output, allow_review=allow_review)
+    result = render_panos_candidate(source, inventory, preview, profile, output, allow_review=allow_review,
+        source_profile_id=profile.id, source_panos_train="11.1", target_panos_train="11.1")
     assert source.read_bytes() == data
     if result.status == PreviewStatus.BLOCKED:
         assert not output.exists()
@@ -91,7 +92,8 @@ def test_valid_context_requires_review_and_preserves_link_xml(model, port, rate,
     denied = tmp_path / "unreviewed.xml"
     source = tmp_path / "source.xml"
     profile = get_profile(f"paloalto-pa-{model}")
-    unreviewed = render_panos_candidate(source, parse_palo_alto_xml(source), preview, profile, denied)
+    unreviewed = render_panos_candidate(source, parse_palo_alto_xml(source), preview, profile, denied,
+        source_profile_id=profile.id, source_panos_train="11.1", target_panos_train="11.1")
     assert unreviewed.status == PreviewStatus.BLOCKED and not denied.exists()
 
 

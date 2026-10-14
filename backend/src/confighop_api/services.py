@@ -346,7 +346,9 @@ async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMa
     if project.preview.status == PreviewStatus.BLOCKED or project.preview.status == PreviewStatus.REVIEW_REQUIRED and not allow_review:
         return blocked_review_metadata(project)
     project.candidate = await asyncio.to_thread(render_panos_candidate, project.source_path, inventory,
-        project.preview, profile, project.candidate_path, allow_review=allow_review)
+        project.preview, profile, project.candidate_path, allow_review=allow_review,
+        source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
+        target_panos_train=project.target_panos_train)
     return candidate_metadata(project)
 
 

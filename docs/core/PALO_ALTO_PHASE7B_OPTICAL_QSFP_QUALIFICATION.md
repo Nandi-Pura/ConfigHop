@@ -42,6 +42,10 @@ Missing or unsupported optic rate, explicit source `auto` or manual speed/duplex
 
 PA-5410 `MANUAL_NATIVE_PORT_SPEED` remains a configuration decision that serializes a qualified 40G or 100G link speed. Phase 7B `optic_rate` is separate physical context and never serializes a link setting.
 
+## Core renderer compatibility enforcement
+
+The Core renderer independently re-evaluates compatibility before SCOPED candidate creation. Direct calls must supply the selected source hardware profile ID, source PAN-OS train, and target PAN-OS train; missing context blocks rendering. A mapping preview alone does not check source-profile-dependent physical media or speed. Hardware, media, speed, and platform errors block even with `allow_review=True`; that flag permits review warnings only. The source hardware identity is selected by the operator and cannot be proven from PAN-OS XML alone. This guard does not change optical non-interference: `optic_rate` remains deployment context and creates no link-speed or link-duplex XML.
+
 ## Support status and next phase
 
 PA-3410 and PA-5410 remain `SUPPORTED`; PA-3200 and PA-5200 remain `SCOPED`; PA-1410 and PA-1420 remain `ANALYSIS_ONLY`. The PAN-OS matrices, same-train rule, API namespace, and version remain unchanged. The recommended next milestone is Phase 7C: Optical/QSFP Hardening & Deployment Plan, covering deployment requirement presentation, migration-plan quality, aggregate/Layer2 boundaries, and an optional controlled device-validation package. It is outside Phase 7B.

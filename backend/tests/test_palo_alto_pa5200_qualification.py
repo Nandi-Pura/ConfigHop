@@ -43,7 +43,8 @@ def test_each_pa5200_generic_renderer_mechanics_without_promotion(model, tmp_pat
     before = source.read_bytes()
     inventory = parse_palo_alto_xml(source)
     profile = get_profile(f"paloalto-pa-{model}")
-    qualification_profile = profile.model_copy(update={"target_render_support": TargetRenderSupport.SUPPORTED})
+    qualification_profile = profile.model_copy(update={"id": f"test-only-pa-{model}",
+        "target_render_support": TargetRenderSupport.SUPPORTED})
     mappings = [InterfaceMapping(source_interface="ethernet1/5", target_interface="ethernet1/9"),
                 InterfaceMapping(source_interface="ethernet1/6", target_interface="ethernet1/10")]
     preview = preview_interface_mappings(inventory, mappings, qualification_profile)

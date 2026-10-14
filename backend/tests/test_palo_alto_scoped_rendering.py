@@ -29,7 +29,8 @@ def run(tmp_path: Path, model: str, data: bytes, destination="ethernet1/2", sett
     mappings = [InterfaceMapping(source_interface=inventory.physical_interfaces[0].name,
         target_interface=destination, target_settings=settings)] if mapped else []
     preview = preview_interface_mappings(inventory, mappings, profile)
-    result = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True)
+    result = render_panos_candidate(source, inventory, preview, profile, output, allow_review=True,
+        source_profile_id=profile.id, source_panos_train="11.1", target_panos_train="11.1")
     assert source.read_bytes() == data
     if result.status == PreviewStatus.BLOCKED:
         assert not output.exists()
