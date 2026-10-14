@@ -18,7 +18,7 @@ from .schemas import (
 )
 from .services import (
     PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, generate_candidate, inventory_view,
-    profile_detail, profile_summary, project_view, require_inventory, require_live, select_profile,
+    profile_detail, profile_summary, project_deployment_plan, project_view, require_inventory, require_live, select_profile,
     select_source_profile, assess_project,
     update_preview, upload_source,
 )
@@ -187,7 +187,8 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
             preview = await update_preview(project, body.mappings)
             return PreviewView(**preview.model_dump(), platform_assessment=project.compatibility.platform if project.compatibility else None,
                 hardware_assessment=project.compatibility.hardware if project.compatibility else None,
-                overall_status=_overall(preview.status.value, project.compatibility))
+                overall_status=_overall(preview.status.value, project.compatibility),
+                deployment_plan=project_deployment_plan(project))
 
     @app.get("/api/v1/projects/{project_id}/preview", response_model=PreviewView)
     async def get_preview(project_id: str, request: Request):
@@ -198,7 +199,8 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
                 raise ServiceError("PREVIEW_NOT_AVAILABLE", "Preview is not available.", 409)
             return PreviewView(**project.preview.model_dump(), platform_assessment=project.compatibility.platform if project.compatibility else None,
                 hardware_assessment=project.compatibility.hardware if project.compatibility else None,
-                overall_status=_overall(project.preview.status.value, project.compatibility))
+                overall_status=_overall(project.preview.status.value, project.compatibility),
+                deployment_plan=project_deployment_plan(project))
 
     @app.post("/api/v1/projects/{project_id}/candidate", response_model=CandidateMetadata)
     async def post_candidate(project_id: str, body: CandidateRequest, request: Request):

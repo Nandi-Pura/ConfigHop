@@ -12,6 +12,7 @@ from fastapi import Request
 
 from confighop_core import parse_palo_alto_xml, preview_interface_mappings, render_panos_candidate
 from confighop_core.compatibility import CompatibilityAssessment, assess
+from confighop_core.deployment import DeploymentPlan, build_deployment_plan
 from confighop_core.hardware.registry import get_profile
 from confighop_core.hardware.palo_alto import SYNTHETIC
 from confighop_core.dependencies import build_dependency_index
@@ -311,7 +312,8 @@ def candidate_metadata(project: ProjectSession) -> CandidateMetadata:
             effective_panos_version=project.compatibility.platform.effective_source_version,
             platform_assessment_status=project.compatibility.platform.status.value,
             hardware_assessment_status=project.compatibility.hardware.status.value,
-            evidence_ids=project.compatibility.evidence_ids)
+            evidence_ids=project.compatibility.evidence_ids,
+            deployment_plan=project_deployment_plan(project))
     if result is None or project.preview is None:
         raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Candidate result is not available.", 409)
     overall = result.status
@@ -329,7 +331,20 @@ def candidate_metadata(project: ProjectSession) -> CandidateMetadata:
         effective_panos_version=project.compatibility.platform.effective_source_version if project.compatibility else None,
         platform_assessment_status=project.compatibility.platform.status.value if project.compatibility else None,
         hardware_assessment_status=project.compatibility.hardware.status.value if project.compatibility else None,
-        evidence_ids=project.compatibility.evidence_ids if project.compatibility else [])
+        evidence_ids=project.compatibility.evidence_ids if project.compatibility else [],
+        deployment_plan=project_deployment_plan(project))
+
+
+def project_deployment_plan(project: ProjectSession) -> DeploymentPlan | None:
+    if (project.inventory is None or project.preview is None or project.compatibility is None
+            or not project.source_profile_id or not project.source_panos_train or not project.target_panos_train):
+        return None
+    profile = get_profile(project.profile_id or "")
+    if profile is None:
+        return None
+    return build_deployment_plan(project.inventory, project.source_profile_id, project.source_panos_train,
+        profile, project.target_panos_train, project.mappings, project.preview, project.compatibility,
+        project.candidate)
 
 
 async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMapping], allow_review: bool) -> CandidateMetadata:
@@ -340,9 +355,10 @@ async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMa
     if profile.profile_status == ProfileStatus.VERIFIED:
         project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
             project.profile_id, project.target_panos_train, mappings)
-        if project.compatibility.status.value == "BLOCKED" or (project.compatibility.status.value == "REVIEW_REQUIRED" and not allow_review):
-            return candidate_metadata(project) if project.compatibility.status.value == "BLOCKED" else blocked_review_metadata(project)
     project.preview = await asyncio.to_thread(preview_interface_mappings, inventory, mappings, profile)
+    if project.compatibility and (project.compatibility.status.value == "BLOCKED" or
+            project.compatibility.status.value == "REVIEW_REQUIRED" and not allow_review):
+        return candidate_metadata(project) if project.compatibility.status.value == "BLOCKED" else blocked_review_metadata(project)
     if project.preview.status == PreviewStatus.BLOCKED or project.preview.status == PreviewStatus.REVIEW_REQUIRED and not allow_review:
         return blocked_review_metadata(project)
     project.candidate = await asyncio.to_thread(render_panos_candidate, project.source_path, inventory,
@@ -367,4 +383,5 @@ def blocked_review_metadata(project: ProjectSession) -> CandidateMetadata:
         effective_panos_version=compatibility.platform.effective_source_version if compatibility else None,
         platform_assessment_status=compatibility.platform.status.value if compatibility else None,
         hardware_assessment_status=compatibility.hardware.status.value if compatibility else None,
-        evidence_ids=compatibility.evidence_ids if compatibility else [])
+        evidence_ids=compatibility.evidence_ids if compatibility else [],
+        deployment_plan=project_deployment_plan(project))

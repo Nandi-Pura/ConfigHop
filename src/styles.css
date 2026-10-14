@@ -128,3 +128,25 @@
 .evidence-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
 .evidence-item{border-top:1px solid var(--border);padding:12px 0;font-size:12px}
 .evidence-item strong,.evidence-item span{display:block}.evidence-item span{color:var(--muted);margin-top:4px}.evidence-item p{margin:7px 0}.evidence-item a{color:var(--accent)}
+.deployment-plan{padding:12px;min-width:0;color:var(--text);font-size:11px}
+.deployment-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}
+.deployment-summary>div{display:flex;flex-direction:column;gap:4px;min-width:0;padding:9px 11px;border:1px solid var(--border);border-radius:4px;background:#0b151d}
+.deployment-summary span,.deployment-section p,.deployment-limit{color:var(--muted)}
+.deployment-summary strong{font-size:12px;overflow-wrap:anywhere}
+.deployment-section{border-top:1px solid var(--border);padding:12px 0;min-width:0}
+.deployment-section h4,.deployment-section h5{margin:0 0 6px;font-size:12px}
+.deployment-section h5{margin-top:10px;color:var(--accent)}
+.deployment-section p{margin:0 0 9px}
+.deployment-table-wrap{max-width:100%;overflow-x:auto;border:1px solid var(--border);border-radius:4px}
+.deployment-table-wrap table{width:100%;min-width:760px;border-collapse:collapse;text-align:left}
+.deployment-table-wrap th,.deployment-table-wrap td{padding:7px 9px;border-bottom:1px solid var(--border);vertical-align:top;overflow-wrap:anywhere}
+.deployment-table-wrap th{background:#122331;color:var(--muted);font-size:10px;font-weight:600}
+.deployment-table-wrap td small{display:block;margin-top:4px;color:var(--muted);line-height:1.35}
+.deployment-table-wrap td:first-child{min-width:160px}
+.deployment-evidence{display:flex;flex-wrap:wrap;gap:5px}.deployment-evidence button{padding:2px 0;text-align:left;overflow-wrap:anywhere}
+.deployment-status{display:inline-block;padding:3px 6px;border:1px solid var(--border);border-radius:3px;white-space:nowrap;font-size:10px}
+.deployment-status-blocked{color:#f48b89;border-color:#8b3938}.deployment-status-engineer_action_required{color:#f6bc66;border-color:#8b6827}
+.deployment-blockers ul{margin:0;padding:0;list-style:none}.deployment-blockers li{display:flex;flex-wrap:wrap;gap:6px 12px;padding:7px 0;border-top:1px solid var(--border)}
+.deployment-blockers li strong{color:#f48b89}.deployment-blockers li span{overflow-wrap:anywhere}.deployment-validation{margin-top:8px!important}
+.deployment-limit{margin:0;line-height:1.45}
+@media(max-width:1024px){.deployment-summary{grid-template-columns:1fr}.deployment-plan{padding:9px}}
