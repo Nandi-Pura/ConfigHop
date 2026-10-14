@@ -17,7 +17,7 @@ test('Firewall remains the default workflow and Switch has its own sections', as
     assert.ok(!firewall.includes('brand-mark'))
     assert.ok(!firewall.includes('ConfigMorph'))
     for (const heading of ['Migration Setup', 'Source Configuration', 'Source Inventory', 'Interface &amp; Zone Mapping', 'Semantic Mapping', 'Migration Readiness', 'Migration Results']) assert.ok(firewall.includes(heading), heading)
-    for (const heading of ['Interface Mapping', 'Semantic Mapping', 'IOS-XE 17.12', 'AOS-CX 10.15', 'C9300-48P', 'CX 6300M 48G', 'Huawei']) assert.ok(switchPage.includes(heading), heading)
+    for (const heading of ['Interface Mapping', 'Semantic Mapping', 'IOS-XE 17.12', 'AOS-CX 10.16', 'C9300-48P', 'CX 6300M 48G', 'Huawei']) assert.ok(switchPage.includes(heading), heading)
     assert.ok(firewall.includes('Conflicts (0)'))
     assert.ok(switchPage.includes('Conflicts (0)'))
     assert.ok(switchPage.includes('Chassis View'))

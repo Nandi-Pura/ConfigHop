@@ -9,7 +9,25 @@ import type { SwitchHardware, SwitchOsRelease, SwitchCompatibility, SwitchPlatfo
  * Returns the matching explicit rule, or a synthetic UNKNOWN result if no rule exists.
  * Never fabricates READY status without an explicit compatibility rule.
  */
-export function evaluateCompatibility(hardware: SwitchHardware, os: SwitchOsRelease): SwitchCompatibility {
+export function evaluateCompatibility(hardware: SwitchHardware | undefined, os: SwitchOsRelease | undefined): SwitchCompatibility {
+  if (!hardware) {
+    return {
+      hardwareId: 'unknown',
+      osId: os?.id ?? 'unknown',
+      status: 'UNKNOWN',
+      reason: 'Hardware is not in the Aruba catalog; compatibility cannot be evaluated.',
+      evidenceIds: [],
+    }
+  }
+  if (!os) {
+    return {
+      hardwareId: hardware.id,
+      osId: 'unknown',
+      status: 'UNKNOWN',
+      reason: `OS release is not in the AOS-CX catalog for ${hardware.marketingModel}; compatibility cannot be evaluated.`,
+      evidenceIds: [],
+    }
+  }
   const rule = hardware.compatibilityRules.find((r) => r.osId === os.id)
   if (rule) return rule
   // No explicit rule → UNKNOWN, not READY

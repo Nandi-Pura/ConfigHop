@@ -114,6 +114,16 @@ test('6. Unknown compatibility returns UNKNOWN, never fabricates READY', () => {
   assert.notEqual(r.status, 'READY')
 })
 
+test('Unknown hardware or OS fails closed without throwing', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const unknownHardware = evaluateCompatibility(undefined, os1013)
+  const unknownOs = evaluateCompatibility(CX6000_R8N85A, undefined)
+  assert.equal(unknownHardware.status, 'UNKNOWN')
+  assert.match(unknownHardware.reason, /Hardware is not in the Aruba catalog/)
+  assert.equal(unknownOs.status, 'UNKNOWN')
+  assert.match(unknownOs.reason, /OS release is not in the AOS-CX catalog/)
+})
+
 test('7. Port layout correctness - JL658A is 24 SFP+ + 4 SFP56 = 28 ports', () => {
   assert.equal(CX6300M_24SFP.ports.length, 28)
   assert.equal(CX6300M_24SFP.totalAccessPorts, 24)
