@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,7 @@ def test_stream_limit_and_failed_replacement_are_transactional(api):
     project_id = project(client)
     assert upload(client, project_id).status_code == 200
     old = client.get(f"/api/v1/projects/{project_id}/source").content
+    old_provenance = client.get(f"/api/v1/projects/{project_id}/source/provenance").json()
     store.max_source_bytes = 1024
     too_large = upload(client, project_id)
     assert too_large.status_code == 413
@@ -137,7 +139,26 @@ def test_stream_limit_and_failed_replacement_are_transactional(api):
     assert unsafe.status_code == 422
     assert "secret" not in unsafe.text
     assert client.get(f"/api/v1/projects/{project_id}/source").content == old
+    assert client.get(f"/api/v1/projects/{project_id}/source/provenance").json() == old_provenance
     assert not list(store.get(project_id).workspace.glob("upload-*.tmp"))
+
+
+def test_uploaded_source_provenance_is_explicit_and_has_no_device_identity(api):
+    client, _store = api
+    project_id = project(client)
+    assert client.get(f"/api/v1/projects/{project_id}/source/provenance").status_code == 409
+    response = upload(client, project_id, filename="firewall-export.xml")
+    assert response.status_code == 200
+    provenance = response.json()["provenance"]
+    assert provenance["origin"] == "FILE_UPLOADED"
+    assert provenance["snapshot_kind"] == "UNVERIFIED"
+    assert provenance["sha256"] == hashlib.sha256(FIXTURE.read_bytes()).hexdigest()
+    assert provenance["received_at_utc"].endswith("Z")
+    assert provenance["serial"] is None
+    assert provenance["model"] is None
+    assert provenance["panos_version"] is None
+    assert client.get(f"/api/v1/projects/{project_id}/source/provenance").json() == provenance
+    assert client.get(f"/api/v1/projects/{project_id}").json()["source_provenance"] == provenance
 
 
 def test_filename_is_display_only_and_projects_are_isolated(api):

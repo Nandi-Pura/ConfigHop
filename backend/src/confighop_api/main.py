@@ -14,14 +14,16 @@ from confighop_core.compatibility import CompatibilityAssessment
 
 from .schemas import (
     CandidateMetadata, CandidateRequest, ErrorView, HealthView, InventoryView,
-    PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest, SourceView,
+    PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest,
+    SourceCollectRequest, SourceConnectionRequest, SourceConnectionTestView, SourceProvenance, SourceView,
 )
 from .services import (
-    PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, generate_candidate, inventory_view,
+    PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, collect_source, generate_candidate, inventory_view,
     profile_detail, profile_summary, project_deployment_plan, project_view, require_inventory, require_live, select_profile,
-    select_source_profile, assess_project,
+    select_source_profile, assess_project, test_source_connection,
     update_preview, upload_source,
 )
+from .panos_xml import XmlApiError, normalize_source_endpoint
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -33,10 +35,40 @@ def _overall(preview_status: str, compatibility: CompatibilityAssessment | None)
     return "BLOCKED" if "BLOCKED" in statuses else "REVIEW_REQUIRED" if "REVIEW_REQUIRED" in statuses else "READY"
 
 
-def create_app(store: ProjectStore | None = None) -> FastAPI:
+def _source_endpoints(value: str) -> set[tuple[str, int]]:
+    endpoints: set[tuple[str, int]] = set()
+    for raw in value.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        if item.startswith("["):
+            closing = item.find("]")
+            if closing < 0 or closing + 1 >= len(item) or item[closing + 1] != ":":
+                raise ValueError("Invalid CONFIGHOP_SOURCE_ENDPOINTS entry.")
+            host, port_text = item[1:closing], item[closing + 2:]
+        else:
+            try:
+                host, port_text = item.rsplit(":", 1)
+            except ValueError as exc:
+                raise ValueError("Invalid CONFIGHOP_SOURCE_ENDPOINTS entry.") from exc
+        try:
+            port = int(port_text)
+        except ValueError as exc:
+            raise ValueError("Invalid CONFIGHOP_SOURCE_ENDPOINTS entry.") from exc
+        try:
+            endpoints.add(normalize_source_endpoint(host, port))
+        except XmlApiError:
+            raise ValueError("Invalid CONFIGHOP_SOURCE_ENDPOINTS entry.") from None
+    return endpoints
+
+
+def create_app(store: ProjectStore | None = None, *,
+    allowed_source_endpoints: set[tuple[str, int]] | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = store or ProjectStore()
+        app.state.allowed_source_endpoints = (allowed_source_endpoints if allowed_source_endpoints is not None
+            else _source_endpoints(os.getenv("CONFIGHOP_SOURCE_ENDPOINTS", "")))
         try:
             yield
         finally:
@@ -82,10 +114,11 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         return HealthView()
 
     @app.get("/api/v1/capabilities")
-    async def capabilities():
+    async def capabilities(request: Request):
         profiles = list_hardware_profiles()
         return {"domains": {"firewall": {"palo_alto_xml_inventory": True,
-            "manual_interface_mapping": True, "dependency_preview": True, "panos_candidate_renderer": True},
+            "manual_interface_mapping": True, "dependency_preview": True, "panos_candidate_renderer": True,
+            "panos_xml_api_collect": bool(request.app.state.allowed_source_endpoints)},
             "switch": {"backend_enabled": False}},
             "verified_hardware_profiles": [p.id for p in profiles if p.profile_status == "verified"],
             "synthetic_hardware_profiles": [p.id for p in profiles if p.profile_status == "synthetic"],
@@ -112,6 +145,20 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         return await upload_source(current_store(request), current_store(request).get(project_id),
             request, request.headers.get("x-confighop-filename"))
 
+    @app.post("/api/v1/projects/{project_id}/source/collect", response_model=SourceView)
+    async def post_collect_source(project_id: str, body: SourceCollectRequest, request: Request):
+        return await collect_source(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem,
+            allowed_endpoints=request.app.state.allowed_source_endpoints)
+
+    @app.post("/api/v1/projects/{project_id}/source/connection/test", response_model=SourceConnectionTestView)
+    async def post_test_source_connection(project_id: str, body: SourceConnectionRequest, request: Request):
+        current_store(request).get(project_id)
+        return await test_source_connection(host=body.host, port=body.port,
+            api_key=body.api_key.get_secret_value(), ca_pem=body.ca_certificate_pem,
+            allowed_endpoints=request.app.state.allowed_source_endpoints)
+
     async def xml_stream(project, path: Path):
         async with project.lock:
             if project.deleted or not path.is_file():
@@ -128,6 +175,15 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
             filename = project.source_filename or "source.xml"
         return StreamingResponse(xml_stream(project, project.source_path), media_type="application/xml",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+    @app.get("/api/v1/projects/{project_id}/source/provenance", response_model=SourceProvenance)
+    async def get_source_provenance(project_id: str, request: Request):
+        project = current_store(request).get(project_id)
+        async with project.lock:
+            require_inventory(project)
+            if project.source_provenance is None:
+                raise ServiceError("SOURCE_PROVENANCE_NOT_AVAILABLE", "Source provenance is not available.", 409)
+            return project.source_provenance
 
     @app.get("/api/v1/projects/{project_id}/inventory", response_model=InventoryView)
     async def get_inventory(project_id: str, request: Request):

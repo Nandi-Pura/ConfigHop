@@ -1,13 +1,16 @@
 import asyncio
+import hashlib
 import ntpath
 import os
 import re
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
 from fastapi import Request
 
 from confighop_core import parse_palo_alto_xml, preview_interface_mappings, render_panos_candidate
@@ -26,8 +29,10 @@ from confighop_core.parsers.palo_alto.parser import MAX_XML_BYTES
 
 from .schemas import (
     CandidateMetadata, DependencySummary, InventorySummary, InventoryView, PhysicalInterfaceView,
-    PlatformView, ProfileDetail, ProfileSummary, ProjectView, SourceView,
+    DeviceIdentityView, PlatformView, ProfileDetail, ProfileSummary, ProjectView,
+    SourceConnectionTestView, SourceProvenance, SourceView,
 )
+from .panos_xml import XmlApiError, create_source_client, export_configuration, read_system_info
 
 
 PROFILE_ID = "paloalto-synthetic-64"
@@ -40,6 +45,23 @@ class ServiceError(Exception):
         self.code, self.message, self.status = code, message, status
 
 
+def xml_api_service_error(exc: XmlApiError) -> ServiceError:
+    status = {
+        "XML_API_ENDPOINT_INVALID": 400,
+        "XML_API_KEY_REQUIRED": 400,
+        "XML_API_TLS_REQUIRED": 400,
+        "XML_API_CA_INVALID": 400,
+        "XML_API_ENDPOINT_NOT_ALLOWED": 403,
+        "XML_API_EXPORT_TOO_LARGE": 413,
+        "XML_API_TRANSPORT_ERROR": 502,
+        "XML_API_TLS_FAILED": 502,
+        "XML_API_HTTP_ERROR": 502,
+        "XML_API_REDIRECT": 502,
+        "XML_API_TIMEOUT": 504,
+    }.get(exc.code, 422)
+    return ServiceError(exc.code, str(exc), status)
+
+
 @dataclass
 class ProjectSession:
     project_id: str
@@ -48,6 +70,7 @@ class ProjectSession:
     deleted: bool = False
     source_filename: str | None = None
     source_size_bytes: int | None = None
+    source_provenance: SourceProvenance | None = None
     inventory: PaloAltoInventory | None = None
     profile_id: str | None = None
     source_profile_id: str | None = None
@@ -125,7 +148,8 @@ def project_view(project: ProjectSession) -> ProjectView:
         state = "CANDIDATE_READY"
     return ProjectView(project_id=project.project_id, state=state,
         source_available=project.inventory is not None, source_filename=project.source_filename,
-        source_size_bytes=project.source_size_bytes, target_profile_id=project.profile_id,
+        source_size_bytes=project.source_size_bytes, source_provenance=project.source_provenance,
+        target_profile_id=project.profile_id,
         source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
         target_panos_train=project.target_panos_train,
         latest_platform_assessment=project.compatibility.platform if project.compatibility else None,
@@ -218,20 +242,101 @@ async def upload_source(store: ProjectStore, project: ProjectSession, request: R
                     if size > store.max_source_bytes:
                         raise ServiceError("SOURCE_TOO_LARGE", "Source exceeds the upload limit.", 413)
                     stream.write(chunk)
-            try:
-                inventory = await asyncio.to_thread(parse_palo_alto_xml, temporary)
-            except ConfigParseError as exc:
-                raise ServiceError("SOURCE_PARSE_FAILED", "Source is not valid supported PAN-OS XML.", 422) from exc
-            os.replace(temporary, project.source_path)
-            project.inventory = inventory
-            project.source_filename = sanitize_filename(filename)
-            project.source_size_bytes = size
-            project.invalidate()
-            return SourceView(project_id=project.project_id, filename=project.source_filename, size_bytes=size,
-                platform=PlatformView.model_validate(inventory.platform.model_dump()),
-                inventory_summary=inventory_summary(inventory))
+            return await ingest_source_file(store, project, temporary, filename=filename,
+                origin="FILE_UPLOADED", snapshot_kind="UNVERIFIED")
         finally:
             temporary.unlink(missing_ok=True)
+
+
+async def ingest_source_file(store: ProjectStore, project: ProjectSession, temporary: Path, *,
+    filename: str | None, origin: str, snapshot_kind: str, serial: str | None = None,
+    model: str | None = None, panos_version: str | None = None,
+    hostname: str | None = None) -> SourceView:
+    size = temporary.stat().st_size
+    if size > store.max_source_bytes:
+        raise ServiceError("SOURCE_TOO_LARGE", "Source exceeds the upload limit.", 413)
+    try:
+        inventory = await asyncio.to_thread(parse_palo_alto_xml, temporary)
+    except ConfigParseError as exc:
+        raise ServiceError("SOURCE_PARSE_FAILED", "Source is not valid supported PAN-OS XML.", 422) from exc
+    digest = hashlib.sha256()
+    with temporary.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    provenance = SourceProvenance(origin=origin, snapshot_kind=snapshot_kind, sha256=digest.hexdigest(),
+        received_at_utc=datetime.now(timezone.utc), serial=serial, model=model,
+        panos_version=panos_version, hostname=hostname)
+    os.replace(temporary, project.source_path)
+    project.inventory = inventory
+    project.source_filename = sanitize_filename(filename)
+    project.source_size_bytes = size
+    project.source_provenance = provenance
+    project.invalidate()
+    return SourceView(project_id=project.project_id, filename=project.source_filename, size_bytes=size,
+        platform=PlatformView.model_validate(inventory.platform.model_dump()),
+        inventory_summary=inventory_summary(inventory), provenance=provenance)
+
+
+async def collect_source_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, operation_timeout_seconds: float = 60.0) -> SourceView:
+    async with project.lock:
+        require_live(project)
+        try:
+            async with asyncio.timeout(operation_timeout_seconds):
+                identity_before = await read_system_info(client, api_key)
+                first = await export_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                second = await export_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                identity_after = await read_system_info(client, api_key)
+        except TimeoutError:
+            raise ServiceError("XML_API_OPERATION_TIMEOUT", "The source collection operation timed out.", 504) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if identity_before != identity_after:
+            raise ServiceError("SOURCE_IDENTITY_CHANGED", "The source device identity changed during collection.", 409)
+        if first != second:
+            raise ServiceError("SOURCE_CONFIG_CHANGED", "The source configuration changed during collection.", 409)
+
+        temporary = project.workspace / f"collect-{uuid4().hex}.tmp"
+        try:
+            with temporary.open("xb") as stream:
+                os.chmod(temporary, 0o600)
+                stream.write(first)
+            return await ingest_source_file(store, project, temporary,
+                filename=f"{identity_before.serial}-configuration.xml", origin="API_COLLECTED",
+                snapshot_kind="UNVERIFIED", serial=identity_before.serial,
+                model=identity_before.model, panos_version=identity_before.panos_version,
+                hostname=identity_before.hostname)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+async def collect_source(store: ProjectStore, project: ProjectSession, *, host: str, port: int,
+    api_key: str, ca_pem: str | None, allowed_endpoints: set[tuple[str, int]]) -> SourceView:
+    try:
+        client = create_source_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await collect_source_from_client(store, project, client, api_key)
+
+
+async def test_source_connection(*, host: str, port: int, api_key: str, ca_pem: str | None,
+    allowed_endpoints: set[tuple[str, int]], operation_timeout_seconds: float = 15.0) -> SourceConnectionTestView:
+    try:
+        client = create_source_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    try:
+        async with client:
+            async with asyncio.timeout(operation_timeout_seconds):
+                identity = await read_system_info(client, api_key)
+    except TimeoutError:
+        raise ServiceError("XML_API_OPERATION_TIMEOUT", "The source connection test timed out.", 504) from None
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    return SourceConnectionTestView(host=host, port=port, tested_at_utc=datetime.now(timezone.utc),
+        identity=DeviceIdentityView(hostname=identity.hostname, serial=identity.serial,
+            model=identity.model, panos_version=identity.panos_version))
 
 
 def require_inventory(project: ProjectSession) -> PaloAltoInventory:

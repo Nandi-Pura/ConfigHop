@@ -40,6 +40,44 @@ test('Firewall API client sends mutation guard and candidate mappings to one ver
   } finally { globalThis.fetch = previous; await vite.close() }
 })
 
+test('source API test and collect use the project endpoints with an explicit TLS input', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  const previous = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init })
+    return new Response(JSON.stringify({ host: '192.0.2.10', port: 443, tested_at_utc: '2026-10-15T00:00:00Z', tls_verification: 'CA_VERIFIED', identity: { hostname: 'pa-source', serial: 'SERIAL1', model: 'PA-5410', panos_version: '11.1.4' } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    const { api, API_BASE } = await vite.ssrLoadModule('/src/api/client.ts')
+    const input = { host: '192.0.2.10', port: 443, api_key: 'memory-only-key', ca_certificate_pem: 'test-ca' }
+    await api.testSourceConnection('synthetic-project', input)
+    await api.collectSource('synthetic-project', input)
+    assert.equal(calls[0].url, `${API_BASE}/projects/synthetic-project/source/connection/test`)
+    assert.equal(calls[1].url, `${API_BASE}/projects/synthetic-project/source/collect`)
+    assert.equal(calls[0].init.headers['X-ConfigHop-Client'], 'web')
+    assert.deepEqual(JSON.parse(calls[0].init.body), input)
+    assert.deepEqual(JSON.parse(calls[1].init.body), input)
+  } finally { globalThis.fetch = previous; await vite.close() }
+})
+
+test('manual source provenance stays unverified in the dashboard', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  try {
+    const { SourceProvenanceDetails } = await vite.ssrLoadModule('/src/FirewallApp.tsx')
+    const html = renderToStaticMarkup(React.createElement(SourceProvenanceDetails, { provenance: {
+      origin: 'FILE_UPLOADED', snapshot_kind: 'UNVERIFIED', sha256: 'a'.repeat(64),
+      received_at_utc: '2026-10-15T00:00:00Z', serial: null, model: null, panos_version: null,
+    } }))
+    assert.ok(html.includes('Manual XML upload'))
+    assert.ok(html.includes('Source device identity not verified'))
+    assert.ok(html.includes('Snapshot type not verified'))
+    assert.ok(html.includes('SHA-256'))
+    assert.ok(html.includes('a'.repeat(64)))
+    assert.ok(!html.includes('Running configuration'))
+  } finally { await vite.close() }
+})
+
 test('Large XML viewer renders only visible lines', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {

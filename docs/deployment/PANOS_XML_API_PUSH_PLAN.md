@@ -6,15 +6,19 @@ Target awal: migrasi langsung dari satu firewall Palo Alto sumber ke satu firewa
 
 Di luar target awal: Panorama, HA pair, production deployment, dan multi-user approval
 
+Keputusan urutan kerja: pengujian ke perangkat Palo Alto fisik/virtual dilakukan **setelah seluruh fitur dalam scope rilis awal selesai diimplementasikan** dan gerbang `Implementation Complete (offline)` lulus. Sebelum itu, pengujian memakai unit test, fake PAN-OS server, dan browser UAT dengan fixture. `Implementation Complete` menyatakan kode dan alur UI selesai, bukan bukti perangkat lab berhasil atau izin production deployment.
+
 ## 1. Tujuan
 
 Menambahkan workflow migrasi dari firewall PAN-OS lama ke firewall PAN-OS baru. ConfigHop mengambil running configuration perangkat sumber melalui XML API, memasukkannya ke pipeline analisis yang saat ini menerima upload XML, lalu engineer meninjau mapping dan perubahan di dashboard. Hasil review menjadi dasar deployment package untuk perangkat tujuan.
 
-Alur utama: `Connect source -> Collect running config -> Parse/Analyze -> Manual review -> Build target package -> Connect target -> Preflight/Backup -> Stage/Validate -> Approve/Commit -> Verify`.
+Alur utama: `Connect source -> Collect running config -> Parse/Analyze -> Manual review -> Connect target -> Fresh target baseline -> Build/review target package -> Backup -> Stage/Validate -> Approve/Commit -> Verify`.
+
+Urutan request, bukti per gerbang, dan checklist implementasi ada di [bagian 14](#14-flow-teknis-dan-checkpoint-implementasi). Bagian itu adalah runbook rancangan untuk lab, bukan tanda bahwa koneksi perangkat sudah tersedia di aplikasi.
 
 Upload XML manual tetap menjadi jalur input alternatif. Asal source (`API_COLLECTED` atau `FILE_UPLOADED`) harus terlihat pada project dan hasil review.
 
-Fitur dianggap selesai hanya jika sistem dapat:
+Workflow baru dapat disebut `Lab Available` jika sistem dapat:
 
 1. mengambil snapshot running configuration perangkat sumber tanpa memodifikasinya;
 2. membuktikan asal snapshot melalui serial, model, PAN-OS version, waktu collect, dan SHA-256;
@@ -35,8 +39,8 @@ Fitur dianggap selesai hanya jika sistem dapat:
 | Candidate generation | `Available` untuk target/render path yang sudah dikualifikasi | Menjadi input deployment, tetapi belum otomatis layak di-load ke device |
 | Candidate validation lokal | `Available` | Hanya membuktikan parsing, inventory expectation, dan preservation scope lokal |
 | Source XML upload | `Available` | Tetap tersedia sebagai alternatif collect; parser dan review harus memakai satu jalur validasi |
-| Source API collection | `Unavailable` | Perlu koneksi read-only, pengambilan running config, dan provenance snapshot |
-| Live firewall connection | `Unavailable` | Perlu PAN-OS XML API client baru |
+| Source API collection | `Partial` | Backend dan UI read-only tersedia serta telah diuji offline; durability, audit, masking raw XML, dan pembuktian perangkat lab belum selesai |
+| Live firewall connection | `Partial` | XML API client dan connection test tersedia untuk endpoint IP/port allowlist; belum pernah diuji ke perangkat nyata |
 | Project state | In-memory dan temporary directory | Tidak cukup untuk job deployment dan audit yang harus bertahan setelah restart |
 | Raw source access | Source XML dapat diunduh dan ditampilkan pada UI lokal | Collection dari firewall perlu masking dan kebijakan akses artifact sebelum diaktifkan |
 | App authentication/RBAC | `Unavailable` | Live deployment harus tetap localhost/lab sampai kontrol akses tersedia |
@@ -372,7 +376,7 @@ Tombol harus menyatakan aksi aktual: `Test Source Connection`, `Collect Running 
 
 ## 9. Delivery Phases
 
-### P0: Source collection dan no-mutation connectivity
+### P0: Implementasi source collection dan no-mutation connectivity
 
 - Metadata source snapshot, deployment model, state machine, audit event, dan device lock.
 - Secure XML API client, response parser, redaction, TLS pinning, dan timeout policy.
@@ -382,9 +386,9 @@ Tombol harus menyatakan aksi aktual: `Test Source Connection`, `Collect Running 
 - Fake PAN-OS server untuk deterministic source export dan target read-only tests.
 - Live deployment feature flag tetap `off`.
 
-Exit gate: collect read-only dari lab source menghasilkan inventory yang setara dengan upload file yang sama; snapshot hash, waktu, dan serial terlihat; collect gagal tidak mengganti source lama; source dan target identity terbukti; log scan tidak menemukan API key atau raw XML.
+Exit gate offline: fake PAN-OS source menghasilkan inventory yang setara dengan upload fixture XML yang sama; snapshot hash, waktu, dan serial terlihat; collect gagal tidak mengganti source lama; identity source dan target dari fixture terbaca; log scan tidak menemukan API key atau raw XML. Belum ada koneksi ke perangkat.
 
-### P1: Lab staging tanpa commit
+### P1: Implementasi staging tanpa commit
 
 - Immutable deployment package dan deployability policy.
 - Manual review mengikat keputusan engineer ke source snapshot hash, target profile, dan mapping; recollect menginvalidasi review/package lama.
@@ -394,9 +398,9 @@ Exit gate: collect read-only dari lab source menghasilkan inventory yang setara 
 - Restore pre-deployment candidate tanpa commit.
 - UI progress/error/ambiguous-result states.
 
-Exit gate: staging dan validation lulus di firewall lab untuk source yang dikumpulkan via API; target-local settings tetap utuh; invalid candidate diblokir; timeout setelah mutation dapat direconcile tanpa duplicate mutation.
+Exit gate offline: fake PAN-OS server membuktikan alur backup, import, load, dan validation untuk source yang dikumpulkan via API; target-local settings tetap utuh dalam fixture; invalid candidate diblokir; timeout setelah mutation dapat direconcile tanpa duplicate mutation. Belum ada staging ke perangkat.
 
-### P2: Lab commit dan recovery drill
+### P2: Implementasi commit, verification, dan recovery
 
 - Approval token terikat hash/target dengan TTL.
 - Commit orchestration dan job polling.
@@ -404,7 +408,23 @@ Exit gate: staging dan validation lulus di firewall lab untuk source yang dikump
 - Backup restore, validation, recovery commit, dan verification.
 - Simulasi loss of API connectivity dan operator handoff ke out-of-band path.
 
-Exit gate: minimum dua siklus deploy dan restore berhasil pada lab target; satu negative drill terdokumentasi; tidak ada langkah recovery yang hanya bersifat teoritis.
+Exit gate offline: fake PAN-OS server membuktikan commit job polling, post-commit verification, restore, dan failure/reconciliation path. Browser UAT membuktikan approval terpisah serta state loading, error, ambiguous, dan recovery. Hasil simulasi tidak boleh disebut recovery perangkat yang teruji.
+
+### Gerbang `Implementation Complete (offline)`
+
+Gerbang ini harus lulus sebelum operator memasukkan alamat atau API key perangkat nyata ke ConfigHop, termasuk untuk `Test Source Connection` dan collect read-only. Kriteria lulus:
+
+- seluruh item implementasi `IMP-01` sampai `IMP-07` selesai tanpa stub, kontrol UI palsu, atau jalur yang hanya menangani happy path;
+- unit, integration dengan fake PAN-OS server, dan browser UAT lulus untuk skenario sukses, gagal, timeout, hasil mutasi ambigu, invalidation, dan recovery;
+- seluruh endpoint, state transition, persistence, secret handling, TLS policy, feature flag, serta dokumentasi operator sudah di-review;
+- hasil test dan temuan yang tersisa dicatat; tidak ada blocker untuk scope firewall standalone/non-HA;
+- live deployment feature flag tetap `off` sampai sesi validasi lab disetujui secara terpisah.
+
+Status ini berarti implementasi fitur 100% untuk scope yang disepakati dan siap diuji ke perangkat. Status ini **tidak** menyatakan kompatibilitas PAN-OS train/model tertentu, keberhasilan commit, atau recovery pada firewall nyata.
+
+### Validasi perangkat lab setelah `Implementation Complete (offline)`
+
+Baru setelah gerbang di atas lulus, jalankan `Physical/virtual lab` pada bagian 10 dan `IMP-08` pada bagian 14.4. Lakukan collect, stage/validate, commit, verifikasi, dan recovery pada dua perangkat lab berbeda serial. Exit gate lab: minimum dua siklus deploy dan restore berhasil pada target, satu negative drill terdokumentasi, dan evidence `CP-01` sampai `CP-13` tersimpan. Jika uji perangkat mengungkap bug, kembali ke implementasi dan ulangi gerbang offline sebelum melanjutkan uji perangkat.
 
 ### P3: Production hardening
 
@@ -463,7 +483,7 @@ Exit gate: security review, operator runbook, recovery drill, browser UAT, dan p
 - commit button tidak tersedia sebelum seluruh gate lulus;
 - recovery tidak ditampilkan sebagai sukses sebelum verification.
 
-### Physical/virtual lab
+### Physical/virtual lab (hanya setelah `Implementation Complete (offline)`)
 
 - supported PAN-OS trains dan exact target models;
 - collect dari physical/virtual source melalui API, lalu verifikasi parity parser dengan export manual dari perangkat yang sama;
@@ -482,7 +502,8 @@ Targeted unit/integration checks tidak boleh dilaporkan sebagai bukti production
 
 Fitur baru dapat disebut `Lab Available` jika:
 
-- seluruh P0 sampai P2 exit gate lulus;
+- seluruh P0 sampai P2 exit gate offline dan gerbang `Implementation Complete (offline)` lulus sebelum pengujian perangkat;
+- exit gate validasi perangkat lab lulus setelah implementasi selesai;
 - source running configuration dapat di-collect via API dengan izin baca dan masuk ke pipeline analisis yang sama dengan upload XML;
 - UI menunjukkan provenance, identitas source, waktu collect, dan hash; source lama tetap utuh jika collect gagal;
 - perubahan source snapshot membatalkan review dan deployment package lama;
@@ -519,3 +540,111 @@ Fitur baru dapat disebut `Lab Available` jika:
 - [Export files through the XML API](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/export-files-api)
 - [Configuration API: running and candidate configuration access](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/configuration-api)
 - [Commit configuration changes and validation behavior](https://docs.paloaltonetworks.com/ngfw/pan-os-cli-quick-start/use-the-cli/commit-configuration-changes)
+
+## 14. Flow Teknis dan Checkpoint Implementasi
+
+Bagian ini menjabarkan jalur `pull` dari firewall sumber dan `push` ke firewall tujuan. Semua operasi firewall dilakukan backend melalui HTTPS XML API. UI hanya mengirim keputusan operator ke backend dan membaca status. Dalam rilis awal, perangkat sumber dan tujuan harus firewall standalone yang berbeda serial; Panorama, HA, dan production tetap di luar scope.
+
+### 14.1 Urutan teknis dan batas mutasi
+
+```mermaid
+flowchart TD
+    A[Connect source: TLS, izin baca, identitas] --> B[Pull running config sumber]
+    B --> C{Snapshot utuh dan konsisten?}
+    C -- Tidak --> X[Stop: pertahankan source lama dan tampilkan bukti gagal]
+    C -- Ya --> D[Parse, inventory, mapping, review manual]
+    D --> E{Temuan dan mapping disetujui?}
+    E -- Tidak --> Y[Stop: review atau perbaiki mapping]
+    E -- Ya --> F[Connect target dan ambil fresh running baseline]
+    F --> G[Bangun package dari baseline target + perubahan yang direview]
+    G --> H{Diff target dan policy gate lulus?}
+    H -- Tidak --> Y
+    H -- Ya --> I[Backup running dan candidate target]
+    I --> J[Import file, load candidate, baca change summary]
+    J --> K[Validate full dan tunggu hasil job]
+    K --> L{Validasi dan candidate sesuai package?}
+    L -- Tidak --> Z[Stop: reconcile atau pulihkan candidate]
+    L -- Ya --> M[Approval terpisah, terikat hash dan serial]
+    M --> N[Commit dan tunggu hasil job]
+    N --> O[Verifikasi running config dan identitas target]
+    O --> P{Hasil sesuai?}
+    P -- Ya --> Q[Lab deployment selesai dengan audit evidence]
+    P -- Tidak --> R[Handoff recovery dengan backup dan akses out-of-band]
+```
+
+`Pull` berarti membaca snapshot running configuration sumber, bukan mengambil candidate yang belum di-commit. `Push` berarti mengimpor package yang dibangun dari baseline target, memuatnya ke candidate target, memvalidasi, lalu melakukan commit setelah approval baru. Respons sukses dari `import`, `load`, atau enqueue `commit` bukan bukti bahwa konfigurasi sudah aktif.
+
+### 14.2 Request firewall dan artifact yang dihasilkan
+
+| Langkah | XML API / aksi backend | Artifact atau bukti minimum |
+|---|---|---|
+| Identifikasi sumber | `type=op&cmd=<show><system><info></info></system></show>`; TLS identity dan izin API diverifikasi | Serial, model, PAN-OS version, hostname, TLS fingerprint, waktu UTC |
+| Pull sumber | `type=export&category=configuration`; parameter pemilihan running snapshot dikunci setelah uji versi lab | Byte XML asli, SHA-256, ukuran, jenis `RUNNING`; bedakan file XML dari XML `<response status="error">` |
+| Cek konsistensi sumber | Baca identitas/revision lagi; bila revision tidak tersedia, export ulang dan bandingkan hash | Hasil konsistensi dan alasan bila snapshot tidak dipromosikan |
+| Ambil baseline target | System info, running config, candidate config, jobs, locks, change summary | Identitas target, hash baseline, daftar pending changes dan blockers |
+| Bangun package | Transformasi lokal dari fresh target running config dengan source-to-target mapping yang direview | Package immutable, SHA-256, semantic diff terhadap target, daftar node target-local yang dipertahankan |
+| Backup target | Export running dan candidate sebelum mutasi pertama | Dua backup yang dapat diparse, hash, serial, waktu, lokasi artifact terenkripsi |
+| Stage | `type=import&category=configuration`, lalu `type=op` dengan `<load><config><from>filename</from></config></load>` | Nama file unik, respons import/load, change summary candidate target |
+| Validasi | `type=op` dengan `<validate><full></full></validate>`; poll job jika respons mengembalikan job ID | Terminal result, warnings, errors, job ID, candidate/change-summary evidence |
+| Aktivasi | `type=commit` dengan `<commit></commit>` setelah approval; poll `type=op` dengan `<show><jobs><id>...</id></jobs></show>` | Approval hash-bound, job ID, terminal result, warnings; respons enqueue saja belum lulus |
+| Verifikasi | Baca ulang system info, running config, pending changes, dan inventory yang diharapkan | Serial tetap, hash/semantic projection cocok, management API reachable, hasil per check |
+
+Jangan mengasumsikan `type=export&category=configuration` pada semua PAN-OS train langsung menghasilkan running config yang diinginkan. Saat validasi perangkat lab setelah `Implementation Complete (offline)`, uji parameter export dan root XML, termasuk kasus ada uncommitted changes. `type=config&action=show` adalah alternatif pembacaan active config bila hasilnya terbukti setara; `action=get` membaca candidate dan tidak boleh dipakai sebagai baseline sumber tanpa pilihan eksplisit. Rujukan sintaks: [System Info](https://docs.paloaltonetworks.com/ngfw/api/getting-started/explore-xmlapi/cli-xml-api-explore), [Export Files](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/export-files-api), [Configuration API](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/configuration-api), [Import Files](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/import-files-api), [Operational Commands](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/run-operational-mode-commands-api), dan [Commit](https://docs.paloaltonetworks.com/ngfw/api/pan-os-xml-api-request-types-and-actions/commit).
+
+### 14.3 Checkpoint runtime: semua harus lulus berurutan
+
+| Checkpoint | Kondisi lulus dan evidence di dashboard/audit | Jika gagal |
+|---|---|---|
+| `CP-01 Source identity` | TLS valid; API key baca bekerja; serial, model, versi, dan hostname sumber terbaca | Hentikan collect; jangan simpan secret di project/log |
+| `CP-02 Source snapshot` | Running XML utuh, parse aman, di bawah size limit, SHA-256 tercatat, hasil cek konsistensi stabil | Source lama tetap aktif; snapshot baru berstatus gagal/review required |
+| `CP-03 Analysis` | Ingest API dan upload file memakai parser yang sama; source profile, inventory, dan temuan terlihat | Blokir review dan package sampai sumber dapat dianalisis |
+| `CP-04 Manual review` | Engineer menyelesaikan mapping/temuan; keputusan terikat source hash, profile target, renderer, dan mapping | Perubahan input menginvalidasi review; minta keputusan baru |
+| `CP-05 Target identity` | TLS valid; serial target berbeda dari sumber dan cocok dengan expected serial; model/PAN-OS sesuai profile | Hard block; jangan ambil tindakan mutasi |
+| `CP-06 Target baseline` | Tidak ada lock/job/pending changes yang konflik; running baseline segar; OOB access dikonfirmasi | Hard block; jangan menimpa candidate milik operator lain |
+| `CP-07 Package diff` | Package immutable berbasis target baseline; target-local nodes terlindungi; final diff dan hash disetujui | Bangun ulang package atau perbaiki mapping; jangan upload source XML mentah |
+| `CP-08 Backup` | Running dan candidate backup target tersedia, dapat diparse, ber-hash, dan tersimpan sebelum import | Hard block; tidak ada stage tanpa backup |
+| `CP-09 Stage` | Import dan load terkonfirmasi; candidate/change summary target sesuai package yang disetujui | Jika hasil ambigu, lakukan read-only reconcile; jangan blind retry |
+| `CP-10 Validate` | `validate full` selesai dengan hasil terminal sukses; warning dan error ditampilkan; tidak ada drift candidate | Jangan buka commit; pertahankan evidence dan tawarkan pemulihan candidate |
+| `CP-11 Approval` | Operator meninjau validation output, target serial, diff, hash, dan OOB access; token one-time belum kedaluwarsa | Batalkan approval saat input, baseline, atau candidate berubah |
+| `CP-12 Commit` | Commit job mencapai terminal success, bukan hanya `queued`; job ID dan warnings tercatat | Status `FAILED_NEEDS_OPERATOR`; reconcile sebelum tindakan lain |
+| `CP-13 Verify` | Running target cocok secara semantic dengan package, identitas tetap, management path tersedia, pending changes dijelaskan | Jangan label `SUCCEEDED`; mulai prosedur recovery/handoff |
+
+Tiap checkpoint menyimpan `status`, `started_at`, `finished_at`, `actor`, `source_snapshot_sha256`, `target_serial`, `package_sha256` bila sudah ada, `job_id` bila ada, serta error code dan evidence reference tanpa API key atau raw secret. UI menampilkan checkpoint terakhir yang lulus, checkpoint yang sedang berjalan, dan alasan blokir. Timeout setelah mutasi menghasilkan state `ambiguous`, bukan `failed` yang boleh langsung diulang.
+
+### 14.4 Checklist implementasi yang dapat dikerjakan
+
+Checklist ini mengacu pada fase P0 sampai P2 di bagian 9. `IMP-01` sampai `IMP-07` harus selesai dan lolos gerbang offline sebelum `IMP-08` dimulai. Keberhasilan unit test tidak menggantikan uji perangkat lab.
+
+Status saat ini: **P0 parsial**. Tanda `[x]` hanya berarti subtask tersebut sudah ada di working tree lokal dan telah diuji secara offline. Item induk tetap `[ ]` sampai semua subtask dan exit gate-nya lulus. Browser click-through UAT terisolasi untuk flow source API sudah dijalankan dengan response API yang di-intercept; UAT aplikasi penuh, integrasi fake PAN-OS server penuh, commit/push, dan koneksi ke perangkat nyata belum dilakukan.
+
+- [ ] `IMP-01` (P0): definisikan model `SourceSnapshot`, `DeviceIdentity`, `DeploymentPackage`, `DeploymentEvent`, dan transisi state durable. Uji invalidation saat source hash, mapping, profile, atau target baseline berubah.
+  - [x] Tambahkan provenance dasar (`origin`, jenis snapshot, SHA-256, waktu UTC, serta field identitas opsional) ke respons source dan project; upload manual tetap berstatus `UNVERIFIED` tanpa serial/model rekaan. Bukti: `schemas.py`, `services.py`, dan `test_api_v04.py`.
+  - [ ] Simpan snapshot immutable dan identitas perangkat yang terverifikasi; `ProjectStore` saat ini masih memory-only dengan file temporer.
+  - [ ] Tambahkan deployment package, event/audit, state durable, serta invalidation yang terikat source hash, mapping, profile, dan baseline target.
+- [ ] `IMP-02` (P0): buat XML API client backend dengan TLS verification/pinning, `X-PAN-KEY`, timeout, size limit, no redirects, parsing aman, dan redaction. Uji HTTP 200 berisi XML error, truncated export, credential failure, dan certificate mismatch.
+  - [x] Buat helper export konfigurasi read-only melalui HTTPS dan header `X-PAN-KEY`; tolak redirect, HTTP non-200, XML wrapper/error, XML tidak valid, dan respons melewati batas ukuran. Tes memakai `httpx.MockTransport`, bukan firewall nyata. Bukti: `panos_xml.py` dan `test_panos_xml.py`.
+  - [x] Parse respons `show system info` untuk hostname, serial, model, dan PAN-OS version; tolak respons error atau field identitas yang hilang. Export juga menolak XML `<config>` tanpa device entry.
+  - [x] Tambahkan factory client sumber yang hanya menerima IP literal dan pasangan IP/port dalam allowlist, menolak loopback/link-local/multicast/unspecified, memakai TLS dengan hostname check dan CA sistem/PEM, menonaktifkan proxy environment serta redirect, dan menetapkan timeout connect/read/write/pool. Bukti: `panos_xml.py` dan `test_panos_xml.py`.
+  - [x] Bedakan kegagalan credential, certificate verification, transport, dan timeout tanpa mengekspos respons atau detail exception; batasi waktu seluruh rangkaian collect dan uji koneksi putus saat streaming. Seluruh tes masih memakai transport palsu.
+  - [ ] Lengkapi certificate pinning, dukungan DNS yang aman bila diperlukan, dan pemeriksaan redaction pada logging/telemetry. Kebijakan IP literal saat ini membatasi perangkat yang sertifikatnya tidak memiliki IP SAN.
+  - [ ] Tambahkan identitas/revision yang dapat dibuktikan pada PAN-OS train lab.
+- [ ] `IMP-03` (P0): ekstrak ingest dari `upload_source()` menjadi service bersama. Implementasikan collect read-only dengan promosi snapshot atomik. Uji parity inventory API versus upload file yang sama dan source lama tetap utuh saat collect gagal.
+  - [x] Ekstrak validasi parser, hash, dan promosi file source dari upload menjadi `ingest_source_file()`; tes memastikan upload pengganti yang gagal tidak mengubah source/provenance lama.
+  - [x] Buat service collect internal yang membaca identitas sebelum/sesudah, membandingkan dua export, dan baru mempromosikan XML melalui ingest bersama. Tes membuktikan parity seluruh inventory dengan fixture upload serta source/provenance lama tetap utuh saat API error, byte export berubah, atau identitas berubah. Snapshot tetap `UNVERIFIED` karena makna running export belum dibuktikan di lab. Bukti: `services.py` dan `test_source_collect.py`.
+  - [x] Tambahkan endpoint collect read-only dengan API key dan CA request-scoped, allowlist IP/port dari konfigurasi server, capability flag, timeout operasi, serta error terpisah untuk policy, credential, TLS, transport, dan timeout. Tes endpoint memakai `MockTransport`; route sudah dipakai UI, tetapi belum diuji ke perangkat. Bukti: `main.py`, `schemas.py`, `services.py`, `test_source_collect_api.py`, `FirewallApp.tsx`, dan `api/client.ts`.
+  - [x] Tambahkan `Test Source Connection` stateless yang membaca system info melalui kebijakan TLS/allowlist yang sama, mengembalikan identitas dan status `CA_VERIFIED`, tidak mengubah source project, dan tidak menyimpan API key atau CA. Collect tetap memeriksa ulang identitas agar hasil test bukan approval snapshot.
+  - [ ] Tambahkan audit metadata untuk connection test dan collect tanpa menyimpan secret mentah.
+  - [ ] Lengkapi invalidation/review snapshot, audit, dan cek konsistensi revision atau commit identifier bila tersedia; pastikan collect gagal tidak menyisakan state review yang keliru.
+- [ ] `IMP-04` (P0): tampilkan asal source, identitas, waktu, hash, dan error collect di UI. Mask raw XML dan jangan simpan API key di browser storage. Buktikan empty/loading/error states lewat browser UAT.
+  - [x] Tampilkan provenance upload/restore project di dashboard: asal, status verifikasi, waktu UTC, dan SHA-256. Tes render memastikan upload manual tidak mengaku sebagai running config atau identitas perangkat terverifikasi. Bukti: `FirewallApp.tsx`, `api/types.ts`, dan `firewallIntegration.test.mjs`.
+  - [x] Tambahkan form koneksi dan collect, hasil identity dari connection test, loading dan error state, urutan test sebelum collect, serta pengelolaan secret tanpa browser storage. API key dan CA dibersihkan setelah collect/upload berhasil. Bukti: `FirewallApp.tsx`, `api/client.ts`, `api/types.ts`, dan `firewallIntegration.test.mjs`.
+  - [x] Jalankan browser click-through UAT terisolasi dengan response API yang di-intercept: validasi kosong, error autentikasi backend, loading, success identity, urutan keyboard, collect sukses, credential tidak masuk `localStorage`, credential dibersihkan, dan viewport 390 px tanpa overflow. Ini bukan uji perangkat atau UAT aplikasi penuh.
+  - [ ] Mask raw XML secara default dan tambahkan aturan reveal/download yang aman sebelum koneksi perangkat diaktifkan.
+- [ ] `IMP-05` (P1): implementasikan target preflight, source-target serial guard, target baseline hash, target-local preservation policy, serta package builder dari baseline target. Uji konflik pending changes, unsupported model, dan drift target.
+- [ ] `IMP-06` (P1): simpan backup running/candidate terenkripsi; implementasikan import, load, change-summary comparison, `validate full`, job polling, dan read-only reconciliation untuk hasil ambigu. Uji dengan fake server sebelum firewall lab.
+- [ ] `IMP-07` (P2): implementasikan approval one-time yang terikat hash/serial, commit terpisah, terminal job polling, post-commit verification, serta recovery yang juga membutuhkan validasi dan verification. Uji commit job gagal setelah enqueue dan putus koneksi saat commit.
+- [ ] `IMP-08` (setelah `Implementation Complete`): jalankan migration drill pada dua firewall lab berbeda serial, termasuk invalid candidate, pending changes, restore backup, dan akses out-of-band. Simpan evidence per `CP-01` sampai `CP-13`; baru setelah itu beri label `Lab Available`.
+
+Verifikasi terakhir untuk perubahan lokal ini: 581 tes backend lulus; 17 tes frontend dan build frontend lulus pada putaran sebelumnya. Hasil tersebut hanya membuktikan jalur yang tercakup tes offline, bukan kelulusan `IMP-01` sampai `IMP-04` secara menyeluruh.
+
+P0 sampai P2 adalah tahap implementasi dan pengujian offline, tanpa koneksi ke perangkat nyata. Stage dan commit pertama pada target lab hanya dilakukan setelah gerbang `Implementation Complete (offline)` lulus, dengan approval terpisah. Production tetap menunggu exit gate lab dan seluruh gate P3.

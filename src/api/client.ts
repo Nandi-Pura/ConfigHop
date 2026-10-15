@@ -1,4 +1,4 @@
-import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState } from './types'
+import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload } from './types'
 
 export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || 'http://127.0.0.1:8000/api/v1').replace(/\/$/, '')
 export const MAX_TEXT_PREVIEW_BYTES = 10 * 1024 * 1024
@@ -46,8 +46,14 @@ export const api = {
   createProject: (signal?: AbortSignal) => request<ProjectState>('/projects', { method: 'POST', signal }),
   getProject: (id: string, signal?: AbortSignal) => request<ProjectState>(`/projects/${id}`, { signal }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
-  uploadSource: (id: string, file: File, signal?: AbortSignal) => request<{ filename: string; size_bytes: number }>(`/projects/${id}/source`, {
+  uploadSource: (id: string, file: File, signal?: AbortSignal) => request<SourceUpload>(`/projects/${id}/source`, {
     method: 'PUT', body: file, signal, headers: { 'X-ConfigHop-Filename': file.name },
+  }),
+  testSourceConnection: (id: string, input: SourceConnectionInput, signal?: AbortSignal) => request<SourceConnectionTest>(`/projects/${id}/source/connection/test`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  collectSource: (id: string, input: SourceConnectionInput, signal?: AbortSignal) => request<SourceUpload>(`/projects/${id}/source/collect`, {
+    method: 'POST', body: JSON.stringify(input), signal,
   }),
   getSource: (id: string, signal?: AbortSignal) => xml(`/projects/${id}/source`, signal),
   getInventory: (id: string, signal?: AbortSignal) => request<InventoryView>(`/projects/${id}/inventory`, { signal }),

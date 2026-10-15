@@ -4,12 +4,53 @@ export type RequiredCondition = 'NONE' | 'BREAKOUT_MODE' | 'MANUAL_NATIVE_PORT_S
 export type TargetOpticRate = '1G' | '10G' | '40G' | '100G'
 export type ProjectStatus = 'EMPTY' | 'SOURCE_READY' | 'PREVIEW_READY' | 'PREVIEW_REVIEW_REQUIRED' | 'PREVIEW_BLOCKED' | 'CANDIDATE_READY'
 
+export interface SourceProvenance {
+  origin: 'FILE_UPLOADED' | 'API_COLLECTED'
+  snapshot_kind: 'UNVERIFIED' | 'RUNNING'
+  sha256: string
+  received_at_utc: string
+  serial: string | null
+  model: string | null
+  panos_version: string | null
+  hostname: string | null
+}
+
+export interface SourceUpload {
+  project_id: string
+  filename: string
+  size_bytes: number
+  provenance: SourceProvenance
+}
+
+export interface SourceConnectionInput {
+  host: string
+  port: number
+  api_key: string
+  ca_certificate_pem?: string | null
+}
+
+export interface SourceDeviceIdentity {
+  hostname: string
+  serial: string
+  model: string
+  panos_version: string
+}
+
+export interface SourceConnectionTest {
+  host: string
+  port: number
+  tested_at_utc: string
+  tls_verification: 'CA_VERIFIED'
+  identity: SourceDeviceIdentity
+}
+
 export interface ProjectState {
   project_id: string
   state: ProjectStatus
   source_available: boolean
   source_filename: string | null
   source_size_bytes: number | null
+  source_provenance: SourceProvenance | null
   target_profile_id: string | null
   source_profile_id: string | null
   source_panos_train: string | null

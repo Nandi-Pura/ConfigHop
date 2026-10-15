@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from confighop_core.models.common import ParserWarning
 from confighop_core.compatibility import CompatibilityAssessment, HardwareAssessment, PlatformAssessment
@@ -69,12 +70,50 @@ class InventoryView(BaseModel):
     parser_warnings: list[ParserWarning]
 
 
+class SourceProvenance(BaseModel):
+    origin: Literal["FILE_UPLOADED", "API_COLLECTED"]
+    snapshot_kind: Literal["UNVERIFIED", "RUNNING"]
+    sha256: str
+    received_at_utc: datetime
+    serial: str | None = None
+    model: str | None = None
+    panos_version: str | None = None
+    hostname: str | None = None
+
+
 class SourceView(BaseModel):
     project_id: str
     filename: str
     size_bytes: int
     platform: PlatformView
     inventory_summary: InventorySummary
+    provenance: SourceProvenance
+
+
+class SourceConnectionRequest(BaseModel):
+    host: str = Field(min_length=1, max_length=64)
+    port: int = Field(default=443, ge=1, le=65535)
+    api_key: SecretStr = Field(min_length=1, max_length=4096)
+    ca_certificate_pem: str | None = Field(default=None, max_length=262144)
+
+
+class SourceCollectRequest(SourceConnectionRequest):
+    pass
+
+
+class DeviceIdentityView(BaseModel):
+    hostname: str
+    serial: str
+    model: str
+    panos_version: str
+
+
+class SourceConnectionTestView(BaseModel):
+    host: str
+    port: int
+    tested_at_utc: datetime
+    tls_verification: Literal["CA_VERIFIED"] = "CA_VERIFIED"
+    identity: DeviceIdentityView
 
 
 ProjectStatus = Literal["EMPTY", "SOURCE_READY", "PREVIEW_READY", "PREVIEW_REVIEW_REQUIRED", "PREVIEW_BLOCKED", "CANDIDATE_READY"]
@@ -86,6 +125,7 @@ class ProjectView(BaseModel):
     source_available: bool
     source_filename: str | None
     source_size_bytes: int | None
+    source_provenance: SourceProvenance | None = None
     target_profile_id: str | None
     source_profile_id: str | None = None
     source_panos_train: str | None = None

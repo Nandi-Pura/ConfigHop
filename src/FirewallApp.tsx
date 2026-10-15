@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import MockWorkspace, { type MockActions } from './MockWorkspace'
 import { firewallSource, firewallTarget, type Domain } from './platformCatalog'
 import VirtualCodeViewer from './VirtualCodeViewer'
 import DeploymentPlanView from './DeploymentPlanView'
 import { api, ApiClientError, MAX_TEXT_PREVIEW_BYTES } from './api/client'
 import { canSelectPortForAnalysis, findingLabel, interfaceMappings, linkFindingExplanation, restoredOpticRates, rowFindings, rowRenderScope, sameMappingDecisions, scopeLabel, scopedReadiness, shouldShowNativeSpeedChoice, shouldShowOpticRateChoice, sourceLinkFact, targetCapability, targetRenderLabel, type RenderScope } from './scopedRenderingUI'
-import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, PreviewStatus, TargetOpticRate } from './api/types'
+import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, PreviewStatus, SourceConnectionInput, SourceConnectionTest, SourceProvenance, TargetOpticRate } from './api/types'
 import { AlertTriangle, ArrowRight, Check, CircleAlert, CircleCheck, Clipboard, Download, FileText, FolderOpen, GitCompareArrows, HardDrive, Layers3, Network, Plus, PanelLeftClose, PanelLeftOpen, Pencil, RotateCcw, Save, Search, Settings2, ShieldCheck, Trash2, Upload } from 'lucide-react'
 
 type MappingStatus = 'Mapped' | 'Review' | 'Preserved' | 'Conflict'
@@ -25,6 +25,7 @@ export default function FirewallApp() {
   const mockActions = useRef<MockActions | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadController = useRef<AbortController | null>(null)
+  const sourceApiController = useRef<AbortController | null>(null)
   const candidateController = useRef<AbortController | null>(null)
   const serial = useRef(0)
   const projectRef = useRef<string | null>(null)
@@ -44,7 +45,15 @@ export default function FirewallApp() {
   const [compatibility, setCompatibility] = useState<CompatibilityAssessment | null>(null)
   const [sourceName, setSourceName] = useState('No configuration loaded')
   const [sourceBytes, setSourceBytes] = useState<number | null>(null)
+  const [sourceProvenance, setSourceProvenance] = useState<SourceProvenance | null>(null)
   const [sourceText, setSourceText] = useState('')
+  const [sourceHost, setSourceHost] = useState('')
+  const [sourcePort, setSourcePort] = useState('443')
+  const [sourceApiKey, setSourceApiKey] = useState('')
+  const [sourceCaPem, setSourceCaPem] = useState('')
+  const [sourceConnection, setSourceConnection] = useState<SourceConnectionTest | null>(null)
+  const [sourceApiBusy, setSourceApiBusy] = useState<'testing' | 'collecting' | null>(null)
+  const [sourceApiError, setSourceApiError] = useState<{ code: string; message: string } | null>(null)
   const [candidateBytes, setCandidateBytes] = useState<number | null>(null)
   const [candidateText, setCandidateText] = useState('')
   const [targets, setTargets] = useState<Record<string, string>>({})
@@ -80,7 +89,7 @@ export default function FirewallApp() {
         }
       } catch { localStorage.removeItem(key) }
     }
-    return () => { controller.abort(); uploadController.current?.abort(); candidateController.current?.abort() }
+    return () => { controller.abort(); uploadController.current?.abort(); sourceApiController.current?.abort(); candidateController.current?.abort() }
   }, [])
 
   const mappings = useMemo<InterfaceMapping[]>(() => interfaceMappings(targets, nativeSpeeds, opticRates), [targets, nativeSpeeds, opticRates])
@@ -110,8 +119,9 @@ export default function FirewallApp() {
   }
   function invalidateResult() { setPreview(null); setCandidate(null); setCandidateText(''); setCandidateBytes(null) }
   function clearLocal() {
-    serial.current++; uploadController.current?.abort(); candidateController.current?.abort()
-    setInventory(null); setSelectedScope(null); setSourceName('No configuration loaded'); setSourceBytes(null); setSourceText('')
+    serial.current++; uploadController.current?.abort(); sourceApiController.current?.abort(); candidateController.current?.abort()
+    setInventory(null); setSelectedScope(null); setSourceName('No configuration loaded'); setSourceBytes(null); setSourceProvenance(null); setSourceText('')
+    setSourceHost(''); setSourcePort('443'); setSourceApiKey(''); setSourceCaPem(''); setSourceConnection(null); setSourceApiBusy(null); setSourceApiError(null)
     setProfile(null); setSourceProfile(null); setSourceTrain(''); setTargetTrain(''); setCompatibility(null); setTargets({}); setNativeSpeeds({}); setOpticRates({}); invalidateResult(); setStatusText('No PAN-OS XML source loaded'); setErrorText(''); setTab('Overview')
     setBusy(false)
   }
@@ -126,8 +136,9 @@ export default function FirewallApp() {
       const nextInventory = await api.getInventory(id, controller.signal)
       const text = file.size <= MAX_TEXT_PREVIEW_BYTES ? await file.text() : ''
       if (current !== serial.current) return
-      setInventory(nextInventory); setSourceName(uploaded.filename); setSourceBytes(uploaded.size_bytes)
+      setInventory(nextInventory); setSourceName(uploaded.filename); setSourceBytes(uploaded.size_bytes); setSourceProvenance(uploaded.provenance)
       setSourceText(text)
+      setSourceApiKey(''); setSourceCaPem(''); setSourceConnection(null); setSourceApiError(null)
       setTargets({}); setNativeSpeeds({}); setOpticRates({}); setCompatibility(null); setSelectedScope(null); invalidateResult()
       setStatusText(file.size <= MAX_TEXT_PREVIEW_BYTES ? 'Parsed successfully' : 'Parsed successfully; editor preview omitted because the file is large.')
     } catch (error) {
@@ -137,6 +148,61 @@ export default function FirewallApp() {
   async function pasteClipboard() {
     try { const text = await navigator.clipboard.readText(); if (text.trim()) await upload(new File([text], 'clipboard.xml', { type: 'application/xml' })) }
     catch { setErrorText('Clipboard access is unavailable. Upload a PAN-OS XML file instead.') }
+  }
+  function changeSourceConnection(field: 'host' | 'port' | 'apiKey' | 'caPem', value: string) {
+    setSourceConnection(null); setSourceApiError(null)
+    if (field === 'host') setSourceHost(value)
+    else if (field === 'port') setSourcePort(value)
+    else if (field === 'apiKey') setSourceApiKey(value)
+    else setSourceCaPem(value)
+  }
+  function sourceConnectionInput(): SourceConnectionInput | null {
+    const host = sourceHost.trim()
+    const port = Number(sourcePort)
+    if (!host) { setSourceApiError({ code: 'HOST_REQUIRED', message: 'Enter the allowlisted management IP address.' }); return null }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) { setSourceApiError({ code: 'PORT_INVALID', message: 'Enter a port from 1 to 65535.' }); return null }
+    if (!sourceApiKey.trim()) { setSourceApiError({ code: 'API_KEY_REQUIRED', message: 'Enter a PAN-OS XML API key.' }); return null }
+    return { host, port, api_key: sourceApiKey, ...(sourceCaPem.trim() ? { ca_certificate_pem: sourceCaPem.trim() } : {}) }
+  }
+  async function testSourceConnection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const input = sourceConnectionInput()
+    if (!input) return
+    sourceApiController.current?.abort()
+    const controller = new AbortController(); sourceApiController.current = controller
+    setSourceApiBusy('testing'); setSourceApiError(null); setSourceConnection(null)
+    try {
+      const id = await ensureProject(controller.signal)
+      const result = await api.testSourceConnection(id, input, controller.signal)
+      setSourceConnection(result)
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setSourceApiError(error instanceof ApiClientError ? { code: error.code, message: error.message } : { code: 'REQUEST_FAILED', message: errorMessage(error) })
+    } finally { if (!controller.signal.aborted) setSourceApiBusy(null) }
+  }
+  async function collectSource() {
+    if (!sourceConnection) return
+    const input = sourceConnectionInput()
+    if (!input) return
+    sourceApiController.current?.abort(); candidateController.current?.abort()
+    const controller = new AbortController(); sourceApiController.current = controller
+    const current = ++serial.current
+    setSourceApiBusy('collecting'); setSourceApiError(null); setErrorText(''); setStatusText('Collecting running configuration…')
+    try {
+      const id = await ensureProject(controller.signal)
+      const collected = await api.collectSource(id, input, controller.signal)
+      const nextInventory = await api.getInventory(id, controller.signal)
+      const text = collected.size_bytes <= MAX_TEXT_PREVIEW_BYTES ? await (await api.getSource(id, controller.signal)).text() : ''
+      if (current !== serial.current) return
+      setInventory(nextInventory); setSourceName(collected.filename); setSourceBytes(collected.size_bytes); setSourceProvenance(collected.provenance); setSourceText(text)
+      setTargets({}); setNativeSpeeds({}); setOpticRates({}); setCompatibility(null); setSelectedScope(null); invalidateResult()
+      setSourceApiKey(''); setSourceCaPem('')
+      setStatusText(collected.size_bytes <= MAX_TEXT_PREVIEW_BYTES ? 'Running configuration collected; credentials cleared.' : 'Running configuration collected; credentials cleared and editor preview omitted because the file is large.')
+    } catch (error) {
+      if (current === serial.current && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setSourceApiError(error instanceof ApiClientError ? { code: error.code, message: error.message } : { code: 'REQUEST_FAILED', message: errorMessage(error) })
+        setStatusText('API collection failed')
+      }
+    } finally { if (current === serial.current && !controller.signal.aborted) setSourceApiBusy(null) }
   }
   async function selectProfile(id: string, train = targetTrain) {
     serial.current++; candidateController.current?.abort()
@@ -232,7 +298,7 @@ export default function FirewallApp() {
       const restoredCandidateText = state.candidate_available && state.candidate_size_bytes != null && state.candidate_size_bytes <= MAX_TEXT_PREVIEW_BYTES ? await (await api.downloadCandidate(state.project_id)).text() : ''
       const currentPreview = restoredPreview && sameMappingDecisions(restoredPreview.mappings, saved.mappings || []) ? restoredPreview : null
       suppressPreview.current = !!currentPreview; projectRef.current = state.project_id; setProjectId(state.project_id)
-      setProjectName(saved.project_name || 'ConfigHop Firewall Project'); setSourceName(state.source_filename || 'No configuration loaded'); setSourceBytes(state.source_size_bytes)
+      setProjectName(saved.project_name || 'ConfigHop Firewall Project'); setSourceName(state.source_filename || 'No configuration loaded'); setSourceBytes(state.source_size_bytes); setSourceProvenance(state.source_provenance)
       setTargets(Object.fromEntries((saved.mappings || []).map((item) => [item.source_interface, item.target_interface])))
       setNativeSpeeds(Object.fromEntries((saved.mappings || []).flatMap((item) => item.target_settings?.link_speed ? [[item.source_interface, item.target_settings.link_speed]] : [])))
       setOpticRates(restoredOpticRates(saved.mappings || []))
@@ -265,10 +331,21 @@ export default function FirewallApp() {
             <div className="migration-arrow"><ArrowRight size={30} /></div>
             <PlatformCard title="Target Platform" eyebrow="Migration Destination" profile={profile} profiles={profiles} selected={profile?.id ?? ''} onSelect={(id) => void selectProfile(id)} train={targetTrain} onTrain={(train) => void selectProfile(profile?.id ?? '', train)} onEvidence={() => { setEvidenceScope(null); setShowEvidence(true) }} onVendorChange={() => setBackendMode(false)} />
           </div></Section>
-          <div className="two-up source-row"><Section number="2" title="Source Configuration" subtitle="Upload or paste PAN-OS XML"><div className="source-config-grid"><div className="source-actions">
-            <button className="btn accent-outline" onClick={() => fileRef.current?.click()} disabled={busy}><Upload size={15} /> Upload File</button><button className="btn secondary" onClick={pasteClipboard} disabled={busy}><Clipboard size={15} /> Paste from Clipboard</button>
+          <div className="two-up source-row"><Section number="2" title="Source Configuration" subtitle="Collect from a Palo Alto device or load XML manually"><div className="source-config-grid"><div className="source-ingest">
+            <form className="source-api-form" onSubmit={testSourceConnection} aria-busy={sourceApiBusy ? 'true' : 'false'}>
+              <div className="source-api-heading"><strong>Collect via XML API</strong><span>Running configuration</span></div>
+              <div className="source-api-endpoint"><label>Management IP<input name="source-host" autoComplete="off" placeholder="192.0.2.10" value={sourceHost} disabled={!!sourceApiBusy} onChange={(event) => changeSourceConnection('host', event.target.value)} /></label><label>Port<input name="source-port" type="number" min="1" max="65535" value={sourcePort} disabled={!!sourceApiBusy} onChange={(event) => changeSourceConnection('port', event.target.value)} /></label></div>
+              <label>XML API key<input name="source-api-key" type="password" autoComplete="off" spellCheck={false} value={sourceApiKey} disabled={!!sourceApiBusy} onChange={(event) => changeSourceConnection('apiKey', event.target.value)} /></label>
+              <label>CA certificate PEM <span className="optional-label">Optional when the device certificate is trusted by the backend</span><textarea name="source-ca-pem" rows={3} autoComplete="off" spellCheck={false} placeholder="-----BEGIN CERTIFICATE-----" value={sourceCaPem} disabled={!!sourceApiBusy} onChange={(event) => changeSourceConnection('caPem', event.target.value)} /></label>
+              <p className="source-secret-note">API key and CA text are sent to the local backend for each request and are not saved with the project.</p>
+              {sourceApiError && <div className="source-api-message error" role="alert"><strong>{sourceApiError.code}</strong><span>{sourceApiError.message}</span><small>Check the allowlist, certificate, API key, and device reachability, then test again.</small></div>}
+              {sourceConnection && <div className="source-api-message success" role="status"><strong>{sourceConnection.identity.hostname} · {sourceConnection.identity.model}</strong><span>{sourceConnection.identity.serial} · PAN-OS {sourceConnection.identity.panos_version}</span><small>{sourceConnection.host}:{sourceConnection.port} · TLS certificate verified</small></div>}
+              <div className="source-api-actions"><button className="btn secondary" type="submit" disabled={busy || !!sourceApiBusy}>{sourceApiBusy === 'testing' ? 'Testing…' : 'Test connection'}</button><button className="btn accent" type="button" onClick={collectSource} disabled={busy || !sourceConnection || !sourceApiKey.trim() || !!sourceApiBusy}>{sourceApiBusy === 'collecting' ? 'Collecting…' : 'Collect running config'}</button></div>
+            </form>
+            <div className="manual-source"><span>Manual XML fallback</span><div><button className="btn accent-outline" onClick={() => fileRef.current?.click()} disabled={busy || !!sourceApiBusy}><Upload size={15} /> Upload File</button><button className="btn secondary" onClick={pasteClipboard} disabled={busy || !!sourceApiBusy}><Clipboard size={15} /> Paste XML</button></div></div>
             <input ref={fileRef} type="file" accept=".xml,text/xml,application/xml" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} />
             <div className="file-card"><FileText size={20} /><div className="grow"><div className="file-name">{sourceName}</div><div className="file-meta">{sizeLabel(sourceBytes)} {statusText}</div></div></div>
+            {sourceProvenance && <SourceProvenanceDetails provenance={sourceProvenance} />}
           </div>{sourceText ? <VirtualCodeViewer lines={sourceLines} /> : <div className="viewer-placeholder">{inventory ? 'Configuration loaded; editor preview omitted because the file is large.' : 'No configuration loaded'}</div>}</div></Section>
           <Section number="3" title="Source Inventory" subtitle="Real parsed PAN-OS inventory"><div className="inventory-head"><span className={inventory ? 'success-pill' : 'muted'}>{inventory ? <CircleCheck size={14} /> : <CircleAlert size={14} />}{inventory ? 'Parsed successfully' : 'Awaiting source'}</span><span className="muted">{inventory ? `${inventory.summary.parser_warnings} parser warnings` : 'No inventory'}</span></div><div className="inventory-grid">
             <Metric icon={<Network size={18} />} value={inventory?.summary.physical_interfaces ?? 0} label="Physical Interfaces" /><Metric icon={<Network size={18} />} value={inventory?.summary.subinterfaces ?? 0} label="Subinterfaces" /><Metric icon={<Layers3 size={18} />} value={inventory?.summary.zones ?? 0} label="Zones" /><Metric icon={<HardDrive size={18} />} value={inventory?.summary.address_objects ?? 0} label="Address Objects" /><Metric icon={<Settings2 size={18} />} value={inventory?.summary.service_objects ?? 0} label="Services" /><Metric icon={<ShieldCheck size={18} />} value={inventory?.summary.security_rules ?? 0} label="Security Policies" /><Metric icon={<GitCompareArrows size={18} />} value={inventory?.summary.nat_rules ?? 0} label="NAT Rules" /><Metric icon={<Network size={18} />} value={inventory?.summary.static_routes ?? 0} label="Static Routes" />
@@ -305,6 +382,16 @@ export function PlatformCard({ title, eyebrow, profile, profiles, selected, onSe
 }
 
 function Metric({ icon, value, label }: { icon: ReactNode; value: number; label: string }) { return <div className="metric-tile"><div className="metric-icon">{icon}</div><div><strong>{value}</strong><span>{label}</span></div></div> }
+export function SourceProvenanceDetails({ provenance }: { provenance: SourceProvenance }) {
+  const fromApi = provenance.origin === 'API_COLLECTED'
+  const received = new Date(provenance.received_at_utc).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' })
+  return <div className="source-provenance" aria-label="Source provenance">
+    <strong>{fromApi ? 'Collected via XML API' : 'Manual XML upload'}</strong>
+    <span>{fromApi ? `Source device: ${provenance.model ?? 'Unknown model'} · ${provenance.serial ?? 'Unknown serial'}` : 'Source device identity not verified'}</span>
+    <span>{provenance.snapshot_kind === 'RUNNING' ? 'Running configuration' : 'Snapshot type not verified'} · {received} UTC</span>
+    <span className="source-hash"><span>SHA-256</span><code>{provenance.sha256}</code></span>
+  </div>
+}
 function StatusBadge({ status }: { status: MappingStatus }) { return <span className={`status-badge ${status.toLowerCase()}`}>{status === 'Mapped' ? <Check size={11} /> : status === 'Preserved' ? <span className="dot" /> : status === 'Review' ? <AlertTriangle size={11} /> : <CircleAlert size={11} />}{status}</span> }
 function HardwareMap({ rows, target }: { rows: { source: string; target: string; zone: string; status: MappingStatus; scope: RenderScope }[]; target: string }) { return <div className="hardware-map"><div className="hardware-panel"><div className="hardware-title">Parsed Source</div>{rows.map((row) => <div className="port-row" key={row.source}><span>{row.source}</span><small>{row.zone}</small></div>)}</div><div className="hardware-links">{rows.map((row) => <div key={row.source}>→</div>)}</div><div className="hardware-panel"><div className="hardware-title">{target}</div>{rows.map((row) => <div className="port-row target" key={row.source}><span>{row.target || row.source}</span><small>{row.status} · {scopeLabel(row.scope)}</small></div>)}</div></div> }
 function Readiness({ label, detail, ok, warn }: { label: string; detail: string; ok: boolean; warn?: boolean }) { return <div className="readiness-item">{ok && !warn ? <CircleCheck className="ok-icon" size={22} /> : <AlertTriangle className="warn-icon" size={22} />}<div><strong>{label}</strong><span>{detail}</span></div></div> }
