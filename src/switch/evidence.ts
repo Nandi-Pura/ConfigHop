@@ -255,6 +255,36 @@ export const SWITCH_EVIDENCE: Record<string, SwitchEvidence> = {
       'Minimum supported version for 6200 VSF is 10.05.0060',
     ],
   },
+  'ARUBA-EVD-RN-1013-1050': {
+    id: 'ARUBA-EVD-RN-1013-1050',
+    vendor: 'hpe_aruba',
+    sourceType: 'release-notes',
+    url: 'https://arubanetworking.hpe.com/techdocs/AOS-CX/10.13/RN/rn_6300-6400_10-13-1030.pdf',
+    title: 'AOS-CX 10.13.1050 Release Notes for 6300/6400 Switch Series',
+    checkedAt: '2026-10-15',
+    claims: [
+      'JL741A: Aruba 6410 96-port 1GbE Class 4 PoE and 4-port SFP56 Switch, minimum 10.05.0001',
+      'JL658A: minimum AOS-CX 10.14.0001',
+      'JL659A: minimum AOS-CX 10.14.0001',
+      'S3L75A, S3L76A, S3L77A: minimum AOS-CX 10.14.0006',
+      'R0X26A: minimum AOS-CX 10.05.0021',
+      'R0X27A: minimum AOS-CX 10.05.0001',
+      'R0X31A: minimum AOS-CX 10.04.1000',
+    ],
+  },
+  'ARUBA-EVD-RN-1017-6000-6100': {
+    id: 'ARUBA-EVD-RN-1017-6000-6100',
+    vendor: 'hpe_aruba',
+    sourceType: 'release-notes',
+    url: 'https://arubanetworking.hpe.com/techdocs/AOS-CX/Consolidated_RNs/HTML-6000/Content/10_17/overview-1017x.htm',
+    title: 'AOS-CX 10.17 Release Notes for 6000/6100 Switch Series',
+    checkedAt: '2026-10-15',
+    claims: [
+      'R8N85A–R8N89A: minimum AOS-CX 10.11.1011 (serial-dependent: 10.08.1010 for older serial range)',
+      'R9Y03A: minimum AOS-CX 10.11.1001',
+      'JL675A–JL679A: serial-dependent (10.06.0001 older series, 10.11.1011 newer series)',
+    ],
+  },
 
 
 }

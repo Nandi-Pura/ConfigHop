@@ -5,6 +5,7 @@ import { parseCiscoConfig } from './switch/cisco/parser.ts'
 import { mapCiscoToAosCx } from './switch/mapping/index.ts'
 import { CX6300M_48G } from './switch/aruba/cx6300.ts'
 import { CX6400_V2 } from './switch/aruba/cx6400.ts'
+import { CX6300L_S3L75A } from './switch/aruba/cx6300l.ts'
 import { CX6000_R8N85A } from './switch/aruba/cx6000.ts'
 import { AOS_CX_RELEASES } from './switch/aosCxOs.ts'
 
@@ -38,8 +39,8 @@ vlan 20
 `
   const parsed = parseCiscoConfig(config)
 
-  // CX6400_V2 on 10.13 is BLOCKED
-  const resBlocked = mapCiscoToAosCx(parsed, CX6400_V2, OS_1013)
+  // S3L75A on 10.13 is BLOCKED
+  const resBlocked = mapCiscoToAosCx(parsed, CX6300L_S3L75A, OS_1013)
   assert.equal(resBlocked.targetIntent.targetPlatform.compatibilityStatus, 'BLOCKED')
   assert.ok(resBlocked.findings.some((f) => f.severity === 'error' && f.message.includes('BLOCKED')))
 
@@ -339,7 +340,7 @@ test('17. Interface status precedence preserves unsupported port-access mappings
 
   const unsupportedState = parseCiscoConfig(config)
   unsupportedState.interfaces[0].adminState = 'unknown'
-  const unsupportedStateMapped = mapCiscoToAosCx(unsupportedState, CX6400_V2, OS_1013)
+  const unsupportedStateMapped = mapCiscoToAosCx(unsupportedState, CX6300L_S3L75A, OS_1013)
   assert.equal(unsupportedStateMapped.targetIntent.interfaces[0].portAccess?.status, 'UNSUPPORTED')
   assert.equal(unsupportedStateMapped.targetIntent.interfaces[0].status, 'UNSUPPORTED')
   assert.ok(unsupportedStateMapped.findings.some((f) => f.message.includes('unknown administrative state')))
@@ -347,7 +348,7 @@ test('17. Interface status precedence preserves unsupported port-access mappings
   const unsupportedRole = parseCiscoConfig(config)
   unsupportedRole.interfaces[0].adminState = 'up'
   unsupportedRole.interfaces[0].role = 'unknown'
-  const unsupportedRoleMapped = mapCiscoToAosCx(unsupportedRole, CX6400_V2, OS_1013)
+  const unsupportedRoleMapped = mapCiscoToAosCx(unsupportedRole, CX6300L_S3L75A, OS_1013)
   assert.equal(unsupportedRoleMapped.targetIntent.interfaces[0].portAccess?.status, 'UNSUPPORTED')
   assert.equal(unsupportedRoleMapped.targetIntent.interfaces[0].status, 'UNSUPPORTED')
   assert.ok(unsupportedRoleMapped.findings.some((f) => f.message.includes('unknown switchport role')))

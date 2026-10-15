@@ -28,6 +28,7 @@ import {
 import {
   CX6300L_S3L75A, CX6300L_S3L76A, CX6300L_S3L77A, CX6300L_MODELS,
 } from './switch/aruba/cx6300l.ts'
+import { CX5420F } from './switch/aruba/cx5420.ts'
 import {
   renderVlan, renderVlans, renderInterface, renderLag,
   renderStaticRoute, renderStpMode, renderAcl,
@@ -87,18 +88,15 @@ test('3. Compatibility matrix - CX6300M JL658A rules UNKNOWN (no verified eviden
   assert.notEqual(r1016.status, 'READY')
 })
 
-test('4. Verified hardware (CX6400 v2) is BLOCKED on 10.13, READY on 10.16+', () => {
+test('4. Hardware with floor above 10.13 (CX6300L S3L75A) is BLOCKED on 10.13, REVIEW_REQUIRED on 10.16+', () => {
   const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
-  const r1013 = evaluateCompatibility(CX6400_V2, os1013)
-  const r1016 = evaluateCompatibility(CX6400_V2, os1016)
+  const r1013 = evaluateCompatibility(CX6300L_S3L75A, os1013)
+  const r1016 = evaluateCompatibility(CX6300L_S3L75A, os1016)
   assert.equal(r1013.status, 'BLOCKED')
-  assert.equal(r1016.status, 'READY')
-  if (r1013.evidence) {
-    assert.ok(r1013.evidence.includes('ARUBA-EVD-CX6400V2-1016'))
-  }
-  if (r1016.evidence) {
-    assert.ok(r1016.evidence.includes('ARUBA-EVD-CX6400V2-1016'))
+  assert.equal(r1016.status, 'REVIEW_REQUIRED')
+  if (r1013.evidenceIds) {
+    assert.ok(r1013.evidenceIds.includes('ARUBA-EVD-RN-1013-1050'))
   }
 })
 
@@ -137,7 +135,7 @@ test('7. Port layout correctness - JL658A is 24 SFP+ + 4 SFP56 = 28 ports', () =
 })
 
 test('8. Evidence links are present and verified where claims exist', () => {
-  assert.ok(CX6400_V2.evidenceIds.includes('ARUBA-EVD-CX6400V2-1016'))
+  assert.ok(CX6400_V2.evidenceIds.includes('ARUBA-EVD-RN-1013-1050'))
   assert.ok(isVerified(CX6400_V2.evidenceIds))
 })
 
@@ -179,10 +177,10 @@ test('10. Claim-specific evidence validation', () => {
   assert.equal(isClaimVerified([], 'sku', 'JL658A'), false)
 })
 
-test('11. CX 6400 chassis vs management module distinction', () => {
+test('11. CX 6400 chassis and bundle distinction', () => {
   assert.equal(CX6405.hardwareRole, 'chassis')
   assert.equal(CX6410.hardwareRole, 'chassis')
-  assert.equal(CX6400_V2.hardwareRole, 'management-module')
+  assert.equal(CX6400_V2.hardwareRole, 'chassis')
   assert.equal(CX6400_MGMT_V1.hardwareRole, 'management-module')
 
   assert.equal(CX6405.productNumber, 'R0X26A')
@@ -190,20 +188,21 @@ test('11. CX 6400 chassis vs management module distinction', () => {
   assert.equal(CX6400_V2.productNumber, 'JL741A')
   assert.equal(CX6400_MGMT_V1.productNumber, 'R0X31A')
 
-  assert.ok(CX6400_V2.notes?.includes('NOT A STANDALONE SWITCH'))
+  assert.equal(CX6400_V2.marketingModel, 'Aruba 6410 96-port 1GbE Class 4 PoE and 4-port SFP56 Switch')
+  assert.equal(CX6400_V2.minimumVersion, '10.05.0001')
   assert.ok(CX6400_MGMT_V1.notes?.includes('NOT A STANDALONE SWITCH'))
 })
 
 test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
   assert.equal(CX6300M_24SFP.productNumber, 'JL658A')
-  assert.equal(CX6300M_24SFP.minimumVersion, '10.04.3000')
+  assert.equal(CX6300M_24SFP.minimumVersion, '10.14.0001')
   assert.equal(CX6300M_24SFP.ports.length, 28)
   assert.equal(CX6300M_24SFP.totalAccessPorts, 24)
   assert.equal(CX6300M_24SFP.totalUplinkPorts, 4)
   assert.equal(CX6300M_24SFP.poeCapable, false)
 
   assert.equal(CX6300M_48SR5_POE.productNumber, 'JL659A')
-  assert.equal(CX6300M_48SR5_POE.minimumVersion, '10.04.3000')
+  assert.equal(CX6300M_48SR5_POE.minimumVersion, '10.14.0001')
   assert.equal(CX6300M_48SR5_POE.ports.length, 52)
   assert.equal(CX6300M_48SR5_POE.totalAccessPorts, 48)
   assert.equal(CX6300M_48SR5_POE.totalUplinkPorts, 4)
@@ -211,6 +210,7 @@ test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
 
   assert.equal(CX6300M_24SR5_POE.productNumber, 'JL660A')
   assert.equal(CX6300M_24SR5_POE.minimumVersion, '10.04.3000')
+  assert.equal(CX6300M_24SR5_POE.minimumVersionStatus, 'UNVERIFIED')
   assert.equal(CX6300M_24SR5_POE.ports.length, 28)
   assert.equal(CX6300M_24SR5_POE.totalAccessPorts, 24)
   assert.equal(CX6300M_24SR5_POE.totalUplinkPorts, 4)
@@ -218,6 +218,7 @@ test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
 
   assert.equal(CX6300M_48G_POE.productNumber, 'JL661A')
   assert.equal(CX6300M_48G_POE.minimumVersion, '10.04.3000')
+  assert.equal(CX6300M_48G_POE.minimumVersionStatus, 'UNVERIFIED')
   assert.equal(CX6300M_48G_POE.ports.length, 52)
   assert.equal(CX6300M_48G_POE.totalAccessPorts, 48)
   assert.equal(CX6300M_48G_POE.totalUplinkPorts, 4)
@@ -225,6 +226,7 @@ test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
 
   assert.equal(CX6300M_24G_POE.productNumber, 'JL662A')
   assert.equal(CX6300M_24G_POE.minimumVersion, '10.04.3000')
+  assert.equal(CX6300M_24G_POE.minimumVersionStatus, 'UNVERIFIED')
   assert.equal(CX6300M_24G_POE.ports.length, 28)
   assert.equal(CX6300M_24G_POE.totalAccessPorts, 24)
   assert.equal(CX6300M_24G_POE.totalUplinkPorts, 4)
@@ -232,6 +234,7 @@ test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
 
   assert.equal(CX6300M_48G_NONPOE.productNumber, 'JL663A')
   assert.equal(CX6300M_48G_NONPOE.minimumVersion, '10.04.3000')
+  assert.equal(CX6300M_48G_NONPOE.minimumVersionStatus, 'UNVERIFIED')
   assert.equal(CX6300M_48G_NONPOE.ports.length, 52)
   assert.equal(CX6300M_48G_NONPOE.totalAccessPorts, 48)
   assert.equal(CX6300M_48G_NONPOE.totalUplinkPorts, 4)
@@ -239,15 +242,16 @@ test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
 
   assert.equal(CX6300M_24G_NONPOE.productNumber, 'JL664A')
   assert.equal(CX6300M_24G_NONPOE.minimumVersion, '10.04.0001')
+  assert.equal(CX6300M_24G_NONPOE.minimumVersionStatus, 'UNVERIFIED')
   assert.equal(CX6300M_24G_NONPOE.ports.length, 28)
   assert.equal(CX6300M_24G_NONPOE.totalAccessPorts, 24)
   assert.equal(CX6300M_24G_NONPOE.totalUplinkPorts, 4)
   assert.equal(CX6300M_24G_NONPOE.poeCapable, false)
 
   assert.equal(isVersionAtOrAboveFloor('10.04.2999', CX6300M_24SFP.minimumVersion), false)
-  assert.equal(isVersionAtOrAboveFloor('10.04.3000', CX6300M_24SFP.minimumVersion), true)
-  assert.equal(isVersionAtOrAboveFloor('10.04.3001', CX6300M_24SFP.minimumVersion), true)
-  assert.equal(isVersionAtOrAboveFloor('10.13.0001', CX6300M_24SFP.minimumVersion), true)
+  assert.equal(isVersionAtOrAboveFloor('10.14.0000', CX6300M_24SFP.minimumVersion), false)
+  assert.equal(isVersionAtOrAboveFloor('10.14.0001', CX6300M_24SFP.minimumVersion), true)
+  assert.equal(isVersionAtOrAboveFloor('10.16.0001', CX6300M_24SFP.minimumVersion), true)
   assert.equal(isVersionAtOrAboveFloor('10.04.0000', CX6300M_24G_NONPOE.minimumVersion), false)
   assert.equal(isVersionAtOrAboveFloor('10.04.0001', CX6300M_24G_NONPOE.minimumVersion), true)
 
@@ -268,4 +272,49 @@ test('12. Phase 2.3 Section 16 - CX 6300 official SKUs and VSF specs', () => {
   assert.equal(cx6410?.productNumber, 'R0X27A')
   assert.equal(cx6405?.totalAccessPorts, 0)
   assert.equal(cx6410?.totalAccessPorts, 0)
+})
+
+test('13. Official release notes fixture: SKU -> name + minVersion locked, S3L75A on 10.13 is BLOCKED', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  assert.equal(evaluateCompatibility(CX6300L_S3L75A, os1013).status, 'BLOCKED')
+
+  const FIXTURES = [
+    { sku: 'JL741A', name: 'Aruba 6410 96-port 1GbE Class 4 PoE and 4-port SFP56 Switch', min: '10.05.0001', role: 'chassis' },
+    { sku: 'JL658A', min: '10.14.0001' },
+    { sku: 'JL659A', min: '10.14.0001' },
+    { sku: 'S3L75A', min: '10.14.0006' },
+    { sku: 'S3L76A', min: '10.14.0006' },
+    { sku: 'S3L77A', min: '10.14.0006' },
+    { sku: 'R0X26A', min: '10.05.0021' },
+    { sku: 'R0X27A', min: '10.05.0001' },
+    { sku: 'R0X31A', min: '10.04.1000' },
+    { sku: 'R8N85A', min: '10.11.1011' },
+    { sku: 'R8N86A', min: '10.11.1011' },
+    { sku: 'R8N87A', min: '10.11.1011' },
+    { sku: 'R8N88A', min: '10.11.1011' },
+    { sku: 'R8N89A', min: '10.11.1011' },
+    { sku: 'R9Y03A', min: '10.11.1001' },
+    { sku: 'JL675A', min: '10.06.0001' },
+    { sku: 'JL676A', min: '10.06.0001' },
+    { sku: 'JL677A', min: '10.06.0001' },
+    { sku: 'JL678A', min: '10.06.0001' },
+    { sku: 'JL679A', min: '10.06.0001' },
+  ]
+
+  for (const f of FIXTURES) {
+    const hw = ARUBA_HARDWARE.find((item) => item.productNumber === f.sku)
+    assert.ok(hw, `Hardware ${f.sku} must exist in catalog`)
+    assert.equal(hw.minimumVersion, f.min, `${f.sku} minimumVersion mismatch`)
+    if (f.name) {
+      assert.equal(hw.marketingModel, f.name, `${f.sku} marketingModel mismatch`)
+    }
+    if (f.role) {
+      assert.equal(hw.hardwareRole, f.role, `${f.sku} hardwareRole mismatch`)
+    }
+  }
+
+  // Unverified minimum versions evaluate to UNKNOWN
+  for (const unverifiedHw of [CX6300M_24SR5_POE, CX6300M_48G_POE, CX6300M_24G_POE, CX6300M_48G_NONPOE, CX6300M_24G_NONPOE, CX6200_JL724A, CX5420F]) {
+    assert.equal(evaluateCompatibility(unverifiedHw, os1013).status, 'UNKNOWN')
+  }
 })

@@ -94,7 +94,8 @@ export interface SwitchHardware {
   hardwareVariant?: string // e.g. "Modular uplink (M)" vs "Fixed (F)"
   hardwareRole?: HardwareRole // 'fixed-switch' | 'chassis' | 'management-module' | 'line-card'
   productNumber: string    // e.g. "JL658A" — UNKNOWN if unverified
-  minimumVersion?: string  // e.g. "10.04.3000" — minimum supported AOS-CX version from release notes
+  minimumVersion?: string | null  // e.g. "10.04.3000" — minimum supported AOS-CX version from release notes; null if no floor according to source, 'UNVERIFIED' if unknown
+  minimumVersionStatus?: 'VERIFIED' | 'UNVERIFIED'
   ports: SwitchPortDefinition[]
   totalAccessPorts: number
   totalUplinkPorts: number

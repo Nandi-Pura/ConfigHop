@@ -73,39 +73,39 @@ function rj45(start: number, count: number, poe: boolean, poeStandard?: string):
   }))
 }
 
-// JL658A — Aruba 6300M 24-port SFP+ and 4-port SFP56 Switch, min: 10.04.3000
+// JL658A — Aruba 6300M 24-port SFP+ and 4-port SFP56 Switch, min: 10.14.0001
 export const CX6300M_24SFP: SwitchHardware = {
   id: 'aruba-cx-6300m-24sfp-jl658a', vendor: 'hpe_aruba', series: 'CX 6300',
   marketingModel: 'Aruba 6300M 24-port SFP+ and 4-port SFP56 Switch',
   model: 'CX 6300M 24SFP+ 4SFP56',
   hardwareVariant: 'Modular uplink (M) — fiber access',
   productNumber: 'JL658A',
-  minimumVersion: '10.04.3000',
+  minimumVersion: '10.14.0001',
   ports: [...sfpPlus(1, 24), ...sfp56(25, 4)],
   totalAccessPorts: 24, totalUplinkPorts: 4, poeCapable: false,
   vsf: VSF_M, capabilities: FULL_CAP,
-  compatibilityRules: compat('aruba-cx-6300m-24sfp-jl658a', '10.04.3000'),
-  evidenceIds: EVD_1012,
-  notes: 'JL658A: 24-port SFP+ and 4-port SFP56 Switch. Minimum AOS-CX 10.04.3000.',
+  compatibilityRules: compat('aruba-cx-6300m-24sfp-jl658a', '10.14.0001'),
+  evidenceIds: ['ARUBA-EVD-RN-1013-1050', ...EVD_1012],
+  notes: 'JL658A: 24-port SFP+ and 4-port SFP56 Switch. Minimum AOS-CX 10.14.0001.',
 }
 
 // Backward-compat alias
 export const CX6300M_48G = CX6300M_24SFP
 
-// JL659A — Aruba 6300M 48-port HPE Smart Rate 1/2.5/5GbE Class 6 PoE and 4-port SFP56 Switch, min: 10.04.3000
+// JL659A — Aruba 6300M 48-port HPE Smart Rate 1/2.5/5GbE Class 6 PoE and 4-port SFP56 Switch, min: 10.14.0001
 export const CX6300M_48SR5_POE: SwitchHardware = {
   id: 'aruba-cx-6300m-48sr5-poe-jl659a', vendor: 'hpe_aruba', series: 'CX 6300',
   marketingModel: 'Aruba 6300M 48-port HPE Smart Rate 1/2.5/5GbE Class 6 PoE and 4-port SFP56 Switch',
   model: 'CX 6300M 48SR5 CL6 PoE 4SFP56',
   hardwareVariant: 'Modular uplink (M) — Smart Rate PoE',
   productNumber: 'JL659A',
-  minimumVersion: '10.04.3000',
+  minimumVersion: '10.14.0001',
   ports: [...smartRate(1, 48, '802.3bt Class 6'), ...sfp56(49, 4)],
   totalAccessPorts: 48, totalUplinkPorts: 4, poeCapable: true,
   vsf: VSF_M, capabilities: FULL_CAP,
-  compatibilityRules: compat('aruba-cx-6300m-48sr5-poe-jl659a', '10.04.3000'),
-  evidenceIds: EVD_1012,
-  notes: 'JL659A: 48-port Smart Rate Class 6 PoE and 4-port SFP56 Switch. Minimum AOS-CX 10.04.3000.',
+  compatibilityRules: compat('aruba-cx-6300m-48sr5-poe-jl659a', '10.14.0001'),
+  evidenceIds: ['ARUBA-EVD-RN-1013-1050', ...EVD_1012],
+  notes: 'JL659A: 48-port Smart Rate Class 6 PoE and 4-port SFP56 Switch. Minimum AOS-CX 10.14.0001.',
 }
 
 // JL660A — Aruba 6300M 24-port HPE Smart Rate 1/2.5/5GbE Class 6 PoE and 4-port SFP56 Switch, min: 10.04.3000
@@ -116,6 +116,7 @@ export const CX6300M_24SR5_POE: SwitchHardware = {
   hardwareVariant: 'Modular uplink (M) — Smart Rate PoE',
   productNumber: 'JL660A',
   minimumVersion: '10.04.3000',
+  minimumVersionStatus: 'UNVERIFIED',
   ports: [...smartRate(1, 24, '802.3bt Class 6'), ...sfp56(25, 4)],
   totalAccessPorts: 24, totalUplinkPorts: 4, poeCapable: true,
   vsf: VSF_M, capabilities: FULL_CAP,
@@ -132,6 +133,7 @@ export const CX6300M_48G_POE: SwitchHardware = {
   hardwareVariant: 'Modular uplink (M) — 1GbE PoE',
   productNumber: 'JL661A',
   minimumVersion: '10.04.3000',
+  minimumVersionStatus: 'UNVERIFIED',
   ports: [...rj45(1, 48, true, '802.3at Class 4'), ...sfp56(49, 4)],
   totalAccessPorts: 48, totalUplinkPorts: 4, poeCapable: true,
   vsf: VSF_M, capabilities: FULL_CAP,
@@ -148,6 +150,7 @@ export const CX6300M_24G_POE: SwitchHardware = {
   hardwareVariant: 'Modular uplink (M) — 1GbE PoE',
   productNumber: 'JL662A',
   minimumVersion: '10.04.3000',
+  minimumVersionStatus: 'UNVERIFIED',
   ports: [...rj45(1, 24, true, '802.3at Class 4'), ...sfp56(25, 4)],
   totalAccessPorts: 24, totalUplinkPorts: 4, poeCapable: true,
   vsf: VSF_M, capabilities: FULL_CAP,
@@ -164,6 +167,7 @@ export const CX6300M_48G_NONPOE: SwitchHardware = {
   hardwareVariant: 'Modular uplink (M) — 1GbE',
   productNumber: 'JL663A',
   minimumVersion: '10.04.3000',
+  minimumVersionStatus: 'UNVERIFIED',
   ports: [...rj45(1, 48, false), ...sfp56(49, 4)],
   totalAccessPorts: 48, totalUplinkPorts: 4, poeCapable: false,
   vsf: VSF_M, capabilities: FULL_CAP,
@@ -180,6 +184,7 @@ export const CX6300M_24G_NONPOE: SwitchHardware = {
   hardwareVariant: 'Modular uplink (M) — 1GbE',
   productNumber: 'JL664A',
   minimumVersion: '10.04.0001',
+  minimumVersionStatus: 'UNVERIFIED',
   ports: [...rj45(1, 24, false), ...sfp56(25, 4)],
   totalAccessPorts: 24, totalUplinkPorts: 4, poeCapable: false,
   vsf: VSF_M, capabilities: FULL_CAP,

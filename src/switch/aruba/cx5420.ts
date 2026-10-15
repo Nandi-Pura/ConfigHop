@@ -32,6 +32,8 @@ function compat(id: string): SwitchCompatibility[] {
 export const CX5420F: SwitchHardware = {
   id: 'aruba-cx-5420f-sku-unknown', vendor: 'hpe_aruba', series: 'CX 5420',
   marketingModel: 'Aruba CX 5420F', productNumber: 'UNKNOWN',
+  minimumVersion: 'UNVERIFIED',
+  minimumVersionStatus: 'UNVERIFIED',
   ports: [],
   totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
   vsf: VSF, capabilities: CAP,

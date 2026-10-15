@@ -28,6 +28,15 @@ export function evaluateCompatibility(hardware: SwitchHardware | undefined, os: 
       evidenceIds: [],
     }
   }
+  if (hardware.minimumVersionStatus === 'UNVERIFIED' || hardware.minimumVersion === 'UNVERIFIED') {
+    return {
+      hardwareId: hardware.id,
+      osId: os.id,
+      status: 'UNKNOWN',
+      reason: `Hardware minimum software version for ${hardware.marketingModel} is unverified. Compatibility cannot be evaluated until verified against official release notes.`,
+      evidenceIds: hardware.evidenceIds,
+    }
+  }
   const rule = hardware.compatibilityRules.find((r) => r.osId === os.id)
   if (rule) return rule
   // No explicit rule → UNKNOWN, not READY
