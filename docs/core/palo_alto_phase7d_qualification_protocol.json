@@ -1,0 +1,716 @@
+{
+  "schema_version": 1,
+  "protocol_scope": "PA3200_PA5200_OFFLINE_PLANNING",
+  "canonical_gap_catalog": "docs/core/palo_alto_evidence_gaps.json",
+  "required_dimensions": [
+    "gap_id",
+    "hardware_model",
+    "exact_panos_version",
+    "panos_train",
+    "port_group_id",
+    "interface_name",
+    "optic_rate",
+    "media_type",
+    "transceiver_context",
+    "xml_field",
+    "case_type"
+  ],
+  "required_evidence_fields": [
+    "evidence_record_id",
+    "protocol_case_id",
+    "gap_id",
+    "hardware_model",
+    "exact_panos_version",
+    "panos_train",
+    "port_group_id",
+    "interface_name",
+    "optic_rate",
+    "media_type",
+    "transceiver_context",
+    "xml_field",
+    "initial_node_presence",
+    "initial_node_value",
+    "attempted_node_presence",
+    "attempted_node_value",
+    "load_result",
+    "commit_result",
+    "export_result",
+    "exported_node_presence",
+    "exported_node_value",
+    "normalization_observed",
+    "reimport_result",
+    "reimported_node_presence",
+    "reimported_node_value",
+    "reimport_stable",
+    "not_applicable_reason",
+    "artifacts",
+    "observation_timestamp",
+    "tester_identifier",
+    "reviewer_identifier",
+    "provenance",
+    "evidence_class",
+    "execution_status"
+  ],
+  "scopes": [
+    {
+      "gap_id": "PAN-GAP-PA3200-AUTO-RJ45",
+      "hardware_model": "PA-3220",
+      "port_group_id": "pa3220-RJ45 1-12",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4",
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-AUTO-RJ45",
+      "hardware_model": "PA-3250",
+      "port_group_id": "pa3250-RJ45 1-12",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4",
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-AUTO-RJ45",
+      "hardware_model": "PA-3260",
+      "port_group_id": "pa3260-RJ45 1-12",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4",
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-OPTICAL-1G",
+      "hardware_model": "PA-3220",
+      "port_group_id": "pa3220-SFP 13-16",
+      "interface_names": [
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16"
+      ],
+      "media_types": [
+        "SFP"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        "1G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-OPTICAL-MIXED",
+      "hardware_model": "PA-3220",
+      "port_group_id": "pa3220-SFP+ 17-20",
+      "interface_names": [
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-OPTICAL-MIXED",
+      "hardware_model": "PA-3250",
+      "port_group_id": "pa3250-SFP+ 13-20",
+      "interface_names": [
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16",
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-OPTICAL-MIXED",
+      "hardware_model": "PA-3260",
+      "port_group_id": "pa3260-SFP+ 13-20",
+      "interface_names": [
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16",
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA3200-QSFP-40G",
+      "hardware_model": "PA-3260",
+      "port_group_id": "pa3260-QSFP+ 21-24",
+      "interface_names": [
+        "ethernet1/21",
+        "ethernet1/22",
+        "ethernet1/23",
+        "ethernet1/24"
+      ],
+      "media_types": [
+        "QSFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1"
+      ],
+      "optic_rates": [
+        "40G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-AUTO-RJ45",
+      "hardware_model": "PA-5220",
+      "port_group_id": "pa5220-RJ45 1-4",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-AUTO-RJ45",
+      "hardware_model": "PA-5250",
+      "port_group_id": "pa5250-RJ45 1-4",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-AUTO-RJ45",
+      "hardware_model": "PA-5260",
+      "port_group_id": "pa5260-RJ45 1-4",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-AUTO-RJ45",
+      "hardware_model": "PA-5280",
+      "port_group_id": "pa5280-RJ45 1-4",
+      "interface_names": [
+        "ethernet1/1",
+        "ethernet1/2",
+        "ethernet1/3",
+        "ethernet1/4"
+      ],
+      "media_types": [
+        "RJ45"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        null
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-OPTICAL",
+      "hardware_model": "PA-5220",
+      "port_group_id": "pa5220-SFP+ 5-20",
+      "interface_names": [
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12",
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16",
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-OPTICAL",
+      "hardware_model": "PA-5250",
+      "port_group_id": "pa5250-SFP+ 5-20",
+      "interface_names": [
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12",
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16",
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-OPTICAL",
+      "hardware_model": "PA-5260",
+      "port_group_id": "pa5260-SFP+ 5-20",
+      "interface_names": [
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12",
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16",
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-OPTICAL",
+      "hardware_model": "PA-5280",
+      "port_group_id": "pa5280-SFP+ 5-20",
+      "interface_names": [
+        "ethernet1/5",
+        "ethernet1/6",
+        "ethernet1/7",
+        "ethernet1/8",
+        "ethernet1/9",
+        "ethernet1/10",
+        "ethernet1/11",
+        "ethernet1/12",
+        "ethernet1/13",
+        "ethernet1/14",
+        "ethernet1/15",
+        "ethernet1/16",
+        "ethernet1/17",
+        "ethernet1/18",
+        "ethernet1/19",
+        "ethernet1/20"
+      ],
+      "media_types": [
+        "SFP",
+        "SFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "1G",
+        "10G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-QSFP-40-100G",
+      "hardware_model": "PA-5250",
+      "port_group_id": "pa5250-QSFP 21-24",
+      "interface_names": [
+        "ethernet1/21",
+        "ethernet1/22",
+        "ethernet1/23",
+        "ethernet1/24"
+      ],
+      "media_types": [
+        "QSFP_PLUS",
+        "QSFP28"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "40G",
+        "100G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-QSFP-40-100G",
+      "hardware_model": "PA-5260",
+      "port_group_id": "pa5260-QSFP 21-24",
+      "interface_names": [
+        "ethernet1/21",
+        "ethernet1/22",
+        "ethernet1/23",
+        "ethernet1/24"
+      ],
+      "media_types": [
+        "QSFP_PLUS",
+        "QSFP28"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "40G",
+        "100G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-QSFP-40-100G",
+      "hardware_model": "PA-5280",
+      "port_group_id": "pa5280-QSFP 21-24",
+      "interface_names": [
+        "ethernet1/21",
+        "ethernet1/22",
+        "ethernet1/23",
+        "ethernet1/24"
+      ],
+      "media_types": [
+        "QSFP_PLUS",
+        "QSFP28"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "40G",
+        "100G"
+      ]
+    },
+    {
+      "gap_id": "PAN-GAP-PA5200-QSFP-40G",
+      "hardware_model": "PA-5220",
+      "port_group_id": "pa5220-QSFP 21-24",
+      "interface_names": [
+        "ethernet1/21",
+        "ethernet1/22",
+        "ethernet1/23",
+        "ethernet1/24"
+      ],
+      "media_types": [
+        "QSFP_PLUS"
+      ],
+      "panos_trains": [
+        "10.1",
+        "10.2",
+        "11.0",
+        "11.1",
+        "11.2"
+      ],
+      "optic_rates": [
+        "40G"
+      ]
+    }
+  ],
+  "case_definitions": [
+    {
+      "case_type": "DEFAULT_ABSENT",
+      "xml_field": "link-speed",
+      "controlled_action": "Capture an untouched default, then omit this node in a controlled synthetic candidate.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "EXPLICIT_AUTO",
+      "xml_field": "link-speed",
+      "controlled_action": "Supply only this field as explicit auto; record acceptance and resulting export.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "EXPLICIT_MANUAL",
+      "xml_field": "link-speed",
+      "controlled_action": "Supply one recorded manual candidate value (numeric for speed); acceptance is undetermined.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "ACCEPTANCE_REJECTION",
+      "xml_field": "link-speed",
+      "controlled_action": "Test one lab-approved unsupported-value hypothesis; record rejection, ignoring, retention, or normalization.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "EXPORT_NORMALIZATION",
+      "xml_field": "link-speed",
+      "controlled_action": "Compare attempted and exported node presence/value after the controlled action.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "REIMPORT_STABILITY",
+      "xml_field": "link-speed",
+      "controlled_action": "Re-import the sanitized exported representation and record load/commit and re-export stability.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "DEFAULT_ABSENT",
+      "xml_field": "link-duplex",
+      "controlled_action": "Capture an untouched default, then omit this node in a controlled synthetic candidate.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "EXPLICIT_AUTO",
+      "xml_field": "link-duplex",
+      "controlled_action": "Supply only this field as explicit auto; record acceptance and resulting export.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "EXPLICIT_MANUAL",
+      "xml_field": "link-duplex",
+      "controlled_action": "Supply one recorded manual candidate value (numeric for speed); acceptance is undetermined.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "ACCEPTANCE_REJECTION",
+      "xml_field": "link-duplex",
+      "controlled_action": "Test one lab-approved unsupported-value hypothesis; record rejection, ignoring, retention, or normalization.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "EXPORT_NORMALIZATION",
+      "xml_field": "link-duplex",
+      "controlled_action": "Compare attempted and exported node presence/value after the controlled action.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    },
+    {
+      "case_type": "REIMPORT_STABILITY",
+      "xml_field": "link-duplex",
+      "controlled_action": "Re-import the sanitized exported representation and record load/commit and re-export stability.",
+      "expected_device_outcome": "UNDETERMINED",
+      "execution_status": "NOT_RUN"
+    }
+  ],
+  "execution_status": "NOT_RUN",
+  "observed_device_records": 0
+}
