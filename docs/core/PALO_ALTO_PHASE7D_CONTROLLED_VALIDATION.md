@@ -51,6 +51,8 @@ For future authorized execution, prepare synthetic interface configuration, capt
 
 Record negative outcomes as evidence. After a rejected load/commit, a later stage may be `NOT_APPLICABLE` only with the explicit predecessor rejection and a technical reason. Unknown stages remain `NOT_OBSERVED` and leave review readiness incomplete. Capture stage-specific output and baseline-versus-candidate distinction in the retained artifact. Do not invent actual link state, optical power, or peer readiness.
 
+A justified skipped stage preserves the rejection evidence but cannot cover a case whose purpose is to observe that stage. `EXPORT_NORMALIZATION` requires an actual export observation; `REIMPORT_STABILITY` requires an actual export and an attempted re-import with an explicit result. Otherwise those cases remain incomplete, even when non-applicability is explained.
+
 Re-import acceptance requires a recorded re-exported node presence/value and an explicit stability observation. Acceptance alone does not establish a stable round trip; the assessment detects a stability claim that contradicts the recorded representations.
 
 ## Record and artifact hygiene

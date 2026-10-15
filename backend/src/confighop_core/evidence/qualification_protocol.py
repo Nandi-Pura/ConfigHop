@@ -357,6 +357,14 @@ def assess_serialization_evidence(scope: QualificationScope, records: list[Obser
                     record_errors.append(f"Unjustified NOT_APPLICABLE: {field}")
             elif value not in values:
                 record_errors.append(f"Invalid outcome stage: {field}")
+        if required.case_type in {CaseType.EXPORT_NORMALIZATION, CaseType.REIMPORT_STABILITY} and record.export_result in {
+            Outcome.NOT_APPLICABLE, Outcome.NOT_OBSERVED
+        }:
+            record_missing.append(f"{required.case_type.value} export observation")
+        if required.case_type == CaseType.REIMPORT_STABILITY and record.reimport_result in {
+            Outcome.NOT_APPLICABLE, Outcome.NOT_OBSERVED
+        }:
+            record_missing.append("REIMPORT_STABILITY re-import observation")
         for presence, value in (("initial_node_presence", "initial_node_value"),
                                 ("attempted_node_presence", "attempted_node_value")):
             if getattr(record, presence) is None:

@@ -198,6 +198,34 @@ def test_reimport_acceptance_does_not_imply_roundtrip_stability(protocol, scope)
     assert assess_serialization_evidence(scope, [contradictory], manifest, catalog).status == Readiness.REJECTED
 
 
+@pytest.mark.parametrize("kind", [CaseType.EXPORT_NORMALIZATION, CaseType.REIMPORT_STABILITY])
+def test_unexecuted_export_or_reimport_case_cannot_count_as_covered(protocol, scope, kind):
+    catalog, manifest = protocol
+    cases = {case.id: case for case in protocol_cases(manifest, catalog)}
+    records = synthetic_records(protocol, scope)
+    skipped = set()
+    for record in records:
+        if cases[record.protocol_case_id].case_type != kind:
+            continue
+        skipped.add(record.protocol_case_id)
+        record.load_result = Outcome.LOAD_REJECTED
+        record.commit_result = Outcome.NOT_APPLICABLE
+        record.export_result = Outcome.NOT_APPLICABLE
+        record.exported_node_presence = record.exported_node_value = None
+        record.normalization_observed = None
+        record.reimport_result = Outcome.NOT_APPLICABLE
+        record.reimported_node_presence = record.reimported_node_value = None
+        record.reimport_stable = None
+        record.not_applicable_reason = "Synthetic rejected load prevented export and re-import"
+    result = assess_serialization_evidence(scope, records, manifest, catalog)
+    assert result.status == Readiness.INCOMPLETE
+    assert set(result.missing_case_ids) == skipped
+    assert skipped.isdisjoint(result.covered_case_ids)
+    assert not result.scope_errors
+    assert any(kind.value in reason for reason in result.missing_evidence)
+    assert any(record.load_result == Outcome.LOAD_REJECTED for record in records)
+
+
 @pytest.mark.parametrize("field,value", [("hardware_model", "PA-5250"), ("exact_panos_version", "10.2.4"),
     ("exact_panos_version", "11.1.5"), ("panos_train", "11.2"), ("interface_name", "ethernet1/6")])
 def test_observations_cannot_be_generalized_across_exact_scope(protocol, scope, field, value):
