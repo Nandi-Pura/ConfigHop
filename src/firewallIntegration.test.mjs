@@ -78,6 +78,24 @@ test('manual source provenance stays unverified in the dashboard', async () => {
   } finally { await vite.close() }
 })
 
+test('raw source XML is masked until the operator explicitly reveals it', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  try {
+    const { SourceXmlAccessPanel } = await vite.ssrLoadModule('/src/FirewallApp.tsx')
+    const props = { available: true, sizeBytes: 128, lines: ['<config>sensitive-token</config>'], busy: null, error: '', onReveal() {}, onHide() {}, onDownload() {} }
+    const hidden = renderToStaticMarkup(React.createElement(SourceXmlAccessPanel, { ...props, revealed: false }))
+    assert.ok(hidden.includes('Raw XML hidden'))
+    assert.ok(hidden.includes('Reveal source XML'))
+    assert.ok(hidden.includes('Download source XML'))
+    assert.ok(!hidden.includes('sensitive-token'))
+
+    const revealed = renderToStaticMarkup(React.createElement(SourceXmlAccessPanel, { ...props, revealed: true }))
+    assert.ok(revealed.includes('Raw source XML visible'))
+    assert.ok(revealed.includes('Hide XML'))
+    assert.ok(revealed.includes('sensitive-token'))
+  } finally { await vite.close() }
+})
+
 test('Large XML viewer renders only visible lines', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {

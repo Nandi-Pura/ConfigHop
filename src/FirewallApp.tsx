@@ -26,6 +26,7 @@ export default function FirewallApp() {
   const fileRef = useRef<HTMLInputElement>(null)
   const uploadController = useRef<AbortController | null>(null)
   const sourceApiController = useRef<AbortController | null>(null)
+  const sourceArtifactController = useRef<AbortController | null>(null)
   const candidateController = useRef<AbortController | null>(null)
   const serial = useRef(0)
   const projectRef = useRef<string | null>(null)
@@ -47,6 +48,9 @@ export default function FirewallApp() {
   const [sourceBytes, setSourceBytes] = useState<number | null>(null)
   const [sourceProvenance, setSourceProvenance] = useState<SourceProvenance | null>(null)
   const [sourceText, setSourceText] = useState('')
+  const [sourceRevealed, setSourceRevealed] = useState(false)
+  const [sourceArtifactBusy, setSourceArtifactBusy] = useState<'revealing' | 'downloading' | null>(null)
+  const [sourceArtifactError, setSourceArtifactError] = useState('')
   const [sourceHost, setSourceHost] = useState('')
   const [sourcePort, setSourcePort] = useState('443')
   const [sourceApiKey, setSourceApiKey] = useState('')
@@ -89,7 +93,7 @@ export default function FirewallApp() {
         }
       } catch { localStorage.removeItem(key) }
     }
-    return () => { controller.abort(); uploadController.current?.abort(); sourceApiController.current?.abort(); candidateController.current?.abort() }
+    return () => { controller.abort(); uploadController.current?.abort(); sourceApiController.current?.abort(); sourceArtifactController.current?.abort(); candidateController.current?.abort() }
   }, [])
 
   const mappings = useMemo<InterfaceMapping[]>(() => interfaceMappings(targets, nativeSpeeds, opticRates), [targets, nativeSpeeds, opticRates])
@@ -119,14 +123,16 @@ export default function FirewallApp() {
   }
   function invalidateResult() { setPreview(null); setCandidate(null); setCandidateText(''); setCandidateBytes(null) }
   function clearLocal() {
-    serial.current++; uploadController.current?.abort(); sourceApiController.current?.abort(); candidateController.current?.abort()
+    serial.current++; uploadController.current?.abort(); sourceApiController.current?.abort(); sourceArtifactController.current?.abort(); candidateController.current?.abort()
     setInventory(null); setSelectedScope(null); setSourceName('No configuration loaded'); setSourceBytes(null); setSourceProvenance(null); setSourceText('')
+    setSourceRevealed(false); setSourceArtifactBusy(null); setSourceArtifactError('')
     setSourceHost(''); setSourcePort('443'); setSourceApiKey(''); setSourceCaPem(''); setSourceConnection(null); setSourceApiBusy(null); setSourceApiError(null)
     setProfile(null); setSourceProfile(null); setSourceTrain(''); setTargetTrain(''); setCompatibility(null); setTargets({}); setNativeSpeeds({}); setOpticRates({}); invalidateResult(); setStatusText('No PAN-OS XML source loaded'); setErrorText(''); setTab('Overview')
     setBusy(false)
   }
   async function upload(file: File) {
-    uploadController.current?.abort()
+    uploadController.current?.abort(); sourceArtifactController.current?.abort()
+    setSourceArtifactBusy(null); setSourceArtifactError('')
     const controller = new AbortController(); uploadController.current = controller
     const current = ++serial.current
     setBusy(true); setErrorText(''); setStatusText('Uploading and parsing…')
@@ -134,13 +140,12 @@ export default function FirewallApp() {
       const id = await ensureProject(controller.signal)
       const uploaded = await api.uploadSource(id, file, controller.signal)
       const nextInventory = await api.getInventory(id, controller.signal)
-      const text = file.size <= MAX_TEXT_PREVIEW_BYTES ? await file.text() : ''
       if (current !== serial.current) return
       setInventory(nextInventory); setSourceName(uploaded.filename); setSourceBytes(uploaded.size_bytes); setSourceProvenance(uploaded.provenance)
-      setSourceText(text)
+      setSourceText(''); setSourceRevealed(false); setSourceArtifactBusy(null); setSourceArtifactError('')
       setSourceApiKey(''); setSourceCaPem(''); setSourceConnection(null); setSourceApiError(null)
       setTargets({}); setNativeSpeeds({}); setOpticRates({}); setCompatibility(null); setSelectedScope(null); invalidateResult()
-      setStatusText(file.size <= MAX_TEXT_PREVIEW_BYTES ? 'Parsed successfully' : 'Parsed successfully; editor preview omitted because the file is large.')
+      setStatusText('Parsed successfully; raw XML hidden.')
     } catch (error) {
       if (current === serial.current && !(error instanceof DOMException && error.name === 'AbortError')) { setErrorText(errorMessage(error)); setStatusText('Parse failed') }
     } finally { if (current === serial.current) setBusy(false) }
@@ -183,7 +188,8 @@ export default function FirewallApp() {
     if (!sourceConnection) return
     const input = sourceConnectionInput()
     if (!input) return
-    sourceApiController.current?.abort(); candidateController.current?.abort()
+    sourceApiController.current?.abort(); sourceArtifactController.current?.abort(); candidateController.current?.abort()
+    setSourceArtifactBusy(null); setSourceArtifactError('')
     const controller = new AbortController(); sourceApiController.current = controller
     const current = ++serial.current
     setSourceApiBusy('collecting'); setSourceApiError(null); setErrorText(''); setStatusText('Collecting running configuration…')
@@ -191,18 +197,52 @@ export default function FirewallApp() {
       const id = await ensureProject(controller.signal)
       const collected = await api.collectSource(id, input, controller.signal)
       const nextInventory = await api.getInventory(id, controller.signal)
-      const text = collected.size_bytes <= MAX_TEXT_PREVIEW_BYTES ? await (await api.getSource(id, controller.signal)).text() : ''
       if (current !== serial.current) return
-      setInventory(nextInventory); setSourceName(collected.filename); setSourceBytes(collected.size_bytes); setSourceProvenance(collected.provenance); setSourceText(text)
+      setInventory(nextInventory); setSourceName(collected.filename); setSourceBytes(collected.size_bytes); setSourceProvenance(collected.provenance); setSourceText('')
+      setSourceRevealed(false); setSourceArtifactBusy(null); setSourceArtifactError('')
       setTargets({}); setNativeSpeeds({}); setOpticRates({}); setCompatibility(null); setSelectedScope(null); invalidateResult()
       setSourceApiKey(''); setSourceCaPem('')
-      setStatusText(collected.size_bytes <= MAX_TEXT_PREVIEW_BYTES ? 'Running configuration collected; credentials cleared.' : 'Running configuration collected; credentials cleared and editor preview omitted because the file is large.')
+      setStatusText('Running configuration collected; credentials cleared and raw XML hidden.')
     } catch (error) {
       if (current === serial.current && !(error instanceof DOMException && error.name === 'AbortError')) {
         setSourceApiError(error instanceof ApiClientError ? { code: error.code, message: error.message } : { code: 'REQUEST_FAILED', message: errorMessage(error) })
         setStatusText('API collection failed')
       }
     } finally { if (current === serial.current && !controller.signal.aborted) setSourceApiBusy(null) }
+  }
+  async function revealSourceXml() {
+    if (!projectId || sourceBytes == null || sourceBytes > MAX_TEXT_PREVIEW_BYTES) return
+    sourceArtifactController.current?.abort()
+    const controller = new AbortController(); sourceArtifactController.current = controller
+    setSourceArtifactBusy('revealing'); setSourceArtifactError('')
+    try {
+      const blob = await api.getSource(projectId, controller.signal)
+      if (blob.size > MAX_TEXT_PREVIEW_BYTES) throw new ApiClientError('SOURCE_PREVIEW_TOO_LARGE', 'Source XML is too large for the browser editor. Download it for controlled local review.', 413)
+      const text = await blob.text()
+      if (!controller.signal.aborted) { setSourceText(text); setSourceRevealed(true) }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setSourceArtifactError(errorMessage(error))
+    } finally { if (!controller.signal.aborted) setSourceArtifactBusy(null) }
+  }
+  function hideSourceXml() {
+    sourceArtifactController.current?.abort(); setSourceText(''); setSourceRevealed(false); setSourceArtifactBusy(null); setSourceArtifactError('')
+  }
+  async function downloadSourceXml() {
+    if (!projectId || sourceBytes == null) return
+    sourceArtifactController.current?.abort()
+    const controller = new AbortController(); sourceArtifactController.current = controller
+    setSourceArtifactBusy('downloading'); setSourceArtifactError('')
+    try {
+      const blob = await api.getSource(projectId, controller.signal)
+      if (controller.signal.aborted) return
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url; anchor.download = sourceName.replace(/[^a-zA-Z0-9._-]/g, '_') || 'source.xml'
+      document.body.appendChild(anchor); anchor.click(); anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setSourceArtifactError(errorMessage(error))
+    } finally { if (!controller.signal.aborted) setSourceArtifactBusy(null) }
   }
   async function selectProfile(id: string, train = targetTrain) {
     serial.current++; candidateController.current?.abort()
@@ -284,7 +324,7 @@ export default function FirewallApp() {
   async function loadProject() {
     const raw = localStorage.getItem(STORAGE)
     if (!raw) { setErrorText('No saved project reference was found.'); return }
-    serial.current++; candidateController.current?.abort()
+    serial.current++; sourceArtifactController.current?.abort(); candidateController.current?.abort(); setSourceArtifactBusy(null); setSourceArtifactError('')
     try {
       const saved = JSON.parse(raw) as SavedProject
       if (!saved.project_id) throw new Error('Expired legacy project')
@@ -294,7 +334,6 @@ export default function FirewallApp() {
       const restoredSourceProfile = state.source_profile_id ? await api.getProfile(state.source_profile_id) : null
       const restoredPreview = state.preview_available ? await api.getPreview(state.project_id) : null
       const restoredCandidate = state.candidate_available ? await api.getCandidate(state.project_id) : null
-      const restoredSourceText = state.source_available && state.source_size_bytes != null && state.source_size_bytes <= MAX_TEXT_PREVIEW_BYTES ? await (await api.getSource(state.project_id)).text() : ''
       const restoredCandidateText = state.candidate_available && state.candidate_size_bytes != null && state.candidate_size_bytes <= MAX_TEXT_PREVIEW_BYTES ? await (await api.downloadCandidate(state.project_id)).text() : ''
       const currentPreview = restoredPreview && sameMappingDecisions(restoredPreview.mappings, saved.mappings || []) ? restoredPreview : null
       suppressPreview.current = !!currentPreview; projectRef.current = state.project_id; setProjectId(state.project_id)
@@ -305,8 +344,8 @@ export default function FirewallApp() {
       setInventory(restoredInventory); setProfile(restoredProfile); setSourceProfile(restoredSourceProfile); setSourceTrain(state.source_panos_train || ''); setTargetTrain(state.target_panos_train || ''); setPreview(currentPreview)
       setCompatibility(currentPreview?.platform_assessment && currentPreview.hardware_assessment ? { platform: currentPreview.platform_assessment, hardware: currentPreview.hardware_assessment, status: currentPreview.overall_status || currentPreview.status, findings: [...currentPreview.platform_assessment.findings, ...currentPreview.hardware_assessment.findings], evidence_ids: [] } : null)
       setCandidate(currentPreview ? restoredCandidate : null); setCandidateBytes(currentPreview ? state.candidate_size_bytes : null)
-      setSourceText(restoredSourceText); setCandidateText(currentPreview ? restoredCandidateText : '')
-      setStatusText(state.source_available ? 'Project session restored' : 'Project restored; upload a source configuration.'); setErrorText('')
+      setSourceText(''); setSourceRevealed(false); setSourceArtifactBusy(null); setSourceArtifactError(''); setCandidateText(currentPreview ? restoredCandidateText : '')
+      setStatusText(state.source_available ? 'Project session restored; raw XML hidden.' : 'Project restored; upload a source configuration.'); setErrorText('')
     } catch (error) { setErrorText(error instanceof ApiClientError && error.code === 'PROJECT_NOT_FOUND' ? 'Backend project session expired. Re-upload the source configuration.' : errorMessage(error)) }
   }
 
@@ -346,7 +385,7 @@ export default function FirewallApp() {
             <input ref={fileRef} type="file" accept=".xml,text/xml,application/xml" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} />
             <div className="file-card"><FileText size={20} /><div className="grow"><div className="file-name">{sourceName}</div><div className="file-meta">{sizeLabel(sourceBytes)} {statusText}</div></div></div>
             {sourceProvenance && <SourceProvenanceDetails provenance={sourceProvenance} />}
-          </div>{sourceText ? <VirtualCodeViewer lines={sourceLines} /> : <div className="viewer-placeholder">{inventory ? 'Configuration loaded; editor preview omitted because the file is large.' : 'No configuration loaded'}</div>}</div></Section>
+          </div><SourceXmlAccessPanel available={!!inventory} sizeBytes={sourceBytes} revealed={sourceRevealed} lines={sourceLines} busy={sourceArtifactBusy} error={sourceArtifactError} onReveal={revealSourceXml} onHide={hideSourceXml} onDownload={downloadSourceXml} /></div></Section>
           <Section number="3" title="Source Inventory" subtitle="Real parsed PAN-OS inventory"><div className="inventory-head"><span className={inventory ? 'success-pill' : 'muted'}>{inventory ? <CircleCheck size={14} /> : <CircleAlert size={14} />}{inventory ? 'Parsed successfully' : 'Awaiting source'}</span><span className="muted">{inventory ? `${inventory.summary.parser_warnings} parser warnings` : 'No inventory'}</span></div><div className="inventory-grid">
             <Metric icon={<Network size={18} />} value={inventory?.summary.physical_interfaces ?? 0} label="Physical Interfaces" /><Metric icon={<Network size={18} />} value={inventory?.summary.subinterfaces ?? 0} label="Subinterfaces" /><Metric icon={<Layers3 size={18} />} value={inventory?.summary.zones ?? 0} label="Zones" /><Metric icon={<HardDrive size={18} />} value={inventory?.summary.address_objects ?? 0} label="Address Objects" /><Metric icon={<Settings2 size={18} />} value={inventory?.summary.service_objects ?? 0} label="Services" /><Metric icon={<ShieldCheck size={18} />} value={inventory?.summary.security_rules ?? 0} label="Security Policies" /><Metric icon={<GitCompareArrows size={18} />} value={inventory?.summary.nat_rules ?? 0} label="NAT Rules" /><Metric icon={<Network size={18} />} value={inventory?.summary.static_routes ?? 0} label="Static Routes" />
           </div></Section></div>
@@ -392,6 +431,23 @@ export function SourceProvenanceDetails({ provenance }: { provenance: SourceProv
     <span className="source-hash"><span>SHA-256</span><code>{provenance.sha256}</code></span>
   </div>
 }
+export function SourceXmlAccessPanel({ available, sizeBytes, revealed, lines, busy, error, onReveal, onHide, onDownload }: {
+  available: boolean; sizeBytes: number | null; revealed: boolean; lines: string[]; busy: 'revealing' | 'downloading' | null; error: string;
+  onReveal: () => void; onHide: () => void; onDownload: () => void
+}) {
+  if (!available) return <div className="viewer-placeholder">No configuration loaded</div>
+  const revealAvailable = sizeBytes != null && sizeBytes <= MAX_TEXT_PREVIEW_BYTES
+  if (revealed) return <div className="source-xml-preview" aria-busy={busy ? 'true' : 'false'}>
+    <div className="source-preview-toolbar"><div><strong>Raw source XML visible</strong><span>Hide it when syntax-level review is complete.</span></div><div><button className="btn secondary" type="button" onClick={onHide} disabled={!!busy}>Hide XML</button><button className="btn secondary" type="button" onClick={onDownload} disabled={!!busy}><Download size={14} />{busy === 'downloading' ? 'Downloading…' : 'Download XML'}</button></div></div>
+    {error && <div className="source-artifact-error" role="alert"><CircleAlert size={15} /><span>{error} Try the action again after checking the backend session.</span></div>}
+    <VirtualCodeViewer lines={lines} />
+  </div>
+  return <div className="source-xml-guard" aria-busy={busy ? 'true' : 'false'}>
+    <ShieldCheck size={24} aria-hidden="true" />
+    <div className="source-xml-guard-copy"><strong>Raw XML hidden</strong><span>Parsed inventory and migration analysis remain available without exposing the configuration text in the dashboard.</span>{!revealAvailable && <small>This source exceeds the {sizeLabel(MAX_TEXT_PREVIEW_BYTES)} editor limit. Use explicit download for controlled local review.</small>}{error && <div className="source-artifact-error" role="alert"><CircleAlert size={15} /><span>{error} Try the action again after checking the backend session.</span></div>}</div>
+    <div className="source-xml-actions"><button className="btn secondary" type="button" onClick={onReveal} disabled={!revealAvailable || !!busy}>{busy === 'revealing' ? 'Revealing XML…' : 'Reveal source XML'}</button><button className="btn secondary" type="button" onClick={onDownload} disabled={!!busy}><Download size={14} />{busy === 'downloading' ? 'Downloading…' : 'Download source XML'}</button></div>
+  </div>
+}
 function StatusBadge({ status }: { status: MappingStatus }) { return <span className={`status-badge ${status.toLowerCase()}`}>{status === 'Mapped' ? <Check size={11} /> : status === 'Preserved' ? <span className="dot" /> : status === 'Review' ? <AlertTriangle size={11} /> : <CircleAlert size={11} />}{status}</span> }
 function HardwareMap({ rows, target }: { rows: { source: string; target: string; zone: string; status: MappingStatus; scope: RenderScope }[]; target: string }) { return <div className="hardware-map"><div className="hardware-panel"><div className="hardware-title">Parsed Source</div>{rows.map((row) => <div className="port-row" key={row.source}><span>{row.source}</span><small>{row.zone}</small></div>)}</div><div className="hardware-links">{rows.map((row) => <div key={row.source}>→</div>)}</div><div className="hardware-panel"><div className="hardware-title">{target}</div>{rows.map((row) => <div className="port-row target" key={row.source}><span>{row.target || row.source}</span><small>{row.status} · {scopeLabel(row.scope)}</small></div>)}</div></div> }
 function Readiness({ label, detail, ok, warn }: { label: string; detail: string; ok: boolean; warn?: boolean }) { return <div className="readiness-item">{ok && !warn ? <CircleCheck className="ok-icon" size={22} /> : <AlertTriangle className="warn-icon" size={22} />}<div><strong>{label}</strong><span>{detail}</span></div></div> }
@@ -428,5 +484,5 @@ function RawComparison({ candidate, sourceLines, candidateLines, sourceLoaded, c
   const [query, setQuery] = useState('')
   const references = candidate.summary.zone_reference_changes + candidate.summary.virtual_router_reference_changes + candidate.summary.static_route_reference_changes + candidate.summary.nat_reference_changes
   function search() { const index = sourceLines.findIndex((line) => line.toLowerCase().includes(query.toLowerCase())); if (query && index >= 0) setTop(index * 16) }
-  return <div className="raw-wrap"><div className="raw-toolbar"><span className="small-label">View</span><button className="chip active">Side by Side</button><button className="chip" disabled title="Raw changed-line filtering is not available in v0.4. Use Semantic Changes.">Changed Only</button><div className="search-wrap narrow"><Search size={14} /><input placeholder="Search in configuration..." value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') search() }} /></div><button className="btn secondary" onClick={() => setExpanded((value) => !value)}>{expanded ? 'Collapse' : 'Expanded'}</button></div><div className={`diff-grid ${expanded ? 'expanded' : ''}`}><div className="diff-panel"><div className="diff-title">Source Configuration</div>{sourceLoaded ? <VirtualCodeViewer lines={sourceLines} height={expanded ? 520 : 270} scrollTop={top} onScrollTop={setTop} /> : <div className="viewer-placeholder">Source preview omitted because the file is large.</div>}</div><div className="diff-panel"><div className="diff-title">Candidate Configuration</div>{candidateLoaded ? <VirtualCodeViewer lines={candidateLines} height={expanded ? 520 : 270} scrollTop={top} onScrollTop={setTop} /> : <div className="viewer-placeholder">Candidate preview omitted because the file is large.</div>}</div><div className="diff-summary"><h4>Transformation Summary</h4><div className="donut small"><div><strong>{candidate.status === 'REVIEW_REQUIRED' ? 'REVIEW' : candidate.status}</strong><span>PLAN</span></div></div><div className="summary-row"><span>Mappings</span><b>{candidate.summary.valid_mappings}</b></div><div className="summary-row"><span>Derived Children</span><b>{candidate.summary.derived_subinterface_mappings}</b></div><div className="summary-row"><span>References</span><b>{references}</b></div></div></div></div>
+  return <div className="raw-wrap"><div className="raw-toolbar"><span className="small-label">View</span><button className="chip active">Side by Side</button><button className="chip" disabled title="Raw changed-line filtering is not available in v0.4. Use Semantic Changes.">Changed Only</button><div className="search-wrap narrow"><Search size={14} /><input placeholder="Search in configuration..." value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') search() }} /></div><button className="btn secondary" onClick={() => setExpanded((value) => !value)}>{expanded ? 'Collapse' : 'Expanded'}</button></div><div className={`diff-grid ${expanded ? 'expanded' : ''}`}><div className="diff-panel"><div className="diff-title">Source Configuration</div>{sourceLoaded ? <VirtualCodeViewer lines={sourceLines} height={expanded ? 520 : 270} scrollTop={top} onScrollTop={setTop} /> : <div className="viewer-placeholder">Source XML is hidden. Reveal it in Source Configuration to inspect the raw comparison.</div>}</div><div className="diff-panel"><div className="diff-title">Candidate Configuration</div>{candidateLoaded ? <VirtualCodeViewer lines={candidateLines} height={expanded ? 520 : 270} scrollTop={top} onScrollTop={setTop} /> : <div className="viewer-placeholder">Candidate preview omitted because the file is large.</div>}</div><div className="diff-summary"><h4>Transformation Summary</h4><div className="donut small"><div><strong>{candidate.status === 'REVIEW_REQUIRED' ? 'REVIEW' : candidate.status}</strong><span>PLAN</span></div></div><div className="summary-row"><span>Mappings</span><b>{candidate.summary.valid_mappings}</b></div><div className="summary-row"><span>Derived Children</span><b>{candidate.summary.derived_subinterface_mappings}</b></div><div className="summary-row"><span>References</span><b>{references}</b></div></div></div></div>
 }

@@ -39,10 +39,10 @@ Workflow baru dapat disebut `Lab Available` jika sistem dapat:
 | Candidate generation | `Available` untuk target/render path yang sudah dikualifikasi | Menjadi input deployment, tetapi belum otomatis layak di-load ke device |
 | Candidate validation lokal | `Available` | Hanya membuktikan parsing, inventory expectation, dan preservation scope lokal |
 | Source XML upload | `Available` | Tetap tersedia sebagai alternatif collect; parser dan review harus memakai satu jalur validasi |
-| Source API collection | `Partial` | Backend dan UI read-only tersedia serta telah diuji offline; durability, audit, masking raw XML, dan pembuktian perangkat lab belum selesai |
+| Source API collection | `Partial` | Backend dan UI read-only tersedia serta telah diuji offline; durability, audit artifact, dan pembuktian perangkat lab belum selesai |
 | Live firewall connection | `Partial` | XML API client dan connection test tersedia untuk endpoint IP/port allowlist; belum pernah diuji ke perangkat nyata |
 | Project state | In-memory dan temporary directory | Tidak cukup untuk job deployment dan audit yang harus bertahan setelah restart |
-| Raw source access | Source XML dapat diunduh dan ditampilkan pada UI lokal | Collection dari firewall perlu masking dan kebijakan akses artifact sebelum diaktifkan |
+| Raw source access | `Partial`: dashboard menyembunyikan XML secara default dan hanya mengambilnya saat reveal/download eksplisit | Endpoint artifact belum memiliki authorization dan audit event tersendiri |
 | App authentication/RBAC | `Unavailable` | Live deployment harus tetap localhost/lab sampai kontrol akses tersedia |
 | Device validation/commit | `Unavailable` | Harus dibuat sebagai state machine asynchronous |
 | Rollback teruji | `Unavailable` | Production gate tidak boleh dibuka |
@@ -615,7 +615,7 @@ Tiap checkpoint menyimpan `status`, `started_at`, `finished_at`, `actor`, `sourc
 
 Checklist ini mengacu pada fase P0 sampai P2 di bagian 9. `IMP-01` sampai `IMP-07` harus selesai dan lolos gerbang offline sebelum `IMP-08` dimulai. Keberhasilan unit test tidak menggantikan uji perangkat lab.
 
-Status saat ini: **P0 parsial**. Tanda `[x]` hanya berarti subtask tersebut sudah ada di working tree lokal dan telah diuji secara offline. Item induk tetap `[ ]` sampai semua subtask dan exit gate-nya lulus. Browser click-through UAT terisolasi untuk flow source API sudah dijalankan dengan response API yang di-intercept; UAT aplikasi penuh, integrasi fake PAN-OS server penuh, commit/push, dan koneksi ke perangkat nyata belum dilakukan.
+Status saat ini: **P0 parsial**. Tanda `[x]` hanya berarti subtask tersebut sudah ada di branch fitur dan telah diuji secara offline. Item induk tetap `[ ]` sampai semua subtask dan exit gate-nya lulus. Browser click-through UAT terisolasi untuk flow source API dan raw artifact access sudah dijalankan dengan response API yang di-intercept; UAT aplikasi penuh, integrasi fake PAN-OS server penuh, dan koneksi ke perangkat nyata belum dilakukan.
 
 - [ ] `IMP-01` (P0): definisikan model `SourceSnapshot`, `DeviceIdentity`, `DeploymentPackage`, `DeploymentEvent`, dan transisi state durable. Uji invalidation saat source hash, mapping, profile, atau target baseline berubah.
   - [x] Tambahkan provenance dasar (`origin`, jenis snapshot, SHA-256, waktu UTC, serta field identitas opsional) ke respons source dan project; upload manual tetap berstatus `UNVERIFIED` tanpa serial/model rekaan. Bukti: `schemas.py`, `services.py`, dan `test_api_v04.py`.
@@ -639,12 +639,13 @@ Status saat ini: **P0 parsial**. Tanda `[x]` hanya berarti subtask tersebut suda
   - [x] Tampilkan provenance upload/restore project di dashboard: asal, status verifikasi, waktu UTC, dan SHA-256. Tes render memastikan upload manual tidak mengaku sebagai running config atau identitas perangkat terverifikasi. Bukti: `FirewallApp.tsx`, `api/types.ts`, dan `firewallIntegration.test.mjs`.
   - [x] Tambahkan form koneksi dan collect, hasil identity dari connection test, loading dan error state, urutan test sebelum collect, serta pengelolaan secret tanpa browser storage. API key dan CA dibersihkan setelah collect/upload berhasil. Bukti: `FirewallApp.tsx`, `api/client.ts`, `api/types.ts`, dan `firewallIntegration.test.mjs`.
   - [x] Jalankan browser click-through UAT terisolasi dengan response API yang di-intercept: validasi kosong, error autentikasi backend, loading, success identity, urutan keyboard, collect sukses, credential tidak masuk `localStorage`, credential dibersihkan, dan viewport 390 px tanpa overflow. Ini bukan uji perangkat atau UAT aplikasi penuh.
-  - [ ] Mask raw XML secara default dan tambahkan aturan reveal/download yang aman sebelum koneksi perangkat diaktifkan.
+  - [x] Mask raw XML secara default. Collect, upload, dan restore tidak mengambil raw XML otomatis; reveal/download adalah aksi eksplisit, hide membuang teks dari state browser, file besar tidak dapat dibuka di editor, dan error/loading/mobile/keyboard telah diuji lewat browser UAT. Bukti: `FirewallApp.tsx`, `styles.css`, dan `firewallIntegration.test.mjs`.
+  - [ ] Tambahkan authorization dan audit event backend khusus untuk reveal/download source artifact sebelum koneksi perangkat nyata diaktifkan.
 - [ ] `IMP-05` (P1): implementasikan target preflight, source-target serial guard, target baseline hash, target-local preservation policy, serta package builder dari baseline target. Uji konflik pending changes, unsupported model, dan drift target.
 - [ ] `IMP-06` (P1): simpan backup running/candidate terenkripsi; implementasikan import, load, change-summary comparison, `validate full`, job polling, dan read-only reconciliation untuk hasil ambigu. Uji dengan fake server sebelum firewall lab.
 - [ ] `IMP-07` (P2): implementasikan approval one-time yang terikat hash/serial, commit terpisah, terminal job polling, post-commit verification, serta recovery yang juga membutuhkan validasi dan verification. Uji commit job gagal setelah enqueue dan putus koneksi saat commit.
 - [ ] `IMP-08` (setelah `Implementation Complete`): jalankan migration drill pada dua firewall lab berbeda serial, termasuk invalid candidate, pending changes, restore backup, dan akses out-of-band. Simpan evidence per `CP-01` sampai `CP-13`; baru setelah itu beri label `Lab Available`.
 
-Verifikasi terakhir untuk perubahan lokal ini: 581 tes backend lulus; 17 tes frontend dan build frontend lulus pada putaran sebelumnya. Hasil tersebut hanya membuktikan jalur yang tercakup tes offline, bukan kelulusan `IMP-01` sampai `IMP-04` secara menyeluruh.
+Verifikasi terakhir: 581 tes backend lulus pada implementasi source collection; 19 tes frontend dan production build lulus setelah masking raw XML. Browser UAT membuktikan tidak ada request source artifact sebelum reveal/download eksplisit, serta mencakup error, loading, reveal, hide, download, keyboard, dan viewport 390 px. Hasil tersebut hanya membuktikan jalur yang tercakup tes offline, bukan kelulusan `IMP-01` sampai `IMP-04` secara menyeluruh.
 
 P0 sampai P2 adalah tahap implementasi dan pengujian offline, tanpa koneksi ke perangkat nyata. Stage dan commit pertama pada target lab hanya dilakukan setelah gerbang `Implementation Complete (offline)` lulus, dengan approval terpisah. Production tetap menunggu exit gate lab dan seluruh gate P3.
