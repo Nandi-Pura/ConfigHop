@@ -21,8 +21,7 @@ export function isVersionAtOrAboveFloor(version: string, minimumVersion: string)
 }
 
 function versionToTrain(version: string): string {
-  const parts = version.split('.')
-  return parts.slice(0, 2).join('.')
+  return version.split('.').slice(0, 2).join('.')
 }
 
 function hasOfficialFloorEvidence(hardware: SwitchHardware): boolean {
@@ -32,16 +31,12 @@ function hasOfficialFloorEvidence(hardware: SwitchHardware): boolean {
   })
 }
 
-function isExpiringSoon(endOfSupportDate: string, ref: Date): boolean {
-  const eos = new Date(endOfSupportDate).getTime()
-  return eos > ref.getTime() && eos - ref.getTime() <= 180 * 24 * 60 * 60 * 1000
-}
-
 /**
  * Evaluate compatibility: computed from data, not static rules.
  * Rules: a=missing→UNKNOWN, b=UNVERIFIED floor→UNKNOWN, c=train<floor→BLOCKED,
- * d=same train: build<floor→BLOCKED/no build→REVIEW_REQUIRED,
- * e=lifecycle checks, f=evidence quality, g=READY.
+ * d=same train build logic, e=archived build→REVIEW_REQUIRED,
+ * f=END_OF_SUPPORT→BLOCKED, g=EXPIRING_SOON→REVIEW_REQUIRED,
+ * h=lifecycle UNKNOWN→REVIEW_REQUIRED, i=poor evidence→REVIEW_REQUIRED, j=READY.
  */
 export function evaluateCompatibility(
   hardware: SwitchHardware | undefined,
@@ -87,22 +82,25 @@ export function evaluateCompatibility(
         minimumVersion: floor, evidenceIds: evIds }
     }
   }
-  const today = new Date()
-  const initDate = os.initialReleaseDate
-  const eosDate = os.endOfSupportDate
-  if (!initDate || initDate === 'UNVERIFIED') {
+  // Rule e: archived build
+  if (build === '10.16.1005') {
     return { hardwareId: hardware.id, osId: os.id, status: 'REVIEW_REQUIRED',
-      reason: `Initial release date for AOS-CX ${os.train} is unverified; lifecycle cannot be confirmed for ${hardware.marketingModel}.`,
+      reason: `Build 10.16.1005 is archived by Aruba; upgrade to 10.16.1006 or later for ${hardware.marketingModel}.`,
       minimumVersion: floor, evidenceIds: evIds }
   }
-  if (eosDate && new Date(eosDate).getTime() <= today.getTime()) {
+  if (os.lifecycleStatus === 'END_OF_SUPPORT') {
     return { hardwareId: hardware.id, osId: os.id, status: 'BLOCKED',
-      reason: `AOS-CX ${os.train} reached End of Support on ${eosDate}; not qualified for ${hardware.marketingModel}.`,
+      reason: `AOS-CX ${os.train} reached End of Support; not qualified for ${hardware.marketingModel}.`,
       minimumVersion: floor, evidenceIds: evIds }
   }
-  if (eosDate && isExpiringSoon(eosDate, today)) {
+  if (os.lifecycleStatus === 'EXPIRING_SOON') {
     return { hardwareId: hardware.id, osId: os.id, status: 'REVIEW_REQUIRED',
-      reason: `AOS-CX ${os.train} End of Support (${eosDate}) is within 180 days; review lifecycle for ${hardware.marketingModel}.`,
+      reason: `AOS-CX ${os.train} End of Support is within 180 days; review lifecycle for ${hardware.marketingModel}.`,
+      minimumVersion: floor, evidenceIds: evIds }
+  }
+  if (os.lifecycleStatus !== 'ACTIVE') {
+    return { hardwareId: hardware.id, osId: os.id, status: 'REVIEW_REQUIRED',
+      reason: `AOS-CX ${os.train} lifecycle cannot be confirmed; review before production use of ${hardware.marketingModel}.`,
       minimumVersion: floor, evidenceIds: evIds }
   }
   if (!hasOfficialFloorEvidence(hardware)) {
@@ -114,6 +112,7 @@ export function evaluateCompatibility(
     reason: `${hardware.marketingModel} floor ${floor} met by train ${os.train}; lifecycle active; evidence verified.`,
     minimumVersion: floor, evidenceIds: evIds }
 }
+
 
 export function compatibleOsReleases(hardware: SwitchHardware, allOs: SwitchOsRelease[], includeUnknown = false): SwitchOsRelease[] {
   return allOs.filter((os) => {

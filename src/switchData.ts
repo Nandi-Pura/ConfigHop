@@ -44,6 +44,7 @@ export const switchOsLabel = (item: SwitchPlatform) => `${item.software.product}
 
 export { ARUBA_HARDWARE, getArubaSeries, getArubaHardwareBySeries, getArubaHardwareById, getCompatibleOs, evaluateCompatibility, AOS_CX_RELEASES } from './switch/catalog.ts'
 export { compatibilityLabel, compatibilityClass, buildSelection, compareVersions, isVersionAtOrAboveFloor } from './switch/compatibility.ts'
+export { computeLifecycleStatus } from './switch/aosCxOs.ts'
 export const switchTargetAruba = buildSelection(CX6300M_48G, AOS_CX_RELEASES.find((release) => release.id === 'aos-cx-10.16')!)
 
 export const switchConfig = `version 17.12.3

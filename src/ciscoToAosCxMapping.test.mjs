@@ -11,6 +11,7 @@ import { AOS_CX_RELEASES } from './switch/aosCxOs.ts'
 
 const OS_1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
 const OS_1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+const OS_1017 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
 
 test('1. Deterministic mapping - source intent is not mutated', () => {
   const config = `
@@ -44,12 +45,13 @@ vlan 20
   assert.equal(resBlocked.targetIntent.targetPlatform.compatibilityStatus, 'BLOCKED')
   assert.ok(resBlocked.findings.some((f) => f.severity === 'error' && f.message.includes('BLOCKED')))
 
-  // CX6400_V2 on 10.16 is REVIEW_REQUIRED: initialReleaseDate='UNVERIFIED' → lifecycle unconfirmed
+  // CX6400_V2 on 10.16 is READY: 10.16 lifecycle ACTIVE (earliest bound 2024-05-21 from official
+  // 10.14.0001 RN; official tier → drives ACTIVE); floor 10.05.0001 met; official evidence.
   const resReady = mapCiscoToAosCx(parsed, CX6400_V2, OS_1016)
   assert.equal(
     resReady.targetIntent.targetPlatform.compatibilityStatus,
-    'REVIEW_REQUIRED',
-    `CX6400_V2 on 10.16: expected REVIEW_REQUIRED (unverified lifecycle), got ${resReady.targetIntent.targetPlatform.compatibilityStatus}`
+    'READY',
+    `CX6400_V2 on 10.16: expected READY (lifecycle ACTIVE from official bound), got ${resReady.targetIntent.targetPlatform.compatibilityStatus}`
   )
 
   // CX6000 on 10.13 is READY (floor 10.11.1011 met by 10.13; lifecycle active; release-notes evidence)
@@ -255,11 +257,12 @@ vlan 10
 vlan 20
 `
   const parsed = parseCiscoConfig(config)
+  // CX6300M_48G (JL659A, floor 10.14.0001) on 10.16: lifecycle ACTIVE → platform READY → VLANs READY
   const mapped = mapCiscoToAosCx(parsed, CX6300M_48G, OS_1016)
 
   assert.equal(mapped.coverage.totalSourceItems, 2)
-  assert.equal(mapped.coverage.reviewRequiredCount, 2)
-  assert.equal(mapped.coverage.coveragePercent, 0)
+  assert.equal(mapped.coverage.reviewRequiredCount, 0)
+  assert.equal(mapped.coverage.coveragePercent, 100)
 })
 
 
@@ -364,7 +367,10 @@ test('17. Interface status precedence preserves unsupported port-access mappings
     downloadableAcl: { enabled: true, sourceRefs: [{ startLine: 1 }] },
     sourceRefs: [{ startLine: 1 }],
   }
-  const reviewStateMapped = mapCiscoToAosCx(reviewState, CX6300M_48G, OS_1016)
+  // Use synthetic OS with lifecycleStatus UNKNOWN → evaluateCompatibility returns REVIEW_REQUIRED
+  // → defaultStatus REVIEW_REQUIRED → portAccess precedence test is meaningful
+  const osUnknownLifecycle = { ...OS_1016, id: 'synthetic-os-unknown', lifecycleStatus: /** @type {const} */ ('UNKNOWN') }
+  const reviewStateMapped = mapCiscoToAosCx(reviewState, CX6300M_48G, osUnknownLifecycle)
   assert.equal(reviewStateMapped.targetIntent.interfaces[0].portAccess?.status, 'REVIEW_REQUIRED')
   assert.equal(reviewStateMapped.targetIntent.interfaces[0].status, 'REVIEW_REQUIRED')
   assert.ok(reviewStateMapped.findings.some((f) => f.message.includes('unknown administrative state')))
@@ -372,7 +378,7 @@ test('17. Interface status precedence preserves unsupported port-access mappings
   const knownParsed = parseCiscoConfig(config)
   knownParsed.interfaces[0].adminState = 'up'
   knownParsed.interfaces[0].role = 'access'
-  const known = mapCiscoToAosCx(knownParsed, CX6300M_48G, OS_1016)
+  const known = mapCiscoToAosCx(knownParsed, CX6300M_48G, osUnknownLifecycle)
   assert.equal(known.targetIntent.interfaces[0].status, 'REVIEW_REQUIRED')
   assert.equal(known.targetIntent.interfaces[0].portAccess?.status, 'REVIEW_REQUIRED')
   assert.ok(!known.findings.some((f) => f.message.includes('unknown administrative state') || f.message.includes('unknown switchport role')))

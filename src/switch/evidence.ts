@@ -285,6 +285,43 @@ export const SWITCH_EVIDENCE: Record<string, SwitchEvidence> = {
       'JL675A–JL679A: serial-dependent (10.06.0001 older series, 10.11.1011 newer series)',
     ],
   },
+  // Evidence for 10.17 initial release date: MIB file on official 10.17 release notes page
+  'ARUBA-EVD-RN-1017-RELDATE': {
+    id: 'ARUBA-EVD-RN-1017-RELDATE',
+    vendor: 'hpe_aruba',
+    sourceType: 'release-notes',
+    url: 'https://arubanetworking.hpe.com/techdocs/AOS-CX/Consolidated_RNs/HTML-6000/Content/10_17/overview-1017x.htm',
+    title: 'AOS-CX 10.17 Release Notes — MIB file date 2025-11-20 establishes earliest release bound',
+    checkedAt: '2026-10-15',
+    claims: [
+      'AOS-CX 10.17 MIB file on official release notes page dated 2025-11-20; establishes earliest release bound',
+    ],
+  },
+  // Airheads vendor-forum: HPE employee post announcing 10.16.1006, references 10.16.1005 archived
+  'ARUBA-EVD-AIRHEADS-1016-1006': {
+    id: 'ARUBA-EVD-AIRHEADS-1016-1006',
+    vendor: 'hpe_aruba',
+    sourceType: 'vendor-forum',
+    url: 'https://community.arubanetworks.com/community-home/digestviewer/viewthread?MessageKey=10.16.1006',
+    title: 'Airheads: HPE employee announcement — AOS-CX 10.16.1006 released; 10.16.1005 archived',
+    checkedAt: '2026-10-15',
+    claims: [
+      '10.16.1006 released; establishes latest bound 2025-09-02 for 10.16 train',
+      '10.16.1005 is archived by Aruba; recommend upgrading to 10.16.1006 or later',
+    ],
+  },
+  // Airheads vendor-forum: HPE employee post announcing 10.17 and 10.17.1001
+  'ARUBA-EVD-AIRHEADS-1017-1001': {
+    id: 'ARUBA-EVD-AIRHEADS-1017-1001',
+    vendor: 'hpe_aruba',
+    sourceType: 'vendor-forum',
+    url: 'https://community.arubanetworks.com/community-home/digestviewer/viewthread?MessageKey=10.17.1001',
+    title: 'Airheads: HPE employee announcement — AOS-CX 10.17 and 10.17.1001 release',
+    checkedAt: '2026-10-15',
+    claims: [
+      '10.17.1001 announced; establishes latest bound 2026-02-26 for 10.17 train',
+    ],
+  },
 
 
 }

@@ -5,7 +5,7 @@ import {
   switchCatalog, switchOsLabel, switchPorts, switchSource, switchTarget,
   ARUBA_HARDWARE, getArubaSeries, getArubaHardwareBySeries, getArubaHardwareById,
   getCompatibleOs, evaluateCompatibility, AOS_CX_RELEASES,
-  compareVersions, isVersionAtOrAboveFloor,
+  compareVersions, isVersionAtOrAboveFloor, computeLifecycleStatus,
 } from './switchData.ts'
 import { SWITCH_EVIDENCE, isVerified, isClaimVerified } from './switch/evidence.ts'
 import {
@@ -74,28 +74,29 @@ test('2. Models are decoupled from OS releases', () => {
   assert.equal(CX6300M_24SFP.productNumber, 'JL658A')
 })
 
-test('3. Compatibility matrix - CX6300M JL658A on 10.13 is BLOCKED (floor 10.14.0001), 10.16/10.17 REVIEW_REQUIRED', () => {
+test('3. Compatibility matrix - CX6300M JL658A: BLOCKED on 10.13 (floor 10.14.0001), READY on 10.16 and 10.17 (lifecycle ACTIVE)', () => {
   const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
   const os1017 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
   const r1013 = evaluateCompatibility(CX6300M_24SFP, os1013)
   const r1016 = evaluateCompatibility(CX6300M_24SFP, os1016)
   const r1017 = evaluateCompatibility(CX6300M_24SFP, os1017)
-  // JL658A minimum floor 10.14.0001 — train 10.13 is BLOCKED below floor
+  // JL658A floor 10.14.0001 — train 10.13 below floor
   assert.equal(r1013.status, 'BLOCKED', `10.13 must be BLOCKED for JL658A (floor 10.14.0001): ${r1013.reason}`)
-  // 10.16 and 10.17 lifecycle unverified → REVIEW_REQUIRED
-  assert.equal(r1016.status, 'REVIEW_REQUIRED', `10.16: ${r1016.reason}`)
-  assert.equal(r1017.status, 'REVIEW_REQUIRED', `10.17: ${r1017.reason}`)
-  assert.notEqual(r1016.status, 'READY')
+  // 10.16 lifecycle ACTIVE (earliest bound 2024-05-21 official) → floor met → READY
+  assert.equal(r1016.status, 'READY', `10.16: ${r1016.reason}`)
+  // 10.17 lifecycle ACTIVE (earliest 2025-11-20 official; latestEOS 2027-08-26 > 180d from 2026-10-16) → READY
+  assert.equal(r1017.status, 'READY', `10.17: ${r1017.reason}`)
 })
 
-test('4. Hardware with floor above 10.13 (CX6300L S3L75A) is BLOCKED on 10.13, REVIEW_REQUIRED on 10.16+', () => {
+test('4. Hardware with floor above 10.13 (CX6300L S3L75A): BLOCKED on 10.13, READY on 10.16 (lifecycle ACTIVE)', () => {
   const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
   const r1013 = evaluateCompatibility(CX6300L_S3L75A, os1013)
   const r1016 = evaluateCompatibility(CX6300L_S3L75A, os1016)
   assert.equal(r1013.status, 'BLOCKED')
-  assert.equal(r1016.status, 'REVIEW_REQUIRED')
+  // 10.16 lifecycle ACTIVE → floor 10.14.0006 met by 10.16 → READY
+  assert.equal(r1016.status, 'READY', `S3L75A on 10.16: ${r1016.reason}`)
   if (r1013.evidenceIds) {
     assert.ok(r1013.evidenceIds.includes('ARUBA-EVD-RN-1013-1050'))
   }
@@ -351,22 +352,22 @@ test('14c. S3L75A on 10.13 is BLOCKED (floor 10.14.0006 > train 10.13)', () => {
   assert.equal(r.status, 'BLOCKED', r.reason)
 })
 
-test('14d. S3L75A on 10.16 is REVIEW_REQUIRED (floor met; lifecycle unverified)', () => {
+test('14d. S3L75A on 10.16 is READY (10.16 lifecycle ACTIVE; floor 10.14.0006 met; official evidence)', () => {
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
   const r = evaluateCompatibility(CX6300L_S3L75A, os1016)
-  assert.equal(r.status, 'REVIEW_REQUIRED', r.reason)
-  assert.notEqual(r.status, 'READY')
+  // 10.16 lifecycle ACTIVE (earliest bound 2024-05-21 official) → floor terpenuhi → READY
+  assert.equal(r.status, 'READY', r.reason)
   assert.notEqual(r.status, 'BLOCKED')
 })
 
-test('14e. R0X26A, R0X27A, R0X31A, JL741A on 10.16 are not READY (lifecycle unverified)', () => {
+test('14e. R0X26A, R0X27A, R0X31A, JL741A on 10.16 are READY (lifecycle ACTIVE, official evidence)', () => {
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
   for (const sku of ['R0X26A', 'R0X27A', 'R0X31A', 'JL741A']) {
     const hw = ARUBA_HARDWARE.find((h) => h.productNumber === sku)
     assert.ok(hw, `${sku} must exist in catalog`)
     const r = evaluateCompatibility(hw, os1016)
-    assert.notEqual(r.status, 'READY', `${sku} on 10.16 must not be READY (lifecycle unverified): ${r.reason}`)
-    assert.equal(r.status, 'REVIEW_REQUIRED', `${sku} on 10.16: expected REVIEW_REQUIRED, got ${r.status}: ${r.reason}`)
+    // 10.16 lifecycle ACTIVE (earliest bound 2024-05-21 from official 10.14.0001 RN)
+    assert.equal(r.status, 'READY', `${sku} on 10.16: expected READY (lifecycle ACTIVE), got ${r.status}: ${r.reason}`)
   }
 })
 
@@ -434,5 +435,104 @@ test('14k. hardware undefined and OS undefined both yield UNKNOWN without throwi
 
   const rBoth = evaluateCompatibility(undefined, undefined)
   assert.equal(rBoth.status, 'UNKNOWN')
+})
+
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tes baru: lifecycle bounds dan date-driven status
+// asOf disuntikkan ke computeLifecycleStatus agar tes stabil terhadap waktu.
+// Referensi utama: 2026-10-16 (hari ini). Skenario tambahan: 2027-03-01.
+// ──────────────────────────────────────────────────────────────────────────────
+
+test('15a. 10.13 lifecycle ACTIVE on 2026-10-16 (EOS 2028-11-30, > 180d away)', () => {
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  assert.equal(os.lifecycleStatus, 'ACTIVE', `10.13 must be ACTIVE: ${os.notes}`)
+  // Verify via direct computeLifecycleStatus call with injected asOf
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 5, '2026-10-16')
+  assert.equal(status, 'ACTIVE')
+})
+
+test('15b. 10.16 lifecycle ACTIVE on 2026-10-16 (earliest bound official; EOS derived ~2029-05)', () => {
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  assert.equal(os.lifecycleStatus, 'ACTIVE', `10.16 must be ACTIVE: ${os.notes}`)
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 5, '2026-10-16')
+  assert.equal(status, 'ACTIVE')
+  // Earliest tier must be 'official' for ACTIVE to be granted
+  assert.equal(os.initialReleaseEarliest.tier, 'official', '10.16 earliest bound must be official tier')
+})
+
+test('15c. 10.17 lifecycle ACTIVE on 2026-10-16 (SSR 18m; latestEOS 2027-08-26 > 180d away)', () => {
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
+  // latestEOS = 2026-02-26 + 18m = 2027-08-26; 2027-08-26 - 2026-10-16 = 315d > 180d → ACTIVE
+  assert.equal(os.lifecycleStatus, 'ACTIVE', `10.17 on 2026-10-16 must be ACTIVE (latestEOS ~2027-08-26, 315d away): ${os.notes}`)
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1.5, '2026-10-16')
+  assert.equal(status, 'ACTIVE')
+  // Earliest tier must be official
+  assert.equal(os.initialReleaseEarliest.tier, 'official', '10.17 earliest bound must be official tier')
+})
+
+test('15d. 10.18 lifecycle UNKNOWN (earliest bound tier unverified; never ACTIVE)', () => {
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.18')
+  assert.equal(os.lifecycleStatus, 'UNKNOWN', `10.18 must be UNKNOWN: ${os.notes}`)
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1.5, '2026-10-16')
+  assert.equal(status, 'UNKNOWN')
+  assert.notEqual(status, 'ACTIVE')
+})
+
+test('15e. JL676A on 10.16 is READY (floor 10.06.0001 met; 10.16 ACTIVE; official evidence)', () => {
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  const r = evaluateCompatibility(CX6100_JL676A, os1016)
+  assert.equal(r.status, 'READY', `JL676A on 10.16: ${r.reason}`)
+})
+
+test('15f. R0X27A on 10.16 is READY (floor 10.05.0001 met; 10.16 ACTIVE; official evidence)', () => {
+  const hw = ARUBA_HARDWARE.find((h) => h.productNumber === 'R0X27A')
+  assert.ok(hw, 'R0X27A must exist')
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  const r = evaluateCompatibility(hw, os1016)
+  assert.equal(r.status, 'READY', `R0X27A on 10.16: ${r.reason}`)
+})
+
+test('15g. JL741A on 10.16 is READY (floor 10.05.0001 met; 10.16 ACTIVE; official evidence)', () => {
+  const hw = ARUBA_HARDWARE.find((h) => h.productNumber === 'JL741A')
+  assert.ok(hw, 'JL741A must exist')
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  const r = evaluateCompatibility(hw, os1016)
+  assert.equal(r.status, 'READY', `JL741A on 10.16: ${r.reason}`)
+})
+
+test('15h. Synthetic hardware (floor 10.16.1006) on 10.16: build 10.16.1006 → READY; build 10.16.1005 → BLOCKED', () => {
+  // Synthetic with official evidence so floor evidence check passes
+  const hwFloor1006 = {
+    ...CX6405,
+    id: 'synthetic-floor-1006-test',
+    minimumVersion: '10.16.1006',
+    minimumVersionStatus: /** @type {const} */ ('VERIFIED'),
+  }
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  // build at floor → READY (same-train, build >= floor, lifecycle ACTIVE, official evidence)
+  const rReady = evaluateCompatibility(hwFloor1006, os1016, '10.16.1006')
+  assert.equal(rReady.status, 'READY', `build 10.16.1006 on floor 10.16.1006: ${rReady.reason}`)
+  // build below floor → BLOCKED
+  const rBlocked = evaluateCompatibility(hwFloor1006, os1016, '10.16.1005')
+  assert.equal(rBlocked.status, 'BLOCKED', `build 10.16.1005 < floor 10.16.1006: ${rBlocked.reason}`)
+})
+
+test('15i. Hardware floor 10.04.1000, build 10.16.1005 → REVIEW_REQUIRED (archived build)', () => {
+  // Any hardware with floor below 10.16 (train > floorTrain); build = archived 10.16.1005
+  const hw = ARUBA_HARDWARE.find((h) => h.productNumber === 'R0X31A')  // floor 10.04.1000
+  assert.ok(hw, 'R0X31A must exist')
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  const r = evaluateCompatibility(hw, os1016, '10.16.1005')
+  // cmpTrain > 0 (10.16 > 10.04), so same-train block skipped; then archived-build rule fires
+  assert.equal(r.status, 'REVIEW_REQUIRED', `archived build 10.16.1005: ${r.reason}`)
+  assert.ok(r.reason.includes('archived'), `reason must mention archived: ${r.reason}`)
+})
+
+test('15j. 10.17 on 2027-03-01: EXPIRING_SOON (latestEOS ~2027-08, still > asOf, within 180d)', () => {
+  // 2027-03-01 → latestEOS = 2026-02-26 + 18m = 2027-08-26 → diff = ~178d → EXPIRING_SOON
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1.5, '2027-03-01')
+  assert.equal(status, 'EXPIRING_SOON', `10.17 on 2027-03-01 should be EXPIRING_SOON (latestEOS ~2027-08-26)`)
 })
 

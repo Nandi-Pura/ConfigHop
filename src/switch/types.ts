@@ -21,7 +21,25 @@ export interface SwitchPortDefinition {
 }
 
 export type OsReleaseType = 'LSR' | 'SSR' | 'UNKNOWN'
-export type LifecycleStatus = 'ACTIVE' | 'END_OF_SUPPORT' | 'UNKNOWN'
+export type LifecycleStatus = 'ACTIVE' | 'EXPIRING_SOON' | 'END_OF_SUPPORT' | 'UNKNOWN'
+
+/**
+ * Evidence tier for lifecycle purposes.
+ * 'official' = release-notes or official-documentation → can drive ACTIVE.
+ * 'vendor-forum' = Airheads/community announcements → max REVIEW_REQUIRED for lifecycle.
+ */
+export type EvidenceTier = 'official' | 'vendor-forum' | 'unverified'
+
+export interface OsReleaseBound {
+  /** ISO date (YYYY-MM-DD) of this bound */
+  date: string
+  /** Evidence IDs that establish this bound */
+  evidenceIds: string[]
+  /** Reason/derivation for this bound value */
+  reason: string
+  /** Tier of the strongest evidence behind this bound */
+  tier: EvidenceTier
+}
 
 export interface SwitchOsRelease {
   id: string              // e.g. "aos-cx-10.13"
@@ -30,7 +48,10 @@ export interface SwitchOsRelease {
   train: string           // e.g. "10.13"
   exactVersion?: string   // e.g. "10.13.1000" if known
   releaseType: OsReleaseType
-  initialReleaseDate?: string  // ISO date if known
+  /** Earliest confirmed release date with evidence. Absent = unverified. */
+  initialReleaseEarliest?: OsReleaseBound
+  /** Latest confirmed release date with evidence. Absent = no upper bound known. */
+  initialReleaseLatest?: OsReleaseBound
   endOfSupportDate?: string    // ISO date if known
   lifecycleStatus: LifecycleStatus
   evidenceIds: string[]
@@ -120,7 +141,7 @@ export interface SwitchPlatformSelection {
 export interface SwitchEvidence {
   id: string
   vendor: SwitchVendor | 'generic'
-  sourceType: 'official-documentation' | 'release-notes' | 'product-bulletin' | 'datasheet' | 'compatibility-matrix' | 'unverified'
+  sourceType: 'official-documentation' | 'release-notes' | 'product-bulletin' | 'datasheet' | 'compatibility-matrix' | 'vendor-forum' | 'unverified'
   url: string
   title: string
   checkedAt: string  // ISO date
