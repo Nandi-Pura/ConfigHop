@@ -41,6 +41,15 @@ export interface OsReleaseBound {
   tier: EvidenceTier
 }
 
+export interface ArchivedBuild {
+  /** Build version that is archived/deprecated (e.g. "10.16.1005") */
+  build: string
+  /** Human-readable reason */
+  reason: string
+  /** Evidence IDs supporting this archived status */
+  evidenceIds: string[]
+}
+
 export interface SwitchOsRelease {
   id: string              // e.g. "aos-cx-10.13"
   vendor: SwitchVendor
@@ -53,6 +62,8 @@ export interface SwitchOsRelease {
   /** Latest confirmed release date with evidence. Absent = no upper bound known. */
   initialReleaseLatest?: OsReleaseBound
   endOfSupportDate?: string    // ISO date if known
+  /** Builds within this train that are archived/deprecated by vendor */
+  archivedBuilds?: ArchivedBuild[]
   lifecycleStatus: LifecycleStatus
   evidenceIds: string[]
   notes?: string

@@ -82,11 +82,14 @@ export function evaluateCompatibility(
         minimumVersion: floor, evidenceIds: evIds }
     }
   }
-  // Rule e: archived build
-  if (build === '10.16.1005') {
-    return { hardwareId: hardware.id, osId: os.id, status: 'REVIEW_REQUIRED',
-      reason: `Build 10.16.1005 is archived by Aruba; upgrade to 10.16.1006 or later for ${hardware.marketingModel}.`,
-      minimumVersion: floor, evidenceIds: evIds }
+  // Rule e: archived build check from OS data
+  if (build && os.archivedBuilds) {
+    const archived = os.archivedBuilds.find((ab) => ab.build === build)
+    if (archived) {
+      return { hardwareId: hardware.id, osId: os.id, status: 'REVIEW_REQUIRED',
+        reason: `Build ${build} is archived: ${archived.reason}`,
+        minimumVersion: floor, evidenceIds: [...evIds, ...archived.evidenceIds] }
+    }
   }
   if (os.lifecycleStatus === 'END_OF_SUPPORT') {
     return { hardwareId: hardware.id, osId: os.id, status: 'BLOCKED',

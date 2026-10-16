@@ -74,7 +74,7 @@ test('2. Models are decoupled from OS releases', () => {
   assert.equal(CX6300M_24SFP.productNumber, 'JL658A')
 })
 
-test('3. Compatibility matrix - CX6300M JL658A: BLOCKED on 10.13 (floor 10.14.0001), READY on 10.16 and 10.17 (lifecycle ACTIVE)', () => {
+test('3. Compatibility matrix - CX6300M JL658A: BLOCKED on 10.13, READY on 10.16, REVIEW_REQUIRED on 10.17 (EXPIRING_SOON)', () => {
   const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
   const os1017 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
@@ -85,8 +85,8 @@ test('3. Compatibility matrix - CX6300M JL658A: BLOCKED on 10.13 (floor 10.14.00
   assert.equal(r1013.status, 'BLOCKED', `10.13 must be BLOCKED for JL658A (floor 10.14.0001): ${r1013.reason}`)
   // 10.16 lifecycle ACTIVE (earliest bound 2024-05-21 official) → floor met → READY
   assert.equal(r1016.status, 'READY', `10.16: ${r1016.reason}`)
-  // 10.17 lifecycle ACTIVE (earliest 2025-11-20 official; latestEOS 2027-08-26 > 180d from 2026-10-16) → READY
-  assert.equal(r1017.status, 'READY', `10.17: ${r1017.reason}`)
+  // 10.17 lifecycle EXPIRING_SOON (latestEOS 2027-02-26 within 180d from 2026-10-16) → REVIEW_REQUIRED
+  assert.equal(r1017.status, 'REVIEW_REQUIRED', `10.17 should be REVIEW_REQUIRED (EXPIRING_SOON): ${r1017.reason}`)
 })
 
 test('4. Hardware with floor above 10.13 (CX6300L S3L75A): BLOCKED on 10.13, READY on 10.16 (lifecycle ACTIVE)', () => {
@@ -461,12 +461,12 @@ test('15b. 10.16 lifecycle ACTIVE on 2026-10-16 (earliest bound official; EOS de
   assert.equal(os.initialReleaseEarliest.tier, 'official', '10.16 earliest bound must be official tier')
 })
 
-test('15c. 10.17 lifecycle ACTIVE on 2026-10-16 (SSR 18m; latestEOS 2027-08-26 > 180d away)', () => {
+test('15c. 10.17 lifecycle EXPIRING_SOON on 2026-10-16 (SSR 1y; latestEOS 2027-02-26 within 180d)', () => {
   const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
-  // latestEOS = 2026-02-26 + 18m = 2027-08-26; 2027-08-26 - 2026-10-16 = 315d > 180d → ACTIVE
-  assert.equal(os.lifecycleStatus, 'ACTIVE', `10.17 on 2026-10-16 must be ACTIVE (latestEOS ~2027-08-26, 315d away): ${os.notes}`)
-  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1.5, '2026-10-16')
-  assert.equal(status, 'ACTIVE')
+  // latestEOS = 2026-02-26 + 1y = 2027-02-26; 2027-02-26 - 2026-10-16 = 133d < 180d → EXPIRING_SOON
+  assert.equal(os.lifecycleStatus, 'EXPIRING_SOON', `10.17 on 2026-10-16 must be EXPIRING_SOON (latestEOS 2027-02-26, 133d away): ${os.notes}`)
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1, '2026-10-16')
+  assert.equal(status, 'EXPIRING_SOON')
   // Earliest tier must be official
   assert.equal(os.initialReleaseEarliest.tier, 'official', '10.17 earliest bound must be official tier')
 })
@@ -474,7 +474,7 @@ test('15c. 10.17 lifecycle ACTIVE on 2026-10-16 (SSR 18m; latestEOS 2027-08-26 >
 test('15d. 10.18 lifecycle UNKNOWN (earliest bound tier unverified; never ACTIVE)', () => {
   const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.18')
   assert.equal(os.lifecycleStatus, 'UNKNOWN', `10.18 must be UNKNOWN: ${os.notes}`)
-  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1.5, '2026-10-16')
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1, '2026-10-16')
   assert.equal(status, 'UNKNOWN')
   assert.notEqual(status, 'ACTIVE')
 })
@@ -529,10 +529,55 @@ test('15i. Hardware floor 10.04.1000, build 10.16.1005 → REVIEW_REQUIRED (arch
   assert.ok(r.reason.includes('archived'), `reason must mention archived: ${r.reason}`)
 })
 
-test('15j. 10.17 on 2027-03-01: EXPIRING_SOON (latestEOS ~2027-08, still > asOf, within 180d)', () => {
-  // 2027-03-01 → latestEOS = 2026-02-26 + 18m = 2027-08-26 → diff = ~178d → EXPIRING_SOON
+test('15j. 10.17 on 2027-03-01: END_OF_SUPPORT (latestEOS 2027-02-26 < asOf)', () => {
+  // 2027-03-01 > latestEOS = 2026-02-26 + 1y = 2027-02-26 → END_OF_SUPPORT
   const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
-  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1.5, '2027-03-01')
-  assert.equal(status, 'EXPIRING_SOON', `10.17 on 2027-03-01 should be EXPIRING_SOON (latestEOS ~2027-08-26)`)
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1, '2027-03-01')
+  assert.equal(status, 'END_OF_SUPPORT', `10.17 on 2027-03-01 should be END_OF_SUPPORT (latestEOS 2027-02-26)`)
+})
+
+test('15k. 10.17 on 2026-03-01: ACTIVE (earliestEOS 2026-11-20 > asOf + 180d)', () => {
+  // earliestEOS = 2025-11-20 + 1y = 2026-11-20; 2026-11-20 - 2026-03-01 = 264d > 180d → ACTIVE
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1, '2026-03-01')
+  assert.equal(status, 'ACTIVE', `10.17 on 2026-03-01 should be ACTIVE (earliestEOS 2026-11-20, 264d away)`)
+})
+
+test('15l. 10.17 on 2026-12-01: UNKNOWN (earliestEOS past, latestEOS future)', () => {
+  // earliestEOS = 2026-11-20 < 2026-12-01; latestEOS = 2027-02-26 > 2026-12-01 → straddling → UNKNOWN
+  const os = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
+  const status = computeLifecycleStatus(os.initialReleaseEarliest, os.initialReleaseLatest, os.endOfSupportDate, 1, '2026-12-01')
+  assert.equal(status, 'UNKNOWN', `10.17 on 2026-12-01 should be UNKNOWN (straddling EOS bounds)`)
+})
+
+test('15m. JL658A on 10.17 is REVIEW_REQUIRED (lifecycle EXPIRING_SOON on 2026-10-16)', () => {
+  const hw = ARUBA_HARDWARE.find((h) => h.productNumber === 'JL658A')
+  const os1017 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
+  const r = evaluateCompatibility(hw, os1017)
+  assert.equal(r.status, 'REVIEW_REQUIRED', `JL658A on 10.17 should be REVIEW_REQUIRED (lifecycle EXPIRING_SOON): ${r.reason}`)
+  assert.ok(r.reason.includes('End of Support'), `reason should mention End of Support: ${r.reason}`)
+})
+
+test('15n. Real compatibility matrix — print for all hardware × trains', () => {
+  console.log('\n=== Compatibility Matrix (asOf: 2026-10-16) ===')
+  console.log('hardwareId | train | status | reason')
+  console.log('---')
+  
+  ARUBA_HARDWARE.forEach((hw) => {
+    AOS_CX_RELEASES.forEach((os) => {
+      const r = evaluateCompatibility(hw, os)
+      if (r.status !== 'UNKNOWN') {
+        console.log(`${hw.productNumber.padEnd(8)} | ${os.train.padEnd(6)} | ${r.status.padEnd(17)} | ${r.reason.slice(0, 80)}`)
+      }
+    })
+  })
+  
+  // Sample UNKNOWN
+  const sampleUnknown = evaluateCompatibility(
+    ARUBA_HARDWARE.find((h) => h.minimumVersionStatus === 'UNVERIFIED'),
+    AOS_CX_RELEASES[0]
+  )
+  console.log(`... (UNKNOWN entries omitted; sample): ${sampleUnknown.reason.slice(0, 60)}`)
+  console.log('===\n')
 })
 
