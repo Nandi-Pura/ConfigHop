@@ -17,10 +17,11 @@ from .schemas import (
     CandidateMetadata, CandidateRequest, ErrorView, HealthView, InventoryView,
     PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest,
     SourceCollectRequest, SourceConnectionRequest, SourceConnectionTestView, SourceProvenance, SourceView,
-    TargetBaselineCollectRequest,
+    TargetBaselineCollectRequest, TargetPreflightView,
 )
 from .services import (
-    PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, collect_source, collect_target_baseline,
+    PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, check_target_preflight,
+    collect_source, collect_target_baseline,
     generate_candidate, inventory_view,
     profile_detail, profile_summary, project_deployment_plan, project_view, require_inventory, require_live, select_profile,
     select_source_profile, assess_project, test_source_connection,
@@ -138,7 +139,8 @@ def create_app(store: ProjectStore | None = None, *,
         action = {("GET", "source"): "SOURCE_ARTIFACT_ACCESS",
             ("POST", "source/connection/test"): "SOURCE_CONNECTION_TEST",
             ("POST", "source/collect"): "SOURCE_COLLECT",
-            ("POST", "target/baseline/collect"): "TARGET_BASELINE_COLLECT"}.get((request.method, suffix))
+            ("POST", "target/baseline/collect"): "TARGET_BASELINE_COLLECT",
+            ("POST", "target/preflight/check"): "TARGET_PREFLIGHT_CHECK"}.get((request.method, suffix))
         audit = request.app.state.audit
         digest = project.source_provenance.sha256 if project.source_provenance else None
         if not request.app.state.access.allows(project_id, token):
@@ -163,9 +165,11 @@ def create_app(store: ProjectStore | None = None, *,
             raise
         digest = project.source_provenance.sha256 if project.source_provenance else None
         try:
+            outcome = ("FAILED" if response.status_code >= 400 else
+                "ACCESS_GRANTED" if action == "SOURCE_ARTIFACT_ACCESS" else
+                "COMPLETED" if action == "TARGET_PREFLIGHT_CHECK" else "SUCCEEDED")
             audit.record(project_id=project_id, actor_sha256=actor, action=action,
-                outcome=("ACCESS_GRANTED" if action == "SOURCE_ARTIFACT_ACCESS" else "SUCCEEDED")
-                    if response.status_code < 400 else "FAILED",
+                outcome=outcome,
                 operation_id=operation, error_code=getattr(request.state, "error_code", None), source_sha256=digest)
         except sqlite3.Error:
             return _error("AUDIT_UNAVAILABLE", "Audit storage is unavailable. Reload project state before retrying.", 503)
@@ -288,6 +292,14 @@ def create_app(store: ProjectStore | None = None, *,
         if project.target_baseline is None:
             raise ServiceError("TARGET_BASELINE_NOT_AVAILABLE", "No target baseline has been collected.", 409)
         return project.target_baseline
+
+    @app.post("/api/v1/projects/{project_id}/target/preflight/check", response_model=TargetPreflightView)
+    async def post_check_target_preflight(project_id: str, body: TargetBaselineCollectRequest, request: Request):
+        return await check_target_preflight(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
+            expected_model=body.expected_model,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
 
     async def xml_stream(project, path: Path):
         async with project.lock:

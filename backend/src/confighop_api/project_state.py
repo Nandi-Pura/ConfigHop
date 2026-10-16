@@ -271,6 +271,21 @@ class ProjectDatabase:
             self._event(project_id, None, "TARGET_BASELINE_OBSERVED", "SUCCEEDED",
                 reason, state["target_baseline"]["sha256"])
 
+    def detach_active_package(self, project_id: str, reason: str) -> None:
+        with self.connection:
+            row = self.connection.execute("SELECT state_json FROM projects WHERE project_id=?",
+                (project_id,)).fetchone()
+            if row is None:
+                raise ValueError("Project metadata is unavailable")
+            state = json.loads(row[0])
+            package_id = state.get("active_package_id")
+            if package_id is None:
+                return
+            self._invalidate_package(package_id, reason)
+            state["active_package_id"] = None
+            self.connection.execute("UPDATE projects SET state_json=? WHERE project_id=?",
+                (json.dumps(state, sort_keys=True), project_id))
+
     def snapshots(self, project_id: str) -> list[SourceSnapshot]:
         return [SourceSnapshot.model_validate_json(row[0]) for row in self.connection.execute(
             "SELECT snapshot_json FROM source_snapshots WHERE project_id=? ORDER BY rowid", (project_id,))]

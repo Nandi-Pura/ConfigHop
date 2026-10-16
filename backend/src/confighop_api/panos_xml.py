@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import ipaddress
 import ssl
 from collections.abc import Collection
+from typing import Literal
 
 import httpx
 from defusedxml import ElementTree
@@ -133,20 +134,56 @@ async def export_configuration(client: httpx.AsyncClient, api_key: str, *,
     return document
 
 
-async def read_running_configuration(client: httpx.AsyncClient, api_key: str, *,
-    max_bytes: int = MAX_XML_BYTES) -> bytes:
+async def _read_configuration(client: httpx.AsyncClient, api_key: str, *,
+    action: Literal["show", "get"], max_bytes: int) -> bytes:
+    invalid_code = "XML_API_INVALID_RUNNING_CONFIG" if action == "show" else "XML_API_INVALID_CANDIDATE_CONFIG"
+    failed_code = "XML_API_RUNNING_CONFIG_FAILED" if action == "show" else "XML_API_CANDIDATE_CONFIG_FAILED"
     document = await _request_bytes(client, api_key,
-        {"type": "config", "action": "show", "xpath": "/config"}, max_bytes=max_bytes)
+        {"type": "config", "action": action, "xpath": "/config"}, max_bytes=max_bytes)
     try:
         root = ElementTree.fromstring(document)
     except (ElementTree.ParseError, DefusedXmlException, ValueError) as exc:
-        raise XmlApiError("XML_API_INVALID_RUNNING_CONFIG", "The target API returned invalid active configuration XML.") from exc
+        raise XmlApiError(invalid_code, "The target API returned invalid configuration XML.") from exc
     if root.tag != "response" or root.get("status") != "success":
-        raise XmlApiError("XML_API_RUNNING_CONFIG_FAILED", "The target API did not return active configuration.")
+        raise XmlApiError(failed_code, "The target API did not return configuration.")
     config = root.find("./result/config")
     if config is None or config.find("./devices/entry") is None:
-        raise XmlApiError("XML_API_INVALID_RUNNING_CONFIG", "The target API omitted the active device configuration.")
+        raise XmlApiError(invalid_code, "The target API omitted the device configuration.")
     return ElementTree.tostring(config, encoding="utf-8")
+
+
+async def read_running_configuration(client: httpx.AsyncClient, api_key: str, *,
+    max_bytes: int = MAX_XML_BYTES) -> bytes:
+    return await _read_configuration(client, api_key, action="show", max_bytes=max_bytes)
+
+
+async def read_candidate_configuration(client: httpx.AsyncClient, api_key: str, *,
+    max_bytes: int = MAX_XML_BYTES) -> bytes:
+    return await _read_configuration(client, api_key, action="get", max_bytes=max_bytes)
+
+
+PreflightProbe = Literal["change_summary", "commit_locks", "pending_jobs"]
+_PREFLIGHT_COMMANDS = {
+    "change_summary": "<show><config><list><change-summary/></list></config></show>",
+    "commit_locks": "<show><commit-locks/></show>",
+    "pending_jobs": "<show><jobs><pending/></jobs></show>",
+}
+
+
+async def read_preflight_probe(client: httpx.AsyncClient, api_key: str,
+    probe: PreflightProbe) -> bool:
+    document = await _request_bytes(client, api_key,
+        {"type": "op", "cmd": _PREFLIGHT_COMMANDS[probe]}, max_bytes=1024 * 1024)
+    try:
+        root = ElementTree.fromstring(document)
+    except (ElementTree.ParseError, DefusedXmlException, ValueError) as exc:
+        raise XmlApiError("XML_API_INVALID_PREFLIGHT", "The target API returned invalid preflight XML.") from exc
+    if root.tag != "response" or root.get("status") != "success":
+        raise XmlApiError("XML_API_PREFLIGHT_FAILED", "The target API rejected a read-only preflight check.")
+    result = root.find("./result")
+    if result is None:
+        raise XmlApiError("XML_API_INVALID_PREFLIGHT", "The target API omitted preflight results.")
+    return not len(result) and not (result.text or "").strip()
 
 
 async def read_system_info(client: httpx.AsyncClient, api_key: str) -> DeviceIdentity:

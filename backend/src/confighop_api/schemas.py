@@ -106,6 +106,14 @@ class TargetBaselineCollectRequest(SourceConnectionRequest):
     expected_model: str = Field(min_length=1, max_length=128)
 
 
+class TargetPreflightView(BaseModel):
+    target_serial: str
+    observed_at_utc: datetime
+    status: Literal["BLOCKED", "INCOMPLETE"]
+    checks: dict[str, Literal["CLEAR", "BLOCKED", "NOT_CHECKED"]]
+    deployment_allowed: Literal[False] = False
+
+
 class DeviceIdentityView(BaseModel):
     hostname: str
     serial: str

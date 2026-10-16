@@ -58,6 +58,36 @@ def target_client(*, first: bytes | None = None, second: bytes | None = None,
         [("op", None), ("config", "show"), ("config", "show"), ("op", None)])
 
 
+def probe_result(inner: str = "") -> bytes:
+    return f'<response status="success"><result>{inner}</result></response>'.encode()
+
+
+def preflight_client(*, candidate: bytes | None = None, summary: bytes | None = None,
+    locks: bytes | None = None, jobs: bytes | None = None, running: bytes | None = None,
+    running_again: bytes | None = None, serial: str = "target-serial") -> httpx.AsyncClient:
+    documents = iter([system_info(serial), running or active_config(), candidate or active_config(),
+        summary or probe_result(), locks or probe_result(), jobs or probe_result(),
+        running_again or running or active_config(), system_info(serial)])
+    expected = iter([
+        ("op", None, "<show><system><info></info></system></show>"),
+        ("config", "show", None), ("config", "get", None),
+        ("op", None, "<show><config><list><change-summary/></list></config></show>"),
+        ("op", None, "<show><commit-locks/></show>"),
+        ("op", None, "<show><jobs><pending/></jobs></show>"),
+        ("config", "show", None), ("op", None, "<show><system><info></info></system></show>"),
+    ])
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.headers["X-PAN-KEY"] == "secret-key"
+        form = parse_qs(request.content.decode())
+        assert (form["type"][0], form.get("action", [None])[0],
+            form.get("cmd", [None])[0]) == next(expected)
+        assert form["type"][0] in {"config", "op"}
+        return httpx.Response(200, content=next(documents))
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
 def prepare_project(client: TestClient) -> tuple[str, str]:
     project_id = client.post("/api/v1/projects", headers=HEADERS).json()["project_id"]
     base = f"/api/v1/projects/{project_id}"
@@ -176,3 +206,106 @@ def test_target_panos_train_mismatch_does_not_bind(monkeypatch, tmp_path):
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "TARGET_PANOS_TRAIN_MISMATCH"
         assert client.get(base + "/target/baseline").status_code == 409
+
+
+def test_read_only_preflight_reports_incomplete_without_authorizing_deployment(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    target_clients = iter([target_client(), preflight_client()])
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
+        next(target_clients))
+    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        _, base = prepare_project(client)
+        assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
+        response = client.post(base + "/target/preflight/check", json=target_body(), headers=HEADERS)
+        assert response.status_code == 200
+        report = response.json()
+        assert report["status"] == "INCOMPLETE"
+        assert report["deployment_allowed"] is False
+        assert report["checks"]["candidate_matches_running"] == "CLEAR"
+        assert report["checks"]["pending_jobs_empty"] == "CLEAR"
+        assert report["checks"]["ha_state"] == "NOT_CHECKED"
+        assert client.get(base).json()["active_package_id"] is None
+        audit = client.get(base + "/audit").json()["events"]
+        assert [event["outcome"] for event in audit if event["action"] == "TARGET_PREFLIGHT_CHECK"] == [
+            "STARTED", "COMPLETED"]
+        assert "secret-key" not in str(report) + str(audit)
+
+
+@pytest.mark.parametrize("override,check", [
+    ({"candidate": active_config("other")}, "candidate_matches_running"),
+    ({"summary": probe_result("<entry/>")}, "change_summary_empty"),
+    ({"locks": probe_result("<entry/>")}, "commit_locks_empty"),
+    ({"jobs": probe_result("<job><status>ACT</status></job>")}, "pending_jobs_empty"),
+    ({"running": active_config("changed")}, "baseline_unchanged"),
+])
+def test_preflight_blocks_unsafe_target_state(monkeypatch, tmp_path, override, check):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    target_clients = iter([target_client(), preflight_client(**override)])
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
+        next(target_clients))
+    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        _, base = prepare_project(client)
+        assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
+        response = client.post(base + "/target/preflight/check", json=target_body(), headers=HEADERS)
+        assert response.status_code == 200
+        assert response.json()["status"] == "BLOCKED"
+        assert response.json()["checks"][check] == "BLOCKED"
+        assert response.json()["deployment_allowed"] is False
+
+
+def test_preflight_rejects_unrecognized_probe_response(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    target_clients = iter([target_client(), preflight_client(locks=b'<response status="success"/>')])
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
+        next(target_clients))
+    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        _, base = prepare_project(client)
+        assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
+        response = client.post(base + "/target/preflight/check", json=target_body(), headers=HEADERS)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "XML_API_INVALID_PREFLIGHT"
+
+
+def test_preflight_rejects_candidate_api_error(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    target_clients = iter([target_client(), preflight_client(candidate=b'<response status="error"/>')])
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
+        next(target_clients))
+    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        _, base = prepare_project(client)
+        assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
+        response = client.post(base + "/target/preflight/check", json=target_body(), headers=HEADERS)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "XML_API_CANDIDATE_CONFIG_FAILED"
+
+
+def test_preflight_baseline_drift_detaches_current_draft(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    target_clients = iter([target_client(), preflight_client(running=active_config("changed"))])
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
+        next(target_clients))
+    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        project_id, base = prepare_project(client)
+        assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
+        assert client.put(base + "/source-profile", json={"profile_id": "paloalto-pa-5220",
+            "panos_train": "11.1"}, headers=HEADERS).status_code == 200
+        candidate_response = client.post(base + "/candidate", json={"mappings": [
+            {"source_interface": "ethernet1/12", "target_interface": "ethernet1/8"}],
+            "allow_review": True}, headers=HEADERS)
+        assert candidate_response.status_code == 200
+        assert candidate_response.json()["candidate_available"] is True
+        package_id = client.get(base).json()["active_package_id"]
+        assert package_id is not None
+        response = client.post(base + "/target/preflight/check", json=target_body(), headers=HEADERS)
+        assert response.status_code == 200
+        assert response.json()["checks"]["baseline_unchanged"] == "BLOCKED"
+        assert client.get(base).json()["active_package_id"] is None
+        assert client.app.state.store.database.package(package_id).status == "INVALIDATED"
+        assert client.get(base).json()["candidate_available"] is True
+        assert any(event["reason"] == "TARGET_BASELINE_DRIFT" for event in
+            client.get(base + "/deployment-events").json())

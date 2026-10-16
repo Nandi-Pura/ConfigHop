@@ -21,7 +21,7 @@ from confighop_core.hardware.palo_alto import SYNTHETIC
 from confighop_core.dependencies import build_dependency_index
 from confighop_core.errors import ConfigParseError
 from confighop_core.models.dependency import ReferenceType
-from confighop_core.models.hardware import HardwareProfile, ProfileStatus
+from confighop_core.models.hardware import HardwareProfile, ProfileStatus, TargetRenderSupport
 from confighop_core.models.inventory import PaloAltoInventory
 from confighop_core.models.mapping import InterfaceMapping, MigrationPreview, PreviewStatus
 from confighop_core.models.transformation import CandidateRenderResult
@@ -30,11 +30,12 @@ from confighop_core.parsers.palo_alto.parser import MAX_XML_BYTES
 from .schemas import (
     CandidateMetadata, DependencySummary, InventorySummary, InventoryView, PhysicalInterfaceView,
     DeviceIdentityView, PlatformView, ProfileDetail, ProfileSummary, ProjectView,
-    SourceConnectionTestView, SourceProvenance, SourceView,
+    SourceConnectionTestView, SourceProvenance, SourceView, TargetPreflightView,
 )
 from .panos_xml import (
     XmlApiError, create_source_client, create_target_client, export_configuration,
-    read_running_configuration, read_system_info,
+    read_candidate_configuration, read_preflight_probe, read_running_configuration,
+    read_system_info,
 )
 from .project_state import (
     DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, TargetBaseline, mapping_hash,
@@ -540,6 +541,7 @@ async def collect_target_baseline_from_client(store: ProjectStore, project: Proj
     operation_timeout_seconds: float = 60.0) -> TargetBaseline:
     async with project.lock:
         require_inventory(project)
+        project.verify_source()
         profile = require_profile(project)
         source_serial = project.source_provenance.serial if project.source_provenance else None
         if not source_serial:
@@ -587,6 +589,88 @@ async def collect_target_baseline(store: ProjectStore, project: ProjectSession, 
         raise xml_api_service_error(exc) from None
     async with client:
         return await collect_target_baseline_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model)
+
+
+async def check_target_preflight_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str, expected_model: str,
+    operation_timeout_seconds: float = 90.0) -> TargetPreflightView:
+    async with project.lock:
+        require_inventory(project)
+        project.verify_source()
+        profile = require_profile(project)
+        baseline = project.target_baseline
+        if baseline is None:
+            raise ServiceError("TARGET_BASELINE_REQUIRED", "Collect a target baseline first.", 409)
+        if (expected_serial, expected_model) != (baseline.serial, baseline.model):
+            raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+                "Confirmed target identity differs from the collected baseline.", 409)
+        try:
+            async with asyncio.timeout(operation_timeout_seconds):
+                identity_before = await read_system_info(client, api_key)
+                if (identity_before.serial, identity_before.model) != (baseline.serial, baseline.model):
+                    project.database.detach_active_package(project.project_id, "TARGET_IDENTITY_DRIFT")
+                    project.active_package_id = None
+                    raise ServiceError("TARGET_IDENTITY_DRIFT", "Target identity differs from the collected baseline.", 409)
+                running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                change_summary_clear = await read_preflight_probe(client, api_key, "change_summary")
+                commit_locks_clear = await read_preflight_probe(client, api_key, "commit_locks")
+                pending_jobs_clear = await read_preflight_probe(client, api_key, "pending_jobs")
+                running_again = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                identity_after = await read_system_info(client, api_key)
+        except TimeoutError:
+            raise ServiceError("XML_API_OPERATION_TIMEOUT", "Target preflight check timed out.", 504) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if identity_before != identity_after or running != running_again:
+            project.database.detach_active_package(project.project_id, "TARGET_CHANGED_DURING_PREFLIGHT")
+            project.active_package_id = None
+            raise ServiceError("TARGET_CHANGED_DURING_PREFLIGHT",
+                "Target identity or active configuration changed during preflight.", 409)
+        current_sha256 = hashlib.sha256(running).hexdigest()
+        baseline_clear = (current_sha256 == baseline.sha256 and
+            (identity_before.serial, identity_before.model, identity_before.hostname,
+                identity_before.panos_version) ==
+            (baseline.serial, baseline.model, baseline.hostname, baseline.panos_version))
+        if not baseline_clear:
+            project.database.detach_active_package(project.project_id, "TARGET_BASELINE_DRIFT")
+            project.active_package_id = None
+        source_serial = project.source_provenance.serial if project.source_provenance else None
+        train = project.target_panos_train
+        profile_clear = (profile.profile_status == ProfileStatus.VERIFIED and
+            profile.target_render_support == TargetRenderSupport.SUPPORTED and
+            profile.model == identity_before.model and train is not None and
+            train in profile.supported_panos_trains and
+            identity_before.panos_version.startswith(train + "."))
+        checks = {
+            "source_target_serial": "CLEAR" if source_serial and source_serial != baseline.serial else "BLOCKED",
+            "profile_identity_and_train": "CLEAR" if profile_clear else "BLOCKED",
+            "baseline_unchanged": "CLEAR" if baseline_clear else "BLOCKED",
+            "candidate_matches_running": "CLEAR" if candidate == running else "BLOCKED",
+            "change_summary_empty": "CLEAR" if change_summary_clear else "BLOCKED",
+            "commit_locks_empty": "CLEAR" if commit_locks_clear else "BLOCKED",
+            "pending_jobs_empty": "CLEAR" if pending_jobs_clear else "BLOCKED",
+            "ha_state": "NOT_CHECKED", "panorama_ownership": "NOT_CHECKED",
+            "multi_vsys": "NOT_CHECKED", "minimum_software_release": "NOT_CHECKED",
+            "recovery_path": "NOT_CHECKED",
+            "target_local_preservation": "NOT_CHECKED",
+        }
+        return TargetPreflightView(target_serial=baseline.serial,
+            observed_at_utc=datetime.now(timezone.utc),
+            status="BLOCKED" if "BLOCKED" in checks.values() else "INCOMPLETE",
+            checks=checks)
+
+
+async def check_target_preflight(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, allowed_endpoints: set[tuple[str, int]]) -> TargetPreflightView:
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await check_target_preflight_from_client(store, project, client, api_key,
             expected_serial=expected_serial, expected_model=expected_model)
 
 
