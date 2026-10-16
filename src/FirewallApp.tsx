@@ -109,12 +109,19 @@ export default function FirewallApp() {
 
   async function ensureProject(signal?: AbortSignal) {
     if (projectRef.current) return projectRef.current
-    if (!creating.current) creating.current = api.createProject(signal).then((created) => { projectRef.current = created.project_id; setProjectId(created.project_id); return created.project_id }).finally(() => { creating.current = null })
+    if (!creating.current) {
+      const pending = api.createProject(signal).then((created) => {
+        if (creating.current !== pending) throw new DOMException('Project creation superseded', 'AbortError')
+        projectRef.current = created.project_id; setProjectId(created.project_id); return created.project_id
+      }).finally(() => { if (creating.current === pending) creating.current = null })
+      creating.current = pending
+    }
     return creating.current
   }
-  function invalidateResult() { setPreview(null); setCandidate(null); setCandidateText(''); setCandidateBytes(null) }
+  function invalidateResult() { candidateController.current?.abort(); setBusy(false); setPreview(null); setCandidate(null); setCandidateText(''); setCandidateBytes(null) }
   function clearLocal() {
     serial.current++; uploadController.current?.abort(); candidateController.current?.abort()
+    creating.current = null
     setInventory(null); setSelectedScope(null); setShowSuggestions(false); setSourceName('No configuration loaded'); setSourceBytes(null); setSourceText('')
     setProfile(null); setSourceProfile(null); setSourceTrain(''); setTargetTrain(''); setCompatibility(null); setTargets({}); setNativeSpeeds({}); setOpticRates({}); invalidateResult(); setStatusText('No PAN-OS XML source loaded'); setErrorText(''); setTab('Overview')
     setBusy(false)
@@ -123,6 +130,8 @@ export default function FirewallApp() {
     uploadController.current?.abort()
     const controller = new AbortController(); uploadController.current = controller
     const current = ++serial.current
+    invalidateResult(); setCompatibility(null); setInventory(null); setSourceText(''); setSourceBytes(null); setSourceName(file.name)
+    setTargets({}); setNativeSpeeds({}); setOpticRates({}); setSelectedScope(null)
     setBusy(true); setErrorText(''); setStatusText('Uploading and parsing…')
     try {
       const id = await ensureProject(controller.signal)
@@ -207,12 +216,14 @@ export default function FirewallApp() {
   }
   async function newProject() {
     const old = projectRef.current; clearLocal(); projectRef.current = null; setProjectId(null)
+    const current = serial.current
     try { const id = await ensureProject(); if (old && old !== id) await api.deleteProject(old).catch(() => undefined) }
-    catch (error) { setErrorText(errorMessage(error)) }
+    catch (error) { if (current === serial.current) setErrorText(errorMessage(error)) }
   }
   async function clearProject() {
     const old = projectRef.current; clearLocal(); projectRef.current = null; setProjectId(null); localStorage.removeItem(STORAGE)
-    if (old) try { await api.deleteProject(old) } catch (error) { setErrorText(errorMessage(error)) }
+    const current = serial.current
+    if (old) try { await api.deleteProject(old) } catch (error) { if (current === serial.current) setErrorText(errorMessage(error)) }
   }
   function saveProject() {
     if (!projectId) { setErrorText('Create a project or upload a source before saving.'); return }
@@ -222,6 +233,7 @@ export default function FirewallApp() {
   async function loadProject() {
     const raw = localStorage.getItem(STORAGE)
     if (!raw) { setErrorText('No saved project reference was found.'); return }
+    creating.current = null; uploadController.current?.abort()
     const current = ++serial.current; candidateController.current?.abort(); setCompatibility(null); invalidateResult()
     try {
       const saved = JSON.parse(raw) as SavedProject

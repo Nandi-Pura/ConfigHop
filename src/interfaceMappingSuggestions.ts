@@ -22,8 +22,16 @@ export const portCapabilityLabel = (port?: HardwarePort) => port
   ? `${port.media_capabilities.map(media => ({ SFP_PLUS: 'SFP+', QSFP_PLUS: 'QSFP+' })[media] ?? media).join('/') || 'Media unknown'} | ${port.speed_capabilities.join('/') || 'Rates unknown'}`
   : 'Hardware capability unknown'
 
+function includesMapping(source: string, target: string, preview: MigrationPreview | null) {
+  if (!preview) return false
+  const submitted = preview.mappings?.find(item => item.source_interface === source)
+  if (submitted) return submitted.target_interface === target
+  const assignment = preview.hardware_assessment?.effective_assignments.find(item => item.source_interface === source)
+  return assignment ? assignment.target_interface === target : source === target
+}
+
 export function backendMappingStatus(source: string, target: string, preview: MigrationPreview | null) {
-  if (!preview) return 'Pending backend validation'
+  if (!preview || !includesMapping(source, target, preview)) return 'Pending backend validation'
   const assignment = preview.hardware_assessment?.effective_assignments.find(item => item.source_interface === source && item.target_interface === target)
   const findings = rowFindings(source, target, preview)
   const statuses = [preview.overall_status ?? preview.status, assignment?.status]
@@ -49,7 +57,7 @@ export function rankTargetInterfaces({ source, sourceProfile, targetProfile, map
     const fit = hardwareFit(sourcePort, port)
     const selectable = canSelectPortForAnalysis(port, targetProfile?.target_render_support)
     const assignment = preview?.hardware_assessment?.effective_assignments.find(item => item.source_interface === source.name && item.target_interface === port.name)
-    const findings = rowFindings(source.name, port.name, preview)
+    const findings = includesMapping(source.name, port.name, preview) ? rowFindings(source.name, port.name, preview) : []
     const blocked = assignment?.status === 'BLOCKED' || findings.some(item => item.severity === 'ERROR')
     const unqualified = !selectable || port.candidate_support === 'BLOCKED' || port.availability === 'BREAKOUT_CHILD' || targetProfile?.target_render_support === 'ANALYSIS_ONLY' || blocked
     const group: SuggestionGroup = unqualified ? 'NOT QUALIFIED / UNAVAILABLE' : fit.status === 'COMPATIBLE' && !assigned.has(port.name) ? 'RECOMMENDED' : 'OTHER AVAILABLE'

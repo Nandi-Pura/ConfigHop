@@ -95,7 +95,7 @@ test('current backend blockers prevent a recommendation without disabling analys
 
 test('global backend blockers and review remain visible even for matching hardware', () => {
   for (const status of ['BLOCKED', 'REVIEW_REQUIRED', 'READY']) {
-    const preview = { status, overall_status: status, findings: [], impacts: [] }
+    const preview = { status, overall_status: status, findings: [], impacts: [], mappings: [{ source_interface: source.name, target_interface: 'ethernet1/1' }] }
     assert.equal(ui.backendMappingStatus(source.name, 'ethernet1/1', preview), status)
   }
 })
@@ -146,10 +146,22 @@ test('fixed and mixed optic controls require explicit action and reject unsuppor
 test('source explicit auto, manual speed and duplex never override backend blockers', () => {
   for (const fields of [{ link_speed: 'auto', link_speed_explicit: true }, { link_speed: '1000', link_speed_explicit: true }, { link_duplex: 'full', link_duplex_explicit: true }]) {
     const finding = { code: 'TARGET_AUTO_ONLY_LINK_SERIALIZATION_UNVERIFIED', severity: 'ERROR', message: 'Explicit source link field is blocked', source_interface: source.name, target_interface: 'ethernet1/1' }
-    const preview = { status: 'BLOCKED', impacts: [], findings: [finding] }
+    const preview = { status: 'BLOCKED', impacts: [], findings: [finding], mappings: [{ source_interface: source.name, target_interface: 'ethernet1/1' }] }
     const result = rank([port('ethernet1/1', ['RJ45'], ['1G'])], { source: { ...source, ...fields }, sourceProfile: profile([port(source.name, ['RJ45'], ['1G'])]), preview })
     assert.equal(result[0].fit.status, 'COMPATIBLE')
     assert.equal(result[0].group, 'NOT QUALIFIED / UNAVAILABLE')
     assert.equal(ui.backendMappingStatus(source.name, 'ethernet1/1', preview), 'BLOCKED')
   }
+})
+
+test('a preview for one target does not validate or disqualify hypothetical alternatives', () => {
+  const mappings = [{ source_interface: source.name, target_interface: 'ethernet1/2' }]
+  const preview = { status: 'READY', mappings, impacts: [], findings: [] }
+  assert.equal(ui.backendMappingStatus(source.name, 'ethernet1/2', preview), 'READY')
+  assert.equal(ui.backendMappingStatus(source.name, 'ethernet1/3', preview), 'Pending backend validation')
+  const blocked = { ...preview, status: 'BLOCKED', findings: [{ source_interface: source.name, target_interface: null, code: 'UNMODELED_INTERFACE_REFERENCE', severity: 'ERROR', message: 'Selected mapping has unresolved references' }] }
+  const suggestions = rank([port('ethernet1/2'), port('ethernet1/3')], { mappings, preview: blocked })
+  assert.equal(suggestions.find(item => item.port.name === 'ethernet1/2').group, 'NOT QUALIFIED / UNAVAILABLE')
+  assert.equal(suggestions.find(item => item.port.name === 'ethernet1/3').group, 'RECOMMENDED')
+  assert.equal(ui.backendMappingStatus(source.name, 'ethernet1/3', blocked), 'Pending backend validation')
 })
