@@ -33,7 +33,7 @@ from .schemas import (
 )
 from .panos_xml import XmlApiError, create_source_client, export_configuration, read_system_info
 from .project_state import (
-    DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, mapping_hash,
+    DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, TargetBaseline, mapping_hash,
     package_input_hash, sha256_file,
 )
 
@@ -86,6 +86,7 @@ class ProjectSession:
     candidate: CandidateRenderResult | None = None
     active_snapshot_id: str | None = None
     active_package_id: str | None = None
+    target_baseline: TargetBaseline | None = None
     integrity_error: bool = False
 
     @property
@@ -101,6 +102,7 @@ class ProjectSession:
             source_size_bytes=self.source_size_bytes,
             source_provenance=self.source_provenance.model_dump(mode="json") if self.source_provenance else None,
             active_snapshot_id=self.active_snapshot_id, active_package_id=self.active_package_id,
+            target_baseline=self.target_baseline.model_dump(mode="json") if self.target_baseline else None,
             profile_id=self.profile_id, source_profile_id=self.source_profile_id,
             source_panos_train=self.source_panos_train, target_panos_train=self.target_panos_train,
             mappings=[item.model_dump(mode="json") for item in self.mappings],
@@ -151,6 +153,7 @@ class ProjectStore:
             project.source_provenance = SourceProvenance.model_validate(state["source_provenance"]) if state.get("source_provenance") else None
             project.active_snapshot_id = state.get("active_snapshot_id")
             project.active_package_id = state.get("active_package_id")
+            project.target_baseline = TargetBaseline.model_validate(state["target_baseline"]) if state.get("target_baseline") else None
             project.profile_id = state.get("profile_id")
             project.source_profile_id = state.get("source_profile_id")
             project.source_panos_train = state.get("source_panos_train")
@@ -188,6 +191,17 @@ class ProjectStore:
                 project.compatibility = None
                 project.active_package_id = None
                 project.persist()
+            if project.active_package_id:
+                package = self.database.package(project.active_package_id)
+                try:
+                    if package is None:
+                        raise ValueError("Package metadata is unavailable")
+                    self.database.verify_package_artifacts(package)
+                except ValueError:
+                    if package is not None:
+                        self.database.invalidate_package(package.package_id, "PACKAGE_INTEGRITY_FAILED")
+                    project.active_package_id = None
+                    project.persist()
             self.projects[project_id] = project
 
     async def create(self) -> ProjectSession:
@@ -482,6 +496,8 @@ def select_profile(project: ProjectSession, profile_id: str | None, panos_train:
     require_live(project)
     if profile_id:
         profile_detail(profile_id)
+    if (project.profile_id, project.target_panos_train) != (profile_id, panos_train):
+        project.target_baseline = None
     project.profile_id = profile_id
     project.target_panos_train = panos_train
     project.invalidate("TARGET_PROFILE_CHANGED")
@@ -496,6 +512,23 @@ def select_source_profile(project: ProjectSession, profile_id: str | None, panos
     project.source_panos_train = panos_train
     project.invalidate("SOURCE_PROFILE_CHANGED")
     return project_view(project)
+
+
+def record_target_baseline(project: ProjectSession, baseline: TargetBaseline) -> None:
+    require_live(project)
+    source_serial = project.source_provenance.serial if project.source_provenance else None
+    if source_serial and source_serial == baseline.serial:
+        raise ServiceError("SOURCE_TARGET_SAME_SERIAL", "Source and target serial must differ.", 409)
+    previous = project.target_baseline
+    identity = lambda item: (item.serial, item.model, item.hostname, item.panos_version, item.sha256)
+    changed = previous is None or identity(previous) != identity(baseline)
+    reason = "TARGET_BASELINE_CHANGED" if changed else None
+    state = project.export_state()
+    state["target_baseline"] = baseline.model_dump(mode="json")
+    project.database.bind_target_baseline(project.project_id, state, reason)
+    project.target_baseline = baseline
+    if changed:
+        project.active_package_id = None
 
 
 def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:
@@ -598,12 +631,32 @@ async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMa
             input_sha256=package_input_hash(source_sha256=project.source_provenance.sha256,
                 source_profile_id=project.source_profile_id, target_profile_id=project.profile_id,
                 source_panos_train=project.source_panos_train, target_panos_train=project.target_panos_train,
-                mapping_sha256=mapping_hash(project.mappings), target_baseline_sha256=None),
+                mapping_sha256=mapping_hash(project.mappings),
+                target_baseline_sha256=project.target_baseline.sha256 if project.target_baseline else None,
+                candidate_sha256=project.candidate.candidate_sha256),
             mapping_sha256=mapping_hash(project.mappings), source_profile_id=project.source_profile_id,
             target_profile_id=project.profile_id, source_panos_train=project.source_panos_train,
             target_panos_train=project.target_panos_train,
+            target_baseline_sha256=project.target_baseline.sha256 if project.target_baseline else None,
+            target_serial=project.target_baseline.serial if project.target_baseline else None,
             candidate_sha256=project.candidate.candidate_sha256)
-        project.database.save_package(package)
+        package_dir = project.workspace / "packages" / package.package_id
+        package_dir.mkdir(parents=True, mode=0o700)
+        package_artifact = package_dir / "candidate.xml"
+        try:
+            shutil.copyfile(project.candidate_path, package_artifact)
+            os.chmod(package_artifact, 0o600)
+            if sha256_file(package_artifact) != package.candidate_sha256:
+                raise ServiceError("CANDIDATE_INTEGRITY_FAILED", "Candidate artifact integrity check failed.", 409)
+            state = project.export_state()
+            state["active_package_id"] = package.package_id
+            project.database.save_package(package, state=state)
+        except Exception:
+            package_artifact.unlink(missing_ok=True)
+            package_dir.rmdir()
+            project.candidate = None
+            project.persist()
+            raise
         project.active_package_id = package.package_id
     project.persist()
     return candidate_metadata(project)

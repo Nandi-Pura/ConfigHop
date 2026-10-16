@@ -233,6 +233,10 @@ def create_app(store: ProjectStore | None = None, *,
         package = current_store(request).database.package(project.active_package_id)
         if package is None:
             raise ServiceError("PACKAGE_NOT_AVAILABLE", "No current deployment package is available.", 409)
+        try:
+            current_store(request).database.verify_package_artifacts(package)
+        except ValueError:
+            raise ServiceError("PACKAGE_INTEGRITY_FAILED", "Deployment package artifact integrity check failed.", 409) from None
         return package
 
     @app.get("/api/v1/projects/{project_id}/deployment-events", response_model=list[DeploymentEvent])
