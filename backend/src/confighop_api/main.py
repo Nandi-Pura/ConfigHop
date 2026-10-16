@@ -1,8 +1,9 @@
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -24,6 +25,7 @@ from .services import (
     update_preview, upload_source,
 )
 from .panos_xml import XmlApiError, normalize_source_endpoint
+from .access_audit import AuditStore, ProjectAccess, SESSION_COOKIE, SESSION_SECONDS
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -63,43 +65,108 @@ def _source_endpoints(value: str) -> set[tuple[str, int]]:
 
 
 def create_app(store: ProjectStore | None = None, *,
-    allowed_source_endpoints: set[tuple[str, int]] | None = None) -> FastAPI:
+    allowed_source_endpoints: set[tuple[str, int]] | None = None,
+    audit_path: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = store or ProjectStore()
         app.state.allowed_source_endpoints = (allowed_source_endpoints if allowed_source_endpoints is not None
             else _source_endpoints(os.getenv("CONFIGHOP_SOURCE_ENDPOINTS", "")))
+        app.state.access = ProjectAccess()
+        app.state.audit = AuditStore(audit_path or Path(os.getenv("CONFIGHOP_AUDIT_DB",
+            str(Path(store.root.name) / "audit.sqlite3") if store else ".confighop/audit.sqlite3")))
         try:
             yield
         finally:
+            app.state.audit.close()
             app.state.store.close()
 
     app = FastAPI(title="ConfigHop Local API", version="0.7.0",
-        description="Local single-user API without authentication. Bind to 127.0.0.1 only.", lifespan=lifespan)
+        description="Local single-user API with browser-session project ownership. Bind to 127.0.0.1 only.", lifespan=lifespan)
     origins = [item.strip() for item in os.getenv("CONFIGHOP_CORS_ORIGINS",
         "http://localhost:5173,http://127.0.0.1:5173").split(",") if item.strip()]
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "DELETE"],
+    if "*" in origins:
+        raise ValueError("CONFIGHOP_CORS_ORIGINS must list explicit origins for credentialed requests.")
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type", "X-ConfigHop-Client", "X-ConfigHop-Filename"])
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        if request.method in {"POST", "PUT", "DELETE"} and request.url.path.startswith("/api/v1/"):
-            if request.headers.get("x-confighop-client") != "web":
-                response = _error("CLIENT_HEADER_REQUIRED", "X-ConfigHop-Client: web is required.", 400)
-            else:
-                response = await call_next(request)
-        else:
-            response = await call_next(request)
+        response = await project_request(request, call_next)
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        origin = request.headers.get("origin")
+        if origin in origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            if "origin" not in response.headers.get("vary", "").lower():
+                response.headers["Vary"] = ", ".join(filter(None, [response.headers.get("vary"), "Origin"]))
+        return response
+
+    async def project_request(request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        if request.method in {"POST", "PUT", "DELETE"} and request.url.path.startswith("/api/v1/"):
+            if request.headers.get("x-confighop-client") != "web":
+                return _error("CLIENT_HEADER_REQUIRED", "X-ConfigHop-Client: web is required.", 400)
+        parts = request.url.path.split("/")
+        if len(parts) < 5 or parts[1:4] != ["api", "v1", "projects"] or not parts[4]:
+            if request.url.path == "/api/v1/projects" and request.headers.get("origin") not in [None, *origins]:
+                return _error("ORIGIN_NOT_ALLOWED", "Browser origin is not allowed.", 403)
+            return await call_next(request)
+        if request.headers.get("origin") not in [None, *origins]:
+            return _error("ORIGIN_NOT_ALLOWED", "Browser origin is not allowed.", 403)
+        project_id = parts[4]
+        try:
+            project = request.app.state.store.get(project_id)
+        except ServiceError as exc:
+            return _error(exc.code, exc.message, exc.status)
+        token = request.cookies.get(SESSION_COOKIE)
+        actor = ProjectAccess.fingerprint(token)
+        suffix = "/".join(parts[5:])
+        action = {("GET", "source"): "SOURCE_ARTIFACT_ACCESS",
+            ("POST", "source/connection/test"): "SOURCE_CONNECTION_TEST",
+            ("POST", "source/collect"): "SOURCE_COLLECT"}.get((request.method, suffix))
+        audit = request.app.state.audit
+        digest = project.source_provenance.sha256 if project.source_provenance else None
+        if not request.app.state.access.allows(project_id, token):
+            try:
+                audit.record(project_id=project_id, actor_sha256=actor, action=action or "PROJECT_ACCESS",
+                    outcome="DENIED", error_code="PROJECT_ACCESS_DENIED", source_sha256=digest)
+            except sqlite3.Error:
+                return _error("AUDIT_UNAVAILABLE", "Audit storage is unavailable.", 503)
+            return _error("PROJECT_ACCESS_DENIED", "Open this project in the browser session that created it.", 403)
+        if not action:
+            return await call_next(request)
+        try:
+            operation = audit.record(project_id=project_id, actor_sha256=actor, action=action,
+                outcome="STARTED", source_sha256=digest)
+        except sqlite3.Error:
+            return _error("AUDIT_UNAVAILABLE", "Audit storage is unavailable.", 503)
+        try:
+            response = await call_next(request)
+        except Exception:
+            audit.record(project_id=project_id, actor_sha256=actor, action=action,
+                outcome="FAILED", operation_id=operation, error_code="INTERNAL_ERROR", source_sha256=digest)
+            raise
+        digest = project.source_provenance.sha256 if project.source_provenance else None
+        try:
+            audit.record(project_id=project_id, actor_sha256=actor, action=action,
+                outcome=("ACCESS_GRANTED" if action == "SOURCE_ARTIFACT_ACCESS" else "SUCCEEDED")
+                    if response.status_code < 400 else "FAILED",
+                operation_id=operation, error_code=getattr(request.state, "error_code", None), source_sha256=digest)
+        except sqlite3.Error:
+            return _error("AUDIT_UNAVAILABLE", "Audit storage is unavailable. Reload project state before retrying.", 503)
         return response
 
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, exc: ServiceError):
+        _request.state.error_code = exc.code
         return _error(exc.code, exc.message, exc.status)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_request: Request, _exc: RequestValidationError):
+        _request.state.error_code = "INVALID_REQUEST"
         return _error("INVALID_REQUEST", "Request shape is invalid.", 400)
 
     @app.exception_handler(Exception)
@@ -126,8 +193,12 @@ def create_app(store: ProjectStore | None = None, *,
             "analysis_only_target_profiles": [p.id for p in profiles if p.target_render_support == "ANALYSIS_ONLY"]}
 
     @app.post("/api/v1/projects", response_model=ProjectView)
-    async def create_project(request: Request):
-        return project_view(await current_store(request).create())
+    async def create_project(request: Request, response: Response):
+        project = await current_store(request).create()
+        token = request.app.state.access.create_owner(project.project_id, request.cookies.get(SESSION_COOKIE))
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict",
+            secure=request.url.scheme == "https", max_age=SESSION_SECONDS, path="/api/v1")
+        return project_view(project)
 
     @app.get("/api/v1/projects/{project_id}", response_model=ProjectView)
     async def get_project(project_id: str, request: Request):
@@ -139,6 +210,12 @@ def create_app(store: ProjectStore | None = None, *,
     @app.delete("/api/v1/projects/{project_id}", status_code=204)
     async def delete_project(project_id: str, request: Request):
         await current_store(request).delete(project_id)
+        request.app.state.access.owners.pop(project_id, None)
+
+    @app.get("/api/v1/projects/{project_id}/audit")
+    async def get_project_audit(project_id: str, request: Request,
+        after: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=500)):
+        return {"events": request.app.state.audit.events(project_id, after=after, limit=limit)}
 
     @app.put("/api/v1/projects/{project_id}/source", response_model=SourceView)
     async def put_source(project_id: str, request: Request):

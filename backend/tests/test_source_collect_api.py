@@ -109,6 +109,10 @@ def test_collect_endpoint_promotes_source_without_persisting_api_key(monkeypatch
         assert client.get("/api/v1/capabilities").json()["domains"]["firewall"]["panos_xml_api_collect"] is True
         assert "test-secret" not in response.text
         assert "test-secret" not in repr(store.get(project_id))
+        events = client.get(f"/api/v1/projects/{project_id}/audit").json()["events"]
+        assert [event["outcome"] for event in events] == ["STARTED", "SUCCEEDED"]
+        assert events[-1]["action"] == "SOURCE_COLLECT"
+        assert events[-1]["source_sha256"] == response.json()["provenance"]["sha256"]
 
 
 def test_connection_test_reads_identity_without_changing_project(monkeypatch):
@@ -135,6 +139,10 @@ def test_connection_test_reads_identity_without_changing_project(monkeypatch):
         assert client.get(f"/api/v1/projects/{project_id}").json()["source_available"] is False
         assert "test-secret" not in response.text
         assert "test-secret" not in repr(store.get(project_id))
+        events = client.get(f"/api/v1/projects/{project_id}/audit").json()["events"]
+        assert events[-1]["action"] == "SOURCE_CONNECTION_TEST"
+        assert events[-1]["outcome"] == "SUCCEEDED"
+        assert events[-1]["source_sha256"] is None
 
 
 def test_failed_collect_endpoint_keeps_uploaded_source(monkeypatch):

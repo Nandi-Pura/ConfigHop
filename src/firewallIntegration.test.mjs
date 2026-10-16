@@ -34,6 +34,7 @@ test('Firewall API client sends mutation guard and candidate mappings to one ver
     await api.candidate('synthetic-project', [{ source_interface: 'ethernet1/12', target_interface: 'ethernet1/50' }], false)
     assert.equal(calls[0].url, `${API_BASE}/projects`)
     assert.equal(calls[0].init.headers['X-ConfigHop-Client'], 'web')
+    assert.equal(calls[0].init.credentials, 'include')
     assert.equal(calls[1].url, `${API_BASE}/projects/synthetic-project/candidate`)
     assert.equal(calls[1].init.headers['X-ConfigHop-Client'], 'web')
     assert.deepEqual(JSON.parse(calls[1].init.body), { mappings: [{ source_interface: 'ethernet1/12', target_interface: 'ethernet1/50' }], allow_review: false })
@@ -58,6 +59,8 @@ test('source API test and collect use the project endpoints with an explicit TLS
     assert.equal(calls[0].init.headers['X-ConfigHop-Client'], 'web')
     assert.deepEqual(JSON.parse(calls[0].init.body), input)
     assert.deepEqual(JSON.parse(calls[1].init.body), input)
+    assert.equal(calls[0].init.credentials, 'include')
+    assert.equal(calls[1].init.credentials, 'include')
   } finally { globalThis.fetch = previous; await vite.close() }
 })
 

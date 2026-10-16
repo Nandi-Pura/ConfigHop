@@ -9,3 +9,5 @@ __pycache__/
 .vite
 *.local
 .DS_Store
+.confighop/
+confighop.cookies

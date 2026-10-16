@@ -1,6 +1,7 @@
 import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload } from './types'
 
-export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || 'http://127.0.0.1:8000/api/v1').replace(/\/$/, '')
+const LOCAL_API_HOST = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1'
+export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || `http://${LOCAL_API_HOST}:8000/api/v1`).replace(/\/$/, '')
 export const MAX_TEXT_PREVIEW_BYTES = 10 * 1024 * 1024
 
 export class ApiClientError extends Error {
@@ -15,6 +16,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       headers: { ...(typeof File !== 'undefined' && init.body instanceof File ? { 'Content-Type': 'application/xml' } : init.body ? { 'Content-Type': 'application/json' } : {}),
         ...(init.method && init.method !== 'GET' ? { 'X-ConfigHop-Client': 'web' } : {}), ...init.headers },
       cache: 'no-store',
+      credentials: 'include',
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
@@ -30,7 +32,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 async function xml(path: string, signal?: AbortSignal): Promise<Blob> {
   let response: Response
-  try { response = await fetch(`${API_BASE}${path}`, { cache: 'no-store', signal }) }
+  try { response = await fetch(`${API_BASE}${path}`, { cache: 'no-store', credentials: 'include', signal }) }
   catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiClientError('API_UNAVAILABLE', `ConfigHop service is unavailable at ${API_BASE}.`, 0)
