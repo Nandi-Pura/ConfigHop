@@ -6,15 +6,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from .project_state import ProjectDatabase
+
 
 SESSION_COOKIE = "confighop_session"
 SESSION_SECONDS = 8 * 60 * 60
 
 
 class ProjectAccess:
-    def __init__(self):
+    def __init__(self, database: ProjectDatabase | None = None):
+        self.database = database
         self.sessions: dict[str, float] = {}
         self.owners: dict[str, str] = {}
+        if database:
+            now = time.time()
+            for project_id, (digest, expires_at) in database.owners().items():
+                if expires_at > now:
+                    self.owners[project_id] = digest
+                    self.sessions[digest] = time.monotonic() + (expires_at - now)
 
     @staticmethod
     def fingerprint(token: str | None) -> str:
@@ -28,6 +37,9 @@ class ProjectAccess:
         digest = self.fingerprint(token)
         self.sessions[digest] = now + SESSION_SECONDS
         self.owners[project_id] = digest
+        if self.database:
+            self.database.save_owner(project_id, digest, time.time() + SESSION_SECONDS)
+            self.database.refresh_owners(digest, time.time() + SESSION_SECONDS)
         return token
 
     def allows(self, project_id: str, token: str | None) -> bool:

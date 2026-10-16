@@ -116,7 +116,7 @@ class SourceConnectionTestView(BaseModel):
     identity: DeviceIdentityView
 
 
-ProjectStatus = Literal["EMPTY", "SOURCE_READY", "PREVIEW_READY", "PREVIEW_REVIEW_REQUIRED", "PREVIEW_BLOCKED", "CANDIDATE_READY"]
+ProjectStatus = Literal["EMPTY", "SOURCE_READY", "SOURCE_INTEGRITY_FAILED", "PREVIEW_READY", "PREVIEW_REVIEW_REQUIRED", "PREVIEW_BLOCKED", "CANDIDATE_READY"]
 
 
 class ProjectView(BaseModel):
@@ -126,6 +126,8 @@ class ProjectView(BaseModel):
     source_filename: str | None
     source_size_bytes: int | None
     source_provenance: SourceProvenance | None = None
+    active_snapshot_id: str | None = None
+    active_package_id: str | None = None
     target_profile_id: str | None
     source_profile_id: str | None = None
     source_panos_train: str | None = None

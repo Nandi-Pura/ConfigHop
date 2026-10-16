@@ -168,6 +168,7 @@ def test_filename_is_display_only_and_projects_are_isolated(api):
     assert response.status_code == 200
     assert response.json()["filename"] == "private.xml"
     assert store.get(first).source_path.name == "source.xml"
+    assert store.get(first).source_path.parent.parent.name == "snapshots"
     assert client.get(f"/api/v1/projects/{second}/inventory").json()["error"]["code"] == "SOURCE_REQUIRED"
     assert client.get(f"/api/v1/projects/{second}/candidate/download").json()["error"]["code"] == "CANDIDATE_NOT_AVAILABLE"
     deleted = client.delete(f"/api/v1/projects/{first}", headers=MUTATION)

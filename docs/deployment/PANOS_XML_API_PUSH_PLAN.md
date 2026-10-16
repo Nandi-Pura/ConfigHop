@@ -39,9 +39,9 @@ Workflow baru dapat disebut `Lab Available` jika sistem dapat:
 | Candidate generation | `Available` untuk target/render path yang sudah dikualifikasi | Menjadi input deployment, tetapi belum otomatis layak di-load ke device |
 | Candidate validation lokal | `Available` | Hanya membuktikan parsing, inventory expectation, dan preservation scope lokal |
 | Source XML upload | `Available` | Tetap tersedia sebagai alternatif collect; parser dan review harus memakai satu jalur validasi |
-| Source API collection | `Partial` | Backend, UI read-only, ownership sesi, dan audit SQLite tersedia; durability snapshot dan pembuktian perangkat lab belum selesai |
+| Source API collection | `Partial` | Backend, UI read-only, ownership sesi, audit SQLite, serta source snapshot durable tersedia; pembuktian perangkat lab belum selesai |
 | Live firewall connection | `Partial` | XML API client dan connection test tersedia untuk endpoint IP/port allowlist; belum pernah diuji ke perangkat nyata |
-| Project state | In-memory dan temporary directory | Tidak cukup untuk job deployment dan audit yang harus bertahan setelah restart |
+| Project state | `Partial`: metadata dan artifact durable pada satu proses lokal | Project, snapshot, candidate, dan hash pemilik sesi dipulihkan setelah restart; koordinasi multi-worker, review approval, dan state deployment lengkap belum tersedia |
 | Raw source access | `Available` dalam scope lokal: hidden default, explicit reveal/download, ownership sesi, dan audit backend | Audit `ACCESS_GRANTED` menunjukkan izin akses, bukan konfirmasi seluruh byte diterima browser |
 | App authentication/RBAC | `Partial`: cookie sesi `HttpOnly` membatasi seluruh route proyek ke browser pembuat | Login akun, identitas operator manusia, dan RBAC belum tersedia; aplikasi tetap localhost |
 | Device validation/commit | `Unavailable` | Harus dibuat sebagai state machine asynchronous |
@@ -619,8 +619,9 @@ Status saat ini: **P0 parsial**. Tanda `[x]` berarti subtask telah diimplementas
 
 - [ ] `IMP-01` (P0): definisikan model `SourceSnapshot`, `DeviceIdentity`, `DeploymentPackage`, `DeploymentEvent`, dan transisi state durable. Uji invalidation saat source hash, mapping, profile, atau target baseline berubah.
   - [x] Tambahkan provenance dasar (`origin`, jenis snapshot, SHA-256, waktu UTC, serta field identitas opsional) ke respons source dan project; upload manual tetap berstatus `UNVERIFIED` tanpa serial/model rekaan. Bukti: `schemas.py`, `services.py`, dan `test_api_v04.py`.
-  - [ ] Simpan snapshot immutable dan identitas perangkat yang terverifikasi; `ProjectStore` saat ini masih memory-only dengan file temporer.
-  - [ ] Tambahkan deployment package, event/audit, state durable, serta invalidation yang terikat source hash, mapping, profile, dan baseline target.
+  - [x] Simpan project, hash pemilik sesi, dan versi source snapshot immutable di SQLite + direktori artifact stabil; pemeriksaan hash saat restart menolak artifact korup dan upload baru dapat memulihkan project. Identitas API collect disimpan sebagai `DeviceIdentity` setelah pemeriksaan konsistensi sebelum/sesudah export. Jenis snapshot tetap `UNVERIFIED` sampai pembuktian lab. Bukti: `project_state.py`, `services.py`, `access_audit.py`, dan `test_durable_project_state.py`.
+  - [x] Tambahkan draft `DeploymentPackage` dan `DeploymentEvent` durable; ikat package ke source snapshot/hash, profile, train, mapping hash, dan candidate hash. Perubahan source, mapping, atau profile menginvalidasi draft dan mencatat alasan; draft masih `DRAFT_UNDEPLOYABLE` tanpa target baseline. Tes mencakup restart, cookie ownership, snapshot lama tidak berubah, kegagalan promosi, dan invalidation.
+  - [ ] Lengkapi ikatan target baseline dan invalidation drift pada workflow nyata, review/approval yang terikat input, serta transisi state deployment durable. Fungsi fingerprint baseline sudah tersedia dan diuji secara offline, tetapi target baseline baru diambil pada `IMP-05`.
 - [ ] `IMP-02` (P0): buat XML API client backend dengan TLS verification/pinning, `X-PAN-KEY`, timeout, size limit, no redirects, parsing aman, dan redaction. Uji HTTP 200 berisi XML error, truncated export, credential failure, dan certificate mismatch.
   - [x] Buat helper export konfigurasi read-only melalui HTTPS dan header `X-PAN-KEY`; tolak redirect, HTTP non-200, XML wrapper/error, XML tidak valid, dan respons melewati batas ukuran. Tes memakai `httpx.MockTransport`, bukan firewall nyata. Bukti: `panos_xml.py` dan `test_panos_xml.py`.
   - [x] Parse respons `show system info` untuk hostname, serial, model, dan PAN-OS version; tolak respons error atau field identitas yang hilang. Export juga menolak XML `<config>` tanpa device entry.
@@ -648,6 +649,6 @@ Status saat ini: **P0 parsial**. Tanda `[x]` berarti subtask telah diimplementas
 
 Hardening P3 yang masih terbuka: login operator, RBAC, retention/enkripsi audit, dan attribution identitas manusia. Penyelesaian `IMP-04` dalam scope lokal tidak membuka koneksi perangkat atau production gate.
 
-Verifikasi 16 Oktober 2026: 590 tes backend, 19 tes frontend, dan production build lulus. Browser UAT dengan backend localhost asli membuktikan cookie `HttpOnly`, upload/reveal/hide/download/restore, dua event akses artifact, penolakan browser terpisah (`403`), serta tidak ada error JavaScript. UAT sebelumnya mencakup lazy artifact fetch, error/loading, keyboard, dan viewport 390 px. `IMP-01` sampai `IMP-03` serta gerbang `Implementation Complete (offline)` masih terbuka.
+Verifikasi 16 Oktober 2026: 596 tes backend, 19 tes frontend, dan production build lulus setelah penambahan persistence dan snapshot. Tes baru mencakup restart project/candidate/cookie, snapshot lama, invalidasi draft, hash artifact korup, dan kegagalan simpan metadata. Browser UAT backend localhost asli pada baseline sebelumnya mencakup upload/reveal/hide/download/restore dan penolakan sesi lain; browser UAT penuh setelah perubahan `IMP-01` belum diulang. `IMP-01` sampai `IMP-03` serta gerbang `Implementation Complete (offline)` masih terbuka.
 
 P0 sampai P2 adalah tahap implementasi dan pengujian offline, tanpa koneksi ke perangkat nyata. Stage dan commit pertama pada target lab hanya dilakukan setelah gerbang `Implementation Complete (offline)` lulus, dengan approval terpisah. Production tetap menunggu exit gate lab dan seluruh gate P3.

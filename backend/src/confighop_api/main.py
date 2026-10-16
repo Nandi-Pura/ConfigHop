@@ -26,6 +26,7 @@ from .services import (
 )
 from .panos_xml import XmlApiError, normalize_source_endpoint
 from .access_audit import AuditStore, ProjectAccess, SESSION_COOKIE, SESSION_SECONDS
+from .project_state import DeploymentEvent, DeploymentPackage, SourceSnapshot, sha256_file
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -69,12 +70,13 @@ def create_app(store: ProjectStore | None = None, *,
     audit_path: Path | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        app.state.store = store or ProjectStore()
+        app.state.store = store if store is not None else ProjectStore(
+            Path(os.getenv("CONFIGHOP_PROJECT_DATA_DIR", ".confighop/projects")))
         app.state.allowed_source_endpoints = (allowed_source_endpoints if allowed_source_endpoints is not None
             else _source_endpoints(os.getenv("CONFIGHOP_SOURCE_ENDPOINTS", "")))
-        app.state.access = ProjectAccess()
+        app.state.access = ProjectAccess(app.state.store.database)
         app.state.audit = AuditStore(audit_path or Path(os.getenv("CONFIGHOP_AUDIT_DB",
-            str(Path(store.root.name) / "audit.sqlite3") if store else ".confighop/audit.sqlite3")))
+            str(store.data_dir / "audit.sqlite3") if store else ".confighop/audit.sqlite3")))
         try:
             yield
         finally:
@@ -217,6 +219,27 @@ def create_app(store: ProjectStore | None = None, *,
         after: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=500)):
         return {"events": request.app.state.audit.events(project_id, after=after, limit=limit)}
 
+    @app.get("/api/v1/projects/{project_id}/snapshots", response_model=list[SourceSnapshot])
+    async def get_snapshots(project_id: str, request: Request):
+        current_store(request).get(project_id)
+        return current_store(request).database.snapshots(project_id)
+
+    @app.get("/api/v1/projects/{project_id}/deployment-package", response_model=DeploymentPackage)
+    async def get_deployment_package(project_id: str, request: Request):
+        project = current_store(request).get(project_id)
+        if not project.active_package_id:
+            raise ServiceError("PACKAGE_NOT_AVAILABLE", "No current deployment package is available.", 409)
+        project.verify_source()
+        package = current_store(request).database.package(project.active_package_id)
+        if package is None:
+            raise ServiceError("PACKAGE_NOT_AVAILABLE", "No current deployment package is available.", 409)
+        return package
+
+    @app.get("/api/v1/projects/{project_id}/deployment-events", response_model=list[DeploymentEvent])
+    async def get_deployment_events(project_id: str, request: Request):
+        current_store(request).get(project_id)
+        return current_store(request).database.events(project_id)
+
     @app.put("/api/v1/projects/{project_id}/source", response_model=SourceView)
     async def put_source(project_id: str, request: Request):
         return await upload_source(current_store(request), current_store(request).get(project_id),
@@ -249,6 +272,7 @@ def create_app(store: ProjectStore | None = None, *,
         project = current_store(request).get(project_id)
         async with project.lock:
             require_inventory(project)
+            project.verify_source()
             filename = project.source_filename or "source.xml"
         return StreamingResponse(xml_stream(project, project.source_path), media_type="application/xml",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -346,6 +370,8 @@ def create_app(store: ProjectStore | None = None, *,
         project = current_store(request).get(project_id)
         async with project.lock:
             require_live(project)
+            if project.active_snapshot_id:
+                project.verify_source()
             return candidate_metadata(project)
 
     @app.get("/api/v1/projects/{project_id}/candidate/download")
@@ -353,9 +379,13 @@ def create_app(store: ProjectStore | None = None, *,
         project = current_store(request).get(project_id)
         async with project.lock:
             require_live(project)
+            if project.active_snapshot_id:
+                project.verify_source()
             if project.candidate is None or not project.candidate.validation.valid or not project.candidate_path.is_file():
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
             digest = project.candidate.candidate_sha256 or ""
+            if sha256_file(project.candidate_path) != digest:
+                raise ServiceError("CANDIDATE_INTEGRITY_FAILED", "Candidate artifact integrity check failed.", 409)
         return StreamingResponse(xml_stream(project, project.candidate_path), media_type="application/xml",
             headers={"Content-Disposition": 'attachment; filename="confighop-candidate.xml"', "ETag": digest})
 
@@ -364,6 +394,8 @@ def create_app(store: ProjectStore | None = None, *,
         project = current_store(request).get(project_id)
         async with project.lock:
             require_live(project)
+            if project.active_snapshot_id:
+                project.verify_source()
             if project.candidate is None or not project.candidate.validation.valid:
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
             return project.candidate.semantic_diff

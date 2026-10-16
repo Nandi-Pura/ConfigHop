@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import ntpath
 import os
 import re
@@ -33,6 +32,10 @@ from .schemas import (
     SourceConnectionTestView, SourceProvenance, SourceView,
 )
 from .panos_xml import XmlApiError, create_source_client, export_configuration, read_system_info
+from .project_state import (
+    DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, mapping_hash,
+    package_input_hash, sha256_file,
+)
 
 
 PROFILE_ID = "paloalto-synthetic-64"
@@ -66,6 +69,7 @@ def xml_api_service_error(exc: XmlApiError) -> ServiceError:
 class ProjectSession:
     project_id: str
     workspace: Path
+    database: ProjectDatabase | None = field(default=None, repr=False)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     deleted: bool = False
     source_filename: str | None = None
@@ -80,36 +84,119 @@ class ProjectSession:
     mappings: list[InterfaceMapping] = field(default_factory=list)
     preview: MigrationPreview | None = None
     candidate: CandidateRenderResult | None = None
+    active_snapshot_id: str | None = None
+    active_package_id: str | None = None
+    integrity_error: bool = False
 
     @property
     def source_path(self) -> Path:
-        return self.workspace / "source.xml"
+        return self.workspace / "snapshots" / (self.active_snapshot_id or "unavailable") / "source.xml"
 
     @property
     def candidate_path(self) -> Path:
         return self.workspace / "candidate.xml"
 
-    def invalidate(self) -> None:
+    def export_state(self) -> dict:
+        return dict(project_id=self.project_id, source_filename=self.source_filename,
+            source_size_bytes=self.source_size_bytes,
+            source_provenance=self.source_provenance.model_dump(mode="json") if self.source_provenance else None,
+            active_snapshot_id=self.active_snapshot_id, active_package_id=self.active_package_id,
+            profile_id=self.profile_id, source_profile_id=self.source_profile_id,
+            source_panos_train=self.source_panos_train, target_panos_train=self.target_panos_train,
+            mappings=[item.model_dump(mode="json") for item in self.mappings],
+            compatibility=self.compatibility.model_dump(mode="json") if self.compatibility else None,
+            preview=self.preview.model_dump(mode="json") if self.preview else None,
+            candidate=self.candidate.model_dump(mode="json") if self.candidate else None)
+
+    def persist(self) -> None:
+        if self.database:
+            self.database.save_project(self.project_id, self.export_state())
+
+    def verify_source(self) -> None:
+        snapshot = self.database.snapshot(self.active_snapshot_id) if self.active_snapshot_id and self.database else None
+        if self.integrity_error or not self.active_snapshot_id or not self.source_provenance or (
+            not snapshot or snapshot.project_id != self.project_id or snapshot.sha256 != self.source_provenance.sha256 or
+            not self.source_path.is_file() or sha256_file(self.source_path) != self.source_provenance.sha256
+        ):
+            self.integrity_error = True
+            raise ServiceError("SOURCE_INTEGRITY_FAILED", "Source snapshot integrity check failed.", 409)
+
+    def invalidate(self, reason: str = "INPUT_CHANGED", *, persist: bool = True) -> None:
+        if self.active_package_id and self.database:
+            self.database.invalidate_package(self.active_package_id, reason)
+        self.active_package_id = None
         self.compatibility = None
         self.mappings = []
         self.preview = None
         self.candidate = None
+        if persist:
+            self.persist()
         self.candidate_path.unlink(missing_ok=True)
 
 
 class ProjectStore:
-    def __init__(self):
-        self.root = tempfile.TemporaryDirectory(prefix="confighop-")
+    def __init__(self, data_dir: Path | None = None):
+        self.root = tempfile.TemporaryDirectory(prefix="confighop-") if data_dir is None else None
+        self.data_dir = Path(self.root.name) if self.root else Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.database = ProjectDatabase(self.data_dir)
         self.projects: dict[str, ProjectSession] = {}
         self.lock = asyncio.Lock()
         self.max_source_bytes = MAX_XML_BYTES
+        for state in self.database.projects():
+            project_id = state["project_id"]
+            project = ProjectSession(project_id, self.data_dir / project_id, database=self.database)
+            project.source_filename = state.get("source_filename")
+            project.source_size_bytes = state.get("source_size_bytes")
+            project.source_provenance = SourceProvenance.model_validate(state["source_provenance"]) if state.get("source_provenance") else None
+            project.active_snapshot_id = state.get("active_snapshot_id")
+            project.active_package_id = state.get("active_package_id")
+            project.profile_id = state.get("profile_id")
+            project.source_profile_id = state.get("source_profile_id")
+            project.source_panos_train = state.get("source_panos_train")
+            project.target_panos_train = state.get("target_panos_train")
+            project.mappings = [InterfaceMapping.model_validate(item) for item in state.get("mappings", [])]
+            project.compatibility = CompatibilityAssessment.model_validate(state["compatibility"]) if state.get("compatibility") else None
+            project.preview = MigrationPreview.model_validate(state["preview"]) if state.get("preview") else None
+            project.candidate = CandidateRenderResult.model_validate(state["candidate"]) if state.get("candidate") else None
+            if project.active_snapshot_id:
+                snapshot = self.database.snapshot(project.active_snapshot_id)
+                if not project.source_provenance or not snapshot or snapshot.project_id != project.project_id or (
+                    snapshot.sha256 != project.source_provenance.sha256 or not project.source_path.is_file() or
+                    sha256_file(project.source_path) != project.source_provenance.sha256):
+                    project.integrity_error = True
+                else:
+                    try:
+                        project.inventory = parse_palo_alto_xml(project.source_path)
+                    except ConfigParseError:
+                        project.integrity_error = True
+            if project.integrity_error:
+                if project.active_package_id:
+                    self.database.invalidate_package(project.active_package_id, "SOURCE_INTEGRITY_FAILED")
+                project.active_package_id = None
+                project.candidate = None
+                project.preview = None
+                project.compatibility = None
+                project.persist()
+            if project.candidate and project.candidate.validation.valid and (
+                not project.candidate_path.is_file() or sha256_file(project.candidate_path) != project.candidate.candidate_sha256
+            ):
+                if project.active_package_id:
+                    self.database.invalidate_package(project.active_package_id, "CANDIDATE_INTEGRITY_FAILED")
+                project.candidate = None
+                project.preview = None
+                project.compatibility = None
+                project.active_package_id = None
+                project.persist()
+            self.projects[project_id] = project
 
     async def create(self) -> ProjectSession:
         async with self.lock:
             project_id = str(uuid4())
-            workspace = Path(self.root.name) / project_id
+            workspace = self.data_dir / project_id
             workspace.mkdir(mode=0o700)
-            project = ProjectSession(project_id, workspace)
+            project = ProjectSession(project_id, workspace, database=self.database)
+            project.persist()
             self.projects[project_id] = project
             return project
 
@@ -125,10 +212,13 @@ class ProjectStore:
             project.deleted = True
             async with self.lock:
                 self.projects.pop(project_id, None)
+            self.database.delete_project(project_id)
             shutil.rmtree(project.workspace)
 
     def close(self) -> None:
-        self.root.cleanup()
+        self.database.close()
+        if self.root:
+            self.root.cleanup()
 
 
 def sanitize_filename(value: str | None) -> str:
@@ -139,26 +229,30 @@ def sanitize_filename(value: str | None) -> str:
 
 def project_view(project: ProjectSession) -> ProjectView:
     state = "EMPTY"
-    if project.inventory:
+    if project.integrity_error:
+        state = "SOURCE_INTEGRITY_FAILED"
+    elif project.inventory:
         state = "SOURCE_READY"
-    if project.preview:
+    if project.preview and not project.integrity_error:
         state = {PreviewStatus.READY: "PREVIEW_READY", PreviewStatus.REVIEW_REQUIRED: "PREVIEW_REVIEW_REQUIRED",
             PreviewStatus.BLOCKED: "PREVIEW_BLOCKED"}[project.preview.status]
-    if project.candidate and project.candidate.validation.valid:
+    if project.candidate and project.candidate.validation.valid and not project.integrity_error:
         state = "CANDIDATE_READY"
     return ProjectView(project_id=project.project_id, state=state,
-        source_available=project.inventory is not None, source_filename=project.source_filename,
+        source_available=project.inventory is not None and not project.integrity_error,
+        source_filename=project.source_filename,
         source_size_bytes=project.source_size_bytes, source_provenance=project.source_provenance,
+        active_snapshot_id=project.active_snapshot_id, active_package_id=project.active_package_id,
         target_profile_id=project.profile_id,
         source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
         target_panos_train=project.target_panos_train,
-        latest_platform_assessment=project.compatibility.platform if project.compatibility else None,
-        latest_hardware_assessment=project.compatibility.hardware if project.compatibility else None,
-        preview_available=project.preview is not None,
-        preview_status=project.preview.status if project.preview else None,
-        candidate_available=bool(project.candidate and project.candidate.validation.valid),
-        candidate_sha256=project.candidate.candidate_sha256 if project.candidate and project.candidate.validation.valid else None,
-        candidate_size_bytes=project.candidate.candidate_size_bytes if project.candidate and project.candidate.validation.valid else None)
+        latest_platform_assessment=project.compatibility.platform if project.compatibility and not project.integrity_error else None,
+        latest_hardware_assessment=project.compatibility.hardware if project.compatibility and not project.integrity_error else None,
+        preview_available=project.preview is not None and not project.integrity_error,
+        preview_status=project.preview.status if project.preview and not project.integrity_error else None,
+        candidate_available=bool(project.candidate and project.candidate.validation.valid and not project.integrity_error),
+        candidate_sha256=project.candidate.candidate_sha256 if project.candidate and project.candidate.validation.valid and not project.integrity_error else None,
+        candidate_size_bytes=project.candidate.candidate_size_bytes if project.candidate and project.candidate.validation.valid and not project.integrity_error else None)
 
 
 def inventory_summary(inventory: PaloAltoInventory) -> InventorySummary:
@@ -259,19 +353,40 @@ async def ingest_source_file(store: ProjectStore, project: ProjectSession, tempo
         inventory = await asyncio.to_thread(parse_palo_alto_xml, temporary)
     except ConfigParseError as exc:
         raise ServiceError("SOURCE_PARSE_FAILED", "Source is not valid supported PAN-OS XML.", 422) from exc
-    digest = hashlib.sha256()
-    with temporary.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    provenance = SourceProvenance(origin=origin, snapshot_kind=snapshot_kind, sha256=digest.hexdigest(),
+    digest = sha256_file(temporary)
+    provenance = SourceProvenance(origin=origin, snapshot_kind=snapshot_kind, sha256=digest,
         received_at_utc=datetime.now(timezone.utc), serial=serial, model=model,
         panos_version=panos_version, hostname=hostname)
-    os.replace(temporary, project.source_path)
+    snapshot_id = str(uuid4())
+    snapshot_dir = project.workspace / "snapshots" / snapshot_id
+    snapshot_dir.mkdir(parents=True, mode=0o700)
+    snapshot_path = snapshot_dir / "source.xml"
+    source_filename = sanitize_filename(filename)
+    identity = DeviceIdentity(hostname=hostname, serial=serial, model=model,
+        panos_version=panos_version, observed_at_utc=provenance.received_at_utc) if all(
+        value is not None for value in (hostname, serial, model, panos_version)) else None
+    snapshot = SourceSnapshot(snapshot_id=snapshot_id, project_id=project.project_id,
+        filename=source_filename, size_bytes=size, sha256=digest, origin=origin,
+        snapshot_kind=snapshot_kind, received_at_utc=provenance.received_at_utc, identity=identity)
+    state = project.export_state()
+    state.update(source_filename=source_filename, source_size_bytes=size,
+        source_provenance=provenance.model_dump(mode="json"), active_snapshot_id=snapshot_id,
+        active_package_id=None, compatibility=None, mappings=[], preview=None, candidate=None)
+    try:
+        os.replace(temporary, snapshot_path)
+        project.database.save_snapshot(snapshot, state)
+    except Exception:
+        snapshot_path.unlink(missing_ok=True)
+        snapshot_dir.rmdir()
+        raise
     project.inventory = inventory
-    project.source_filename = sanitize_filename(filename)
+    project.source_filename = source_filename
     project.source_size_bytes = size
     project.source_provenance = provenance
-    project.invalidate()
+    project.active_snapshot_id = snapshot_id
+    project.active_package_id = None
+    project.integrity_error = False
+    project.invalidate(persist=False)
     return SourceView(project_id=project.project_id, filename=project.source_filename, size_bytes=size,
         platform=PlatformView.model_validate(inventory.platform.model_dump()),
         inventory_summary=inventory_summary(inventory), provenance=provenance)
@@ -341,6 +456,8 @@ async def test_source_connection(*, host: str, port: int, api_key: str, ca_pem: 
 
 def require_inventory(project: ProjectSession) -> PaloAltoInventory:
     require_live(project)
+    if project.integrity_error:
+        raise ServiceError("SOURCE_INTEGRITY_FAILED", "Source snapshot integrity check failed.", 409)
     if project.inventory is None:
         raise ServiceError("SOURCE_REQUIRED", "Upload a valid PAN-OS XML source first.", 409)
     return project.inventory
@@ -367,7 +484,7 @@ def select_profile(project: ProjectSession, profile_id: str | None, panos_train:
         profile_detail(profile_id)
     project.profile_id = profile_id
     project.target_panos_train = panos_train
-    project.invalidate()
+    project.invalidate("TARGET_PROFILE_CHANGED")
     return project_view(project)
 
 
@@ -377,28 +494,30 @@ def select_source_profile(project: ProjectSession, profile_id: str | None, panos
         profile_detail(profile_id)
     project.source_profile_id = profile_id
     project.source_panos_train = panos_train
-    project.invalidate()
+    project.invalidate("SOURCE_PROFILE_CHANGED")
     return project_view(project)
 
 
 def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:
     inventory = require_inventory(project)
-    project.invalidate()
+    project.invalidate("MAPPING_CHANGED")
     project.mappings = mappings
     project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
         project.profile_id, project.target_panos_train, mappings)
+    project.persist()
     return project.compatibility
 
 
 async def update_preview(project: ProjectSession, mappings: list[InterfaceMapping]) -> MigrationPreview:
     inventory = require_inventory(project)
     profile = require_profile(project)
-    project.invalidate()
+    project.invalidate("MAPPING_CHANGED")
     project.mappings = mappings
     if profile.profile_status == ProfileStatus.VERIFIED:
         project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
             project.profile_id, project.target_panos_train, mappings)
     project.preview = await asyncio.to_thread(preview_interface_mappings, inventory, mappings, profile)
+    project.persist()
     return project.preview
 
 
@@ -455,7 +574,8 @@ def project_deployment_plan(project: ProjectSession) -> DeploymentPlan | None:
 async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMapping], allow_review: bool) -> CandidateMetadata:
     inventory = require_inventory(project)
     profile = require_profile(project)
-    project.invalidate()
+    project.verify_source()
+    project.invalidate("MAPPING_CHANGED")
     project.mappings = mappings
     if profile.profile_status == ProfileStatus.VERIFIED:
         project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
@@ -463,13 +583,29 @@ async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMa
     project.preview = await asyncio.to_thread(preview_interface_mappings, inventory, mappings, profile)
     if project.compatibility and (project.compatibility.status.value == "BLOCKED" or
             project.compatibility.status.value == "REVIEW_REQUIRED" and not allow_review):
+        project.persist()
         return candidate_metadata(project) if project.compatibility.status.value == "BLOCKED" else blocked_review_metadata(project)
     if project.preview.status == PreviewStatus.BLOCKED or project.preview.status == PreviewStatus.REVIEW_REQUIRED and not allow_review:
+        project.persist()
         return blocked_review_metadata(project)
     project.candidate = await asyncio.to_thread(render_panos_candidate, project.source_path, inventory,
         project.preview, profile, project.candidate_path, allow_review=allow_review,
         source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
         target_panos_train=project.target_panos_train)
+    if project.candidate.validation.valid:
+        package = DeploymentPackage(package_id=str(uuid4()), project_id=project.project_id,
+            source_snapshot_id=project.active_snapshot_id, source_sha256=project.source_provenance.sha256,
+            input_sha256=package_input_hash(source_sha256=project.source_provenance.sha256,
+                source_profile_id=project.source_profile_id, target_profile_id=project.profile_id,
+                source_panos_train=project.source_panos_train, target_panos_train=project.target_panos_train,
+                mapping_sha256=mapping_hash(project.mappings), target_baseline_sha256=None),
+            mapping_sha256=mapping_hash(project.mappings), source_profile_id=project.source_profile_id,
+            target_profile_id=project.profile_id, source_panos_train=project.source_panos_train,
+            target_panos_train=project.target_panos_train,
+            candidate_sha256=project.candidate.candidate_sha256)
+        project.database.save_package(package)
+        project.active_package_id = package.package_id
+    project.persist()
     return candidate_metadata(project)
 
 
