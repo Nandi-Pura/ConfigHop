@@ -4,7 +4,45 @@ import ssl
 import httpx
 import pytest
 
-from confighop_api.panos_xml import XmlApiError, create_source_client, export_configuration, read_system_info
+from confighop_api.panos_xml import (
+    XmlApiError, create_source_client, export_configuration, read_running_configuration,
+    read_system_info,
+)
+
+
+def test_read_running_configuration_uses_active_config_request():
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert b"type=config" in request.content
+        assert b"action=show" in request.content
+        assert b"xpath=%2Fconfig" in request.content
+        return httpx.Response(200, content=(
+            b'<response status="success"><result><config><devices><entry name="localhost"/>'
+            b'</devices></config></result></response>'))
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20") as client:
+            return await read_running_configuration(client, "secret")
+
+    assert asyncio.run(run()) == b'<config><devices><entry name="localhost" /></devices></config>'
+
+
+@pytest.mark.parametrize("document,code", [
+    (b'<response status="error"><msg>private detail</msg></response>', "XML_API_RUNNING_CONFIG_FAILED"),
+    (b'<response status="success"><result/></response>', "XML_API_INVALID_RUNNING_CONFIG"),
+    (b'<response status="success"><result><config/></result></response>', "XML_API_INVALID_RUNNING_CONFIG"),
+    (b'<!DOCTYPE config [<!ENTITY x SYSTEM "file:///secret">]><response>&x;</response>',
+        "XML_API_INVALID_RUNNING_CONFIG"),
+])
+def test_read_running_configuration_fails_closed(document, code):
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=document)), base_url="https://10.0.0.20") as client:
+            return await read_running_configuration(client, "secret")
+
+    with pytest.raises(XmlApiError) as error:
+        asyncio.run(run())
+    assert error.value.code == code
+    assert "private detail" not in str(error.value)
 
 
 def test_source_client_enforces_verified_direct_connection(monkeypatch):

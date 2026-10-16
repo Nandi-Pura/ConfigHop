@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import ntpath
 import os
 import re
@@ -31,7 +32,10 @@ from .schemas import (
     DeviceIdentityView, PlatformView, ProfileDetail, ProfileSummary, ProjectView,
     SourceConnectionTestView, SourceProvenance, SourceView,
 )
-from .panos_xml import XmlApiError, create_source_client, export_configuration, read_system_info
+from .panos_xml import (
+    XmlApiError, create_source_client, create_target_client, export_configuration,
+    read_running_configuration, read_system_info,
+)
 from .project_state import (
     DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, TargetBaseline, mapping_hash,
     package_input_hash, sha256_file,
@@ -529,6 +533,61 @@ def record_target_baseline(project: ProjectSession, baseline: TargetBaseline) ->
     project.target_baseline = baseline
     if changed:
         project.active_package_id = None
+
+
+async def collect_target_baseline_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str, expected_model: str,
+    operation_timeout_seconds: float = 60.0) -> TargetBaseline:
+    async with project.lock:
+        require_inventory(project)
+        profile = require_profile(project)
+        source_serial = project.source_provenance.serial if project.source_provenance else None
+        if not source_serial:
+            raise ServiceError("SOURCE_SERIAL_UNVERIFIED",
+                "Collect the source device identity through the API before binding a target baseline.", 409)
+        if expected_serial == source_serial:
+            raise ServiceError("SOURCE_TARGET_SAME_SERIAL", "Source and target serial must differ.", 409)
+        if expected_model != profile.model:
+            raise ServiceError("TARGET_MODEL_MISMATCH", "Expected target model differs from the selected profile.", 409)
+        try:
+            async with asyncio.timeout(operation_timeout_seconds):
+                identity_before = await read_system_info(client, api_key)
+                first = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                second = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+                identity_after = await read_system_info(client, api_key)
+        except TimeoutError:
+            raise ServiceError("XML_API_OPERATION_TIMEOUT", "Target baseline collection timed out.", 504) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if identity_before != identity_after:
+            raise ServiceError("TARGET_IDENTITY_CHANGED", "Target identity changed during baseline collection.", 409)
+        if first != second:
+            raise ServiceError("TARGET_CONFIG_CHANGED", "Target active configuration changed during baseline collection.", 409)
+        if identity_before.serial != expected_serial or identity_before.serial == source_serial:
+            raise ServiceError("TARGET_SERIAL_MISMATCH", "Target serial differs from the confirmed device.", 409)
+        if identity_before.model != expected_model:
+            raise ServiceError("TARGET_MODEL_MISMATCH", "Target model differs from the selected profile.", 409)
+        if project.target_panos_train and not identity_before.panos_version.startswith(
+            project.target_panos_train + "."):
+            raise ServiceError("TARGET_PANOS_TRAIN_MISMATCH",
+                "Target PAN-OS version differs from the selected train.", 409)
+        baseline = TargetBaseline(serial=identity_before.serial, model=identity_before.model,
+            hostname=identity_before.hostname, panos_version=identity_before.panos_version,
+            sha256=hashlib.sha256(first).hexdigest())
+        record_target_baseline(project, baseline)
+        return baseline
+
+
+async def collect_target_baseline(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, allowed_endpoints: set[tuple[str, int]]) -> TargetBaseline:
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await collect_target_baseline_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model)
 
 
 def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:

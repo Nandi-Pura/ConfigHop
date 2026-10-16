@@ -101,6 +101,11 @@ class SourceCollectRequest(SourceConnectionRequest):
     pass
 
 
+class TargetBaselineCollectRequest(SourceConnectionRequest):
+    expected_serial: str = Field(min_length=1, max_length=128)
+    expected_model: str = Field(min_length=1, max_length=128)
+
+
 class DeviceIdentityView(BaseModel):
     hostname: str
     serial: str
