@@ -113,8 +113,19 @@
 .scope-detail-reason strong,.scope-detail-evidence strong{width:100%}
 .scope-detail-reason small{display:block;width:100%;color:var(--muted)}
 .scope-detail-evidence span{font-family:monospace;overflow-wrap:anywhere}
-.optic-rate-choice{flex-wrap:wrap;gap:8px}
 .optic-rate-choice small{color:var(--muted);font-size:10px}
+.mapping-target-cell{min-width:230px;max-width:320px}
+.mapping-target-choice .table-select{width:100%;max-width:320px}
+.mapping-target-choice .table-select:focus-visible,.optic-rate-choice select:focus-visible,.mapping-table-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mapping-suggestion,.mapping-advice{color:var(--muted);font-size:10px;line-height:1.4;white-space:normal}
+.mapping-suggestion{display:block;margin-top:4px}.mapping-advice{margin:4px 8px 8px}
+.optic-rate-choice{display:flex;flex-direction:column;align-items:flex-start;padding:5px 0;gap:3px;white-space:normal}
+.optic-rate-choice label{font-size:10px;color:var(--muted)}
+.optic-rate-choice select{margin-top:3px;min-width:100px}
+.mapping-assessment{min-width:175px;max-width:240px;white-space:normal}
+.mapping-assessment>span{display:block;line-height:1.4}.mapping-blocked{color:var(--danger)}
+.mapping-exceptions{min-width:160px;max-width:260px;white-space:normal}
+.mapping-exceptions summary{cursor:pointer;line-height:1.4}.mapping-exceptions p{overflow-wrap:anywhere;font-size:10px;line-height:1.4}
 .generate-wrap{display:flex;flex-direction:column;gap:4px;min-width:0}
 .generate-wrap .generate-btn{margin:0}
 .generate-wrap small{font-size:9px;color:var(--warning)}
