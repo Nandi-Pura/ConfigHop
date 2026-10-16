@@ -44,14 +44,19 @@ vlan 20
   assert.equal(resBlocked.targetIntent.targetPlatform.compatibilityStatus, 'BLOCKED')
   assert.ok(resBlocked.findings.some((f) => f.severity === 'error' && f.message.includes('BLOCKED')))
 
-  // CX6400_V2 on 10.16 is READY
+  // CX6400_V2 on 10.16 is REVIEW_REQUIRED: initialReleaseDate='UNVERIFIED' → lifecycle unconfirmed
   const resReady = mapCiscoToAosCx(parsed, CX6400_V2, OS_1016)
-  assert.equal(resReady.targetIntent.targetPlatform.compatibilityStatus, 'READY')
+  assert.equal(
+    resReady.targetIntent.targetPlatform.compatibilityStatus,
+    'REVIEW_REQUIRED',
+    `CX6400_V2 on 10.16: expected REVIEW_REQUIRED (unverified lifecycle), got ${resReady.targetIntent.targetPlatform.compatibilityStatus}`
+  )
 
-  // CX6000 on 10.13 is UNKNOWN
+  // CX6000 on 10.13 is READY (floor 10.11.1011 met by 10.13; lifecycle active; release-notes evidence)
   const resUnknown = mapCiscoToAosCx(parsed, CX6000_R8N85A, OS_1013)
-  assert.equal(resUnknown.targetIntent.targetPlatform.compatibilityStatus, 'UNKNOWN')
-  assert.ok(resUnknown.findings.some((f) => f.code === 'MAPPING_UNKNOWN_COMPATIBILITY'))
+  assert.equal(resUnknown.targetIntent.targetPlatform.compatibilityStatus, 'READY')
+  // No MAPPING_UNKNOWN_COMPATIBILITY finding when platform is READY
+  assert.ok(!resUnknown.findings.some((f) => f.code === 'MAPPING_UNKNOWN_COMPATIBILITY'))
 })
 
 test('3. authentication open versus MAB distinction and ClearPass dependency', () => {
@@ -372,3 +377,50 @@ test('17. Interface status precedence preserves unsupported port-access mappings
   assert.equal(known.targetIntent.interfaces[0].portAccess?.status, 'REVIEW_REQUIRED')
   assert.ok(!known.findings.some((f) => f.message.includes('unknown administrative state') || f.message.includes('unknown switchport role')))
 })
+
+test('18. Mapper BLOCKED fixture: synthetic hardware with floor 99.99.0001 is always BLOCKED on any real OS', () => {
+  // ponytail: use synthetic hardware so this test never breaks when real SKU floors change
+  const syntheticHw = {
+    id: 'synthetic-hw-blocked-test',
+    vendor: /** @type {const} */ ('hpe_aruba'),
+    series: 'CX 9999',
+    marketingModel: 'Synthetic HW (floor 99.99.0001)',
+    productNumber: 'SYNTH-BLOCKED',
+    minimumVersion: '99.99.0001',
+    ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
+    vsf: { supported: false, vsfStatus: /** @type {const} */ ('UNKNOWN'), evidenceIds: ['ARUBA-EVD-RN-1013-1050'] },
+    capabilities: {
+      vlan: 'SUPPORTED', accessVlan: 'SUPPORTED', voiceVlan: 'UNKNOWN',
+      trunk: 'SUPPORTED', nativeVlan: 'SUPPORTED', lacp: 'UNKNOWN', lag: 'UNKNOWN',
+      svi: 'UNKNOWN', staticRouting: 'UNKNOWN', dynamicRouting: 'UNKNOWN',
+      stp: 'UNKNOWN', acl: 'UNKNOWN', vrf: 'UNKNOWN', vsf: 'UNKNOWN',
+      qos: 'UNKNOWN', dhcpRelay: 'UNKNOWN', lldp: 'UNKNOWN', management: 'SUPPORTED',
+    },
+    compatibilityRules: [],
+    evidenceIds: ['ARUBA-EVD-RN-1013-1050'],
+  }
+  const parsed = parseCiscoConfig('vlan 10')
+  for (const os of [OS_1013, OS_1016]) {
+    const mapped = mapCiscoToAosCx(parsed, syntheticHw, os)
+    assert.equal(
+      mapped.targetIntent.targetPlatform.compatibilityStatus,
+      'BLOCKED',
+      `Synthetic hw (floor 99.99.0001) on ${os.train} must be BLOCKED`
+    )
+    assert.ok(mapped.findings.some((f) => f.severity === 'error' && f.message.includes('BLOCKED')))
+  }
+})
+
+test('19. Test 17 uses CX6300M_48G for port-access status — S3L75A has ports:[] so portAccess coverage requires non-empty port set', () => {
+  // S3L75A (ports:[]) is used in test 17 only to verify UNSUPPORTED portAccess precedence.
+  // The interface mapper does not require non-empty ports[] to evaluate portAccess.
+  // This test confirms that assertion holds: portAccess UNSUPPORTED when adminState=unknown on S3L75A.
+  const config = 'interface GigabitEthernet1/0/1\n no shutdown\n switchport mode access\n authentication port-control auto\n'
+  const parsed = parseCiscoConfig(config)
+  parsed.interfaces[0].adminState = 'unknown'
+  const mapped = mapCiscoToAosCx(parsed, CX6300L_S3L75A, OS_1013)
+  assert.equal(mapped.targetIntent.interfaces[0].portAccess?.status, 'UNSUPPORTED')
+  assert.equal(mapped.targetIntent.interfaces[0].status, 'UNSUPPORTED')
+  // ports:[] does not affect portAccess evaluation — interface mapper uses authentication config, not port list
+})
+

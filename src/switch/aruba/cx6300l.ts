@@ -4,7 +4,7 @@
 // remain UNKNOWN pending official HPE Aruba documentation.
 // Hardware ports: ports array left empty until official specs verified.
 
-import type { SwitchHardware, SwitchCapability, SwitchVsfConfig, SwitchCompatibility } from '../types.ts'
+import type { SwitchHardware, SwitchCapability, SwitchVsfConfig } from '../types.ts'
 
 const EVIDENCE = ['ARUBA-EVD-RN-1013-1050', 'ARUBA-EVD-CX6300-1012-RN']
 const MIN_VER = '10.14.0006'
@@ -23,49 +23,12 @@ const VSF: SwitchVsfConfig = {
   notes: 'VSF on CX 6300L: vsfStatus UNKNOWN. Cannot confirm UNSUPPORTED without official docs.',
 }
 
-function compat(id: string): SwitchCompatibility[] {
-  return [
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.13',
-      status: 'BLOCKED' as const,
-      reason: `Hardware requires AOS-CX ${MIN_VER} or later; AOS-CX 10.13 is below minimum floor.`,
-      minimumVersion: MIN_VER,
-      evidenceIds: ['ARUBA-EVD-RN-1013-1050'],
-    },
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.16',
-      status: 'REVIEW_REQUIRED' as const,
-      reason: `Train 10.16 meets minimum hardware version floor (${MIN_VER}); production train qualification review required.`,
-      minimumVersion: MIN_VER,
-      evidenceIds: ['ARUBA-EVD-RN-1013-1050'],
-    },
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.17',
-      status: 'REVIEW_REQUIRED' as const,
-      reason: `Train 10.17 meets minimum hardware version floor (${MIN_VER}); production train qualification review required.`,
-      minimumVersion: MIN_VER,
-      evidenceIds: ['ARUBA-EVD-RN-1013-1050'],
-    },
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.18',
-      status: 'REVIEW_REQUIRED' as const,
-      reason: `Train 10.18 meets minimum hardware version floor (${MIN_VER}); production train qualification review required.`,
-      minimumVersion: MIN_VER,
-      evidenceIds: ['ARUBA-EVD-RN-1013-1050'],
-    },
-  ]
-}
-
 export const CX6300L_S3L75A: SwitchHardware = {
   id: 'aruba-cx-6300l-s3l75a', vendor: 'hpe_aruba', series: 'CX 6300L',
   marketingModel: 'Aruba CX 6300L Switch (S3L75A)', productNumber: 'S3L75A',
   minimumVersion: MIN_VER,
   ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6300l-s3l75a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: `S3L75A: Aruba CX 6300L switch SKU. Minimum AOS-CX ${MIN_VER}.`,
 }
 
@@ -74,7 +37,7 @@ export const CX6300L_S3L76A: SwitchHardware = {
   marketingModel: 'Aruba CX 6300L Switch (S3L76A)', productNumber: 'S3L76A',
   minimumVersion: MIN_VER,
   ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: true,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6300l-s3l76a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: `S3L76A: Aruba CX 6300L switch SKU. Minimum AOS-CX ${MIN_VER}.`,
 }
 
@@ -83,7 +46,7 @@ export const CX6300L_S3L77A: SwitchHardware = {
   marketingModel: 'Aruba CX 6300L Switch (S3L77A)', productNumber: 'S3L77A',
   minimumVersion: MIN_VER,
   ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6300l-s3l77a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: `S3L77A: Aruba CX 6300L switch SKU. Minimum AOS-CX ${MIN_VER}.`,
 }
 

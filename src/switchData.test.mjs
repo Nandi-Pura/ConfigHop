@@ -74,17 +74,18 @@ test('2. Models are decoupled from OS releases', () => {
   assert.equal(CX6300M_24SFP.productNumber, 'JL658A')
 })
 
-test('3. Compatibility matrix - CX6300M JL658A rules UNKNOWN (no verified evidence yet)', () => {
+test('3. Compatibility matrix - CX6300M JL658A on 10.13 is BLOCKED (floor 10.14.0001), 10.16/10.17 REVIEW_REQUIRED', () => {
   const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
   const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
   const os1017 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.17')
   const r1013 = evaluateCompatibility(CX6300M_24SFP, os1013)
   const r1016 = evaluateCompatibility(CX6300M_24SFP, os1016)
   const r1017 = evaluateCompatibility(CX6300M_24SFP, os1017)
-  assert.ok(r1013.status === 'UNKNOWN' || r1013.status === 'REVIEW_REQUIRED', `10.13: ${r1013.status}`)
-  assert.ok(r1016.status === 'UNKNOWN' || r1016.status === 'REVIEW_REQUIRED', `10.16: ${r1016.status}`)
-  assert.ok(r1017.status === 'UNKNOWN' || r1017.status === 'REVIEW_REQUIRED', `10.17: ${r1017.status}`)
-  assert.notEqual(r1013.status, 'READY')
+  // JL658A minimum floor 10.14.0001 — train 10.13 is BLOCKED below floor
+  assert.equal(r1013.status, 'BLOCKED', `10.13 must be BLOCKED for JL658A (floor 10.14.0001): ${r1013.reason}`)
+  // 10.16 and 10.17 lifecycle unverified → REVIEW_REQUIRED
+  assert.equal(r1016.status, 'REVIEW_REQUIRED', `10.16: ${r1016.reason}`)
+  assert.equal(r1017.status, 'REVIEW_REQUIRED', `10.17: ${r1017.reason}`)
   assert.notEqual(r1016.status, 'READY')
 })
 
@@ -105,11 +106,17 @@ test('5. Deprecated product mappings removed', () => {
   assert.equal(getArubaHardwareById('aruba-cx-6300-24sfp'), undefined)
 })
 
-test('6. Unknown compatibility returns UNKNOWN, never fabricates READY', () => {
+test('6. Data-driven evaluator: R8N85A and JL676A are consistent and READY on 10.13', () => {
   const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
-  const r = evaluateCompatibility(CX6000_R8N85A, os1013)
-  assert.equal(r.status, 'UNKNOWN')
-  assert.notEqual(r.status, 'READY')
+  // R8N85A: floor 10.11.1011, OS 10.13 > 10.11, lifecycle 10.13 active, evidence release-notes → READY
+  const rR8N85A = evaluateCompatibility(CX6000_R8N85A, os1013)
+  assert.equal(rR8N85A.status, 'READY', `R8N85A on 10.13: ${rR8N85A.reason}`)
+  assert.notEqual(rR8N85A.status, 'UNKNOWN')
+  // JL676A: floor 10.06.0001, OS 10.13 > 10.06, lifecycle active, evidence release-notes → READY
+  const rJL676A = evaluateCompatibility(CX6100_JL676A, os1013)
+  assert.equal(rJL676A.status, 'READY', `JL676A on 10.13: ${rJL676A.reason}`)
+  // Both consistent — same status
+  assert.equal(rR8N85A.status, rJL676A.status, 'R8N85A and JL676A must be consistent on 10.13')
 })
 
 test('Unknown hardware or OS fails closed without throwing', () => {
@@ -318,3 +325,114 @@ test('13. Official release notes fixture: SKU -> name + minVersion locked, S3L75
     assert.equal(evaluateCompatibility(unverifiedHw, os1013).status, 'UNKNOWN')
   }
 })
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tes baru: evaluator data-driven — per kasus, nama jelas
+// ──────────────────────────────────────────────────────────────────────────────
+
+test('14a. JL658A on 10.13 is BLOCKED (floor 10.14.0001 > train 10.13)', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const r = evaluateCompatibility(CX6300M_24SFP, os1013)
+  assert.equal(r.status, 'BLOCKED', r.reason)
+  assert.ok(r.reason.includes('10.14.0001'), `reason should mention floor: ${r.reason}`)
+})
+
+test('14b. JL659A on 10.13 is BLOCKED (floor 10.14.0001 > train 10.13)', () => {
+  const hw = ARUBA_HARDWARE.find((h) => h.productNumber === 'JL659A')
+  assert.ok(hw, 'JL659A must exist in catalog')
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const r = evaluateCompatibility(hw, os1013)
+  assert.equal(r.status, 'BLOCKED', r.reason)
+})
+
+test('14c. S3L75A on 10.13 is BLOCKED (floor 10.14.0006 > train 10.13)', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const r = evaluateCompatibility(CX6300L_S3L75A, os1013)
+  assert.equal(r.status, 'BLOCKED', r.reason)
+})
+
+test('14d. S3L75A on 10.16 is REVIEW_REQUIRED (floor met; lifecycle unverified)', () => {
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  const r = evaluateCompatibility(CX6300L_S3L75A, os1016)
+  assert.equal(r.status, 'REVIEW_REQUIRED', r.reason)
+  assert.notEqual(r.status, 'READY')
+  assert.notEqual(r.status, 'BLOCKED')
+})
+
+test('14e. R0X26A, R0X27A, R0X31A, JL741A on 10.16 are not READY (lifecycle unverified)', () => {
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  for (const sku of ['R0X26A', 'R0X27A', 'R0X31A', 'JL741A']) {
+    const hw = ARUBA_HARDWARE.find((h) => h.productNumber === sku)
+    assert.ok(hw, `${sku} must exist in catalog`)
+    const r = evaluateCompatibility(hw, os1016)
+    assert.notEqual(r.status, 'READY', `${sku} on 10.16 must not be READY (lifecycle unverified): ${r.reason}`)
+    assert.equal(r.status, 'REVIEW_REQUIRED', `${sku} on 10.16: expected REVIEW_REQUIRED, got ${r.status}: ${r.reason}`)
+  }
+})
+
+test('14f. R0X26A on 10.13 is READY (floor 10.05.0021 met; lifecycle 10.13 active; release-notes evidence)', () => {
+  const hw = ARUBA_HARDWARE.find((h) => h.productNumber === 'R0X26A')
+  assert.ok(hw, 'R0X26A must exist')
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const r = evaluateCompatibility(hw, os1013)
+  assert.equal(r.status, 'READY', r.reason)
+})
+
+test('14g. R8N85A on 10.13 yields same status as JL676A on 10.13 (both READY)', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const rR8N85A = evaluateCompatibility(CX6000_R8N85A, os1013)
+  const rJL676A = evaluateCompatibility(CX6100_JL676A, os1013)
+  assert.equal(rR8N85A.status, 'READY', `R8N85A: ${rR8N85A.reason}`)
+  assert.equal(rJL676A.status, 'READY', `JL676A: ${rJL676A.reason}`)
+  assert.equal(rR8N85A.status, rJL676A.status, 'Must be consistent')
+})
+
+test('14h. 6200F (floor UNVERIFIED) on 10.13 and 10.16 is UNKNOWN', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const os1016 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16')
+  for (const hw of [CX6200_JL724A, CX6200_JL725A, CX6200_JL726A, CX6200_JL727A, CX6200_JL728A]) {
+    assert.equal(evaluateCompatibility(hw, os1013).status, 'UNKNOWN', `${hw.productNumber} on 10.13 must be UNKNOWN`)
+    assert.equal(evaluateCompatibility(hw, os1016).status, 'UNKNOWN', `${hw.productNumber} on 10.16 must be UNKNOWN`)
+  }
+})
+
+test('14i. CX5420 on all trains is UNKNOWN (minimumVersion UNVERIFIED)', () => {
+  for (const os of AOS_CX_RELEASES) {
+    const r = evaluateCompatibility(CX5420F, os)
+    assert.equal(r.status, 'UNKNOWN', `CX5420 on ${os.train}: expected UNKNOWN, got ${r.status}: ${r.reason}`)
+  }
+})
+
+test('14j. build comparison: floor 10.16.1006, build 10.16.1005 → BLOCKED; no build → REVIEW_REQUIRED', () => {
+  // Synthetic OS at train 10.16 with verified lifecycle to isolate build-comparison logic
+  const os1016verified = {
+    ...AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.16'),
+    initialReleaseDate: '2024-01-01',  // override to verified so lifecycle check passes
+  }
+  // Hardware with floor 10.16.1006 (same train as OS)
+  const hwFloor1006 = {
+    ...CX6405,
+    id: 'synthetic-floor-1006',
+    minimumVersion: '10.16.1006',
+  }
+  const rBlocked = evaluateCompatibility(hwFloor1006, os1016verified, '10.16.1005')
+  assert.equal(rBlocked.status, 'BLOCKED', `build 10.16.1005 < floor 10.16.1006 must be BLOCKED: ${rBlocked.reason}`)
+
+  const rReview = evaluateCompatibility(hwFloor1006, os1016verified)
+  assert.equal(rReview.status, 'REVIEW_REQUIRED', `no build on same-train must be REVIEW_REQUIRED: ${rReview.reason}`)
+})
+
+test('14k. hardware undefined and OS undefined both yield UNKNOWN without throwing', () => {
+  const os1013 = AOS_CX_RELEASES.find((r) => r.id === 'aos-cx-10.13')
+  const rNoHw = evaluateCompatibility(undefined, os1013)
+  assert.equal(rNoHw.status, 'UNKNOWN')
+  assert.equal(rNoHw.hardwareId, 'unknown')
+
+  const rNoOs = evaluateCompatibility(CX6300M_24SFP, undefined)
+  assert.equal(rNoOs.status, 'UNKNOWN')
+  assert.equal(rNoOs.osId, 'unknown')
+
+  const rBoth = evaluateCompatibility(undefined, undefined)
+  assert.equal(rBoth.status, 'UNKNOWN')
+})
+

@@ -2,7 +2,7 @@
 // Product topology and SKUs unverified pending official HPE Aruba documentation.
 // Hardware ports are NOT fabricated with Array.from; ports array left empty until official specs verified.
 
-import type { SwitchHardware, SwitchCapability, SwitchVsfConfig, SwitchCompatibility } from '../types.ts'
+import type { SwitchHardware, SwitchCapability, SwitchVsfConfig } from '../types.ts'
 
 const EVIDENCE = ['ARUBA-CX5420-DATASHEET-TODO']
 
@@ -21,14 +21,6 @@ const VSF: SwitchVsfConfig = {
   notes: 'VSF on CX 5420: vsfStatus UNKNOWN. Requires official documentation.',
 }
 
-function compat(id: string): SwitchCompatibility[] {
-  return ['aos-cx-10.13', 'aos-cx-10.16', 'aos-cx-10.17', 'aos-cx-10.18'].map((osId) => ({
-    hardwareId: id, osId, status: 'UNKNOWN' as const,
-    reason: `CX 5420 ↔ AOS-CX ${osId.replace('aos-cx-', '')} requires official HPE Aruba compatibility matrix confirmation.`,
-    evidenceIds: EVIDENCE,
-  }))
-}
-
 export const CX5420F: SwitchHardware = {
   id: 'aruba-cx-5420f-sku-unknown', vendor: 'hpe_aruba', series: 'CX 5420',
   marketingModel: 'Aruba CX 5420F', productNumber: 'UNKNOWN',
@@ -37,7 +29,7 @@ export const CX5420F: SwitchHardware = {
   ports: [],
   totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
   vsf: VSF, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-5420f-sku-unknown'),
+  compatibilityRules: [],
   evidenceIds: EVIDENCE,
   notes: 'CX 5420F port layout and SKU unverified pending official HPE Aruba datasheet. Ports not fabricated.',
 }

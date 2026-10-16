@@ -14,7 +14,7 @@
 // VSF: CX 6100 NOT listed in Aruba Central AOS-CX VSF stacking support table.
 // vsfStatus: UNSUPPORTED. Evidence: ARUBA-EVD-VSF-CENTRAL.
 
-import type { SwitchHardware, SwitchPortDefinition, SwitchCapability, SwitchVsfConfig, SwitchCompatibility } from '../types.ts'
+import type { SwitchHardware, SwitchPortDefinition, SwitchCapability, SwitchVsfConfig } from '../types.ts'
 
 const EVD = ['ARUBA-EVD-RN-1017-6000-6100', 'ARUBA-EVD-CX6100-1012-RN']
 const MIN_VER = '10.06.0001'
@@ -32,14 +32,6 @@ const NO_VSF: SwitchVsfConfig = {
   supported: false, vsfStatus: 'UNKNOWN',
   evidenceIds: ['ARUBA-EVD-VSF-CENTRAL'],
   notes: 'CX 6100: UNKNOWN (absent from Aruba Central AOS-CX switch stacking support table; absence does not prove non-support).',
-}
-
-function compat(id: string): SwitchCompatibility[] {
-  return ['aos-cx-10.13', 'aos-cx-10.16', 'aos-cx-10.17', 'aos-cx-10.18'].map((osId) => ({
-    hardwareId: id, osId, status: 'REVIEW_REQUIRED' as const,
-    reason: `CX 6100 min software ${MIN_VER} satisfies ${osId.replace('aos-cx-', '')} floor; train qualification review required.`,
-    minimumVersion: MIN_VER, evidenceIds: EVD,
-  }))
 }
 
 function rj45(start: number, count: number, poe: boolean): SwitchPortDefinition[] {
@@ -74,7 +66,7 @@ export const CX6100_48G_POE: SwitchHardware = {
   ports: [...rj45(1, 48, true), ...sfpPlus(49, 4)],
   totalAccessPorts: 48, totalUplinkPorts: 4, poeCapable: true, poeBudgetWatts: 370,
   vsf: NO_VSF, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6100-48g-poe-jl675a'), evidenceIds: EVD,
+  compatibilityRules: [], evidenceIds: EVD,
   notes: 'JL675A: 48x1G RJ45 PoE (802.3at Class 4) + 4x SFP+. 370W budget. Min AOS-CX 10.06.0001 (serial-dependent: 10.06.0001 seri lama, 10.11.1011 seri baru).',
 }
 
@@ -86,7 +78,7 @@ export const CX6100_48G: SwitchHardware = {
   ports: [...rj45(1, 48, false), ...sfpPlus(49, 4)],
   totalAccessPorts: 48, totalUplinkPorts: 4, poeCapable: false,
   vsf: NO_VSF, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6100-48g-jl676a'), evidenceIds: EVD,
+  compatibilityRules: [], evidenceIds: EVD,
   notes: 'JL676A: 48x1G RJ45 (no PoE) + 4x SFP+. Min AOS-CX 10.06.0001 (serial-dependent: 10.06.0001 seri lama, 10.11.1011 seri baru).',
 }
 
@@ -98,7 +90,7 @@ export const CX6100_24G_POE: SwitchHardware = {
   ports: [...rj45(1, 24, true), ...sfpPlus(25, 4)],
   totalAccessPorts: 24, totalUplinkPorts: 4, poeCapable: true, poeBudgetWatts: 370,
   vsf: NO_VSF, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6100-24g-poe-jl677a'), evidenceIds: EVD,
+  compatibilityRules: [], evidenceIds: EVD,
   notes: 'JL677A: 24x1G RJ45 PoE (802.3at Class 4) + 4x SFP+. 370W budget. Min AOS-CX 10.06.0001 (serial-dependent: 10.06.0001 seri lama, 10.11.1011 seri baru).',
 }
 
@@ -110,7 +102,7 @@ export const CX6100_24G: SwitchHardware = {
   ports: [...rj45(1, 24, false), ...sfpPlus(25, 4)],
   totalAccessPorts: 24, totalUplinkPorts: 4, poeCapable: false,
   vsf: NO_VSF, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6100-24g-jl678a'), evidenceIds: EVD,
+  compatibilityRules: [], evidenceIds: EVD,
   notes: 'JL678A: 24x1G RJ45 (no PoE) + 4x SFP+. Min AOS-CX 10.06.0001 (serial-dependent: 10.06.0001 seri lama, 10.11.1011 seri baru).',
 }
 
@@ -123,7 +115,7 @@ export const CX6100_12G_POE: SwitchHardware = {
   ports: [...rj45(1, 12, true), ...rj45Uplink(13, 2), ...sfpPlus(15, 2)],
   totalAccessPorts: 12, totalUplinkPorts: 4, poeCapable: true, poeBudgetWatts: 139,
   vsf: NO_VSF, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6100-12g-poe-jl679a'), evidenceIds: EVD,
+  compatibilityRules: [], evidenceIds: EVD,
   notes: 'JL679A: 12x1G RJ45 PoE + 2x1G RJ45 uplinks + 2x SFP+ uplinks. 139W budget. Min AOS-CX 10.06.0001 (serial-dependent: 10.06.0001 seri lama, 10.11.1011 seri baru).',
 }
 export const CX6100_JL675A = CX6100_48G_POE

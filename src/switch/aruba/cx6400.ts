@@ -5,7 +5,7 @@
 // TODO: Exact SKUs and line card options require official CX 6400 datasheet verification.
 // ponytail: line card models, slot counts, speed options — add from official datasheet
 
-import type { SwitchHardware, SwitchPortDefinition, SwitchCapability, SwitchVsfConfig, SwitchCompatibility } from '../types.ts'
+import type { SwitchHardware, SwitchPortDefinition, SwitchCapability, SwitchVsfConfig } from '../types.ts'
 
 const RN_1013_1050 = 'ARUBA-EVD-RN-1013-1050'
 const EVIDENCE = [RN_1013_1050, 'ARUBA-EVD-CX6400-CHASSIS']
@@ -25,43 +25,6 @@ const VSF_CHASSIS: SwitchVsfConfig = {
   notes: 'VSF on CX 6400 chassis: vsfStatus UNKNOWN. Verify applicability from official docs.',
 }
 
-function compat(id: string, minVersion: string): SwitchCompatibility[] {
-  return [
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.13',
-      status: 'REVIEW_REQUIRED' as const,
-      reason: `Train 10.13 meets minimum hardware version floor (${minVersion}); production train qualification review required.`,
-      minimumVersion: minVersion,
-      evidenceIds: [RN_1013_1050],
-    },
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.16',
-      status: 'READY' as const,
-      reason: `Supported on AOS-CX 10.16; train meets minimum floor (${minVersion}).`,
-      minimumVersion: minVersion,
-      evidenceIds: [RN_1013_1050],
-    },
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.17',
-      status: 'REVIEW_REQUIRED' as const,
-      reason: 'SSR release requires qualification review',
-      minimumVersion: minVersion,
-      evidenceIds: [RN_1013_1050],
-    },
-    {
-      hardwareId: id,
-      osId: 'aos-cx-10.18',
-      status: 'REVIEW_REQUIRED' as const,
-      reason: 'SSR release requires qualification review',
-      minimumVersion: minVersion,
-      evidenceIds: [RN_1013_1050],
-    },
-  ]
-}
-
 // CX 6400 chassis ports are defined by installed line cards.
 // Placeholder: management port only — actual data ports UNKNOWN pending module selection.
 const CHASSIS_MGMT_PORT: SwitchPortDefinition = {
@@ -78,7 +41,7 @@ export const CX6405: SwitchHardware = {
   ports: [CHASSIS_MGMT_PORT],
   totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
   vsf: VSF_CHASSIS, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6405-r0x26a', '10.05.0021'),
+  compatibilityRules: [],
   evidenceIds: EVIDENCE,
   notes: 'R0X26A: Aruba 6405 5-slot modular chassis. Modular line card architecture; fixed data ports: 0. Minimum AOS-CX 10.05.0021. Requires management module (R0X31A v1).',
 }
@@ -91,13 +54,13 @@ export const CX6410: SwitchHardware = {
   ports: [CHASSIS_MGMT_PORT],
   totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
   vsf: VSF_CHASSIS, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6410-r0x27a', '10.05.0001'),
+  compatibilityRules: [],
   evidenceIds: EVIDENCE,
   notes: 'R0X27A: Aruba 6410 10-slot modular chassis. Modular line card architecture; fixed data ports: 0. Minimum AOS-CX 10.05.0001. Requires management module (R0X31A v1).',
 }
 
 export const CX6400_V2: SwitchHardware = {
-  id: 'aruba-cx-6400-mgmt-v2-jl741a', vendor: 'hpe_aruba', series: 'CX 6400',
+  id: 'aruba-cx-6410-jl741a', vendor: 'hpe_aruba', series: 'CX 6400',
   marketingModel: 'Aruba 6410 96-port 1GbE Class 4 PoE and 4-port SFP56 Switch',
   model: 'Aruba 6410 96-port 1GbE Class 4 PoE and 4-port SFP56 Switch',
   productNumber: 'JL741A',
@@ -106,7 +69,7 @@ export const CX6400_V2: SwitchHardware = {
   ports: [CHASSIS_MGMT_PORT],
   totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
   vsf: VSF_CHASSIS, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6400-mgmt-v2-jl741a', '10.05.0001'),
+  compatibilityRules: [],
   evidenceIds: EVIDENCE,
   notes: 'JL741A: Aruba 6410 96-port 1GbE Class 4 PoE and 4-port SFP56 Switch chassis bundle. Minimum AOS-CX 10.05.0001.',
 }
@@ -119,7 +82,7 @@ export const CX6400_MGMT_V1: SwitchHardware = {
   ports: [CHASSIS_MGMT_PORT],
   totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
   vsf: VSF_CHASSIS, capabilities: CAP,
-  compatibilityRules: compat('aruba-cx-6400-mgmt-v1-r0x31a', '10.04.1000'),
+  compatibilityRules: [],
   evidenceIds: EVIDENCE,
   notes: 'R0X31A: Aruba CX 6400 Management Module v1 for CX 6405/6410 modular chassis. Minimum AOS-CX 10.04.1000. NOT A STANDALONE SWITCH.',
 }

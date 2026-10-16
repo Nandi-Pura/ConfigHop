@@ -1,8 +1,9 @@
 // Topology mapping for STP and VSF (Phase 3.3).
 
 import type { StpConfig, VsfConfig, Finding } from '../intent/types.ts'
-import type { SwitchHardware, CompatibilityStatus } from '../types.ts'
+import type { SwitchHardware, SwitchOsRelease, CompatibilityStatus } from '../types.ts'
 import type { TargetStpConfig, TargetVsfConfig, TargetFeatureStatus } from './types.ts'
+import { evaluateCompatibility } from '../compatibility.ts'
 
 export function mapStp(
   stp: StpConfig,
@@ -37,7 +38,8 @@ export function mapStp(
 export function mapVsf(
   vsf: VsfConfig,
   targetHw: SwitchHardware,
-  findings: Finding[]
+  findings: Finding[],
+  targetOs?: SwitchOsRelease
 ): TargetVsfConfig {
   const hwVsf = targetHw.vsf
   let topoStatus: CompatibilityStatus = 'UNKNOWN'
@@ -68,7 +70,9 @@ export function mapVsf(
         sourceRef: vsf.sourceRefs[0],
       })
     } else {
-      topoStatus = targetHw.compatibilityRules[0]?.status === 'READY' ? 'READY' : 'REVIEW_REQUIRED'
+      topoStatus = targetOs
+        ? (evaluateCompatibility(targetHw, targetOs).status === 'READY' ? 'READY' : 'REVIEW_REQUIRED')
+        : 'REVIEW_REQUIRED'
     }
   }
 

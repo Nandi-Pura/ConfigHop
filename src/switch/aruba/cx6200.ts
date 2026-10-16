@@ -7,7 +7,7 @@
 // VSF stacking: SUPPORTED up to 8 stack members (maxMembers: 8), minimum AOS-CX 10.05.0060.
 // Hardware ports: ports array empty / totalAccessPorts: 0 (not fabricated) until official datasheet specs per SKU verified.
 
-import type { SwitchHardware, SwitchCapability, SwitchVsfConfig, SwitchCompatibility } from '../types.ts'
+import type { SwitchHardware, SwitchCapability, SwitchVsfConfig } from '../types.ts'
 
 const EVIDENCE = ['ARUBA-EVD-CX6200-VSF', 'ARUBA-EVD-VSF-CENTRAL']
 const MIN_VER = '10.05.0060'
@@ -31,19 +31,11 @@ const VSF: SwitchVsfConfig = {
   notes: 'VSF on CX 6200 Series: SUPPORTED up to 8 stack members per official Aruba documentation. Minimum version 10.05.0060.',
 }
 
-function compat(id: string): SwitchCompatibility[] {
-  return ['aos-cx-10.13', 'aos-cx-10.16', 'aos-cx-10.17', 'aos-cx-10.18'].map((osId) => ({
-    hardwareId: id, osId, status: 'UNKNOWN' as const,
-    reason: `CX 6200 minimum software floor (${MIN_VER}) is UNVERIFIED; compatibility cannot be evaluated until verified against official release notes.`,
-    minimumVersion: MIN_VER, evidenceIds: EVIDENCE,
-  }))
-}
-
 export const CX6200_JL724A: SwitchHardware = {
   id: 'aruba-cx-6200f-jl724a', vendor: 'hpe_aruba', series: 'CX 6200',
   marketingModel: 'Aruba CX 6200F Switch (JL724A)', model: 'CX 6200F JL724A', productNumber: 'JL724A',
   minimumVersion: MIN_VER, minimumVersionStatus: 'UNVERIFIED', ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6200f-jl724a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: 'JL724A: Aruba CX 6200F fixed-configuration switch. VSF SUPPORTED max 8 members. Minimum version 10.05.0060 (UNVERIFIED floor).',
 }
 
@@ -51,7 +43,7 @@ export const CX6200_JL725A: SwitchHardware = {
   id: 'aruba-cx-6200f-jl725a', vendor: 'hpe_aruba', series: 'CX 6200',
   marketingModel: 'Aruba CX 6200F Switch (JL725A)', model: 'CX 6200F JL725A', productNumber: 'JL725A',
   minimumVersion: MIN_VER, minimumVersionStatus: 'UNVERIFIED', ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: true,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6200f-jl725a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: 'JL725A: Aruba CX 6200F PoE switch. VSF SUPPORTED max 8 members. Minimum version 10.05.0060 (UNVERIFIED floor).',
 }
 
@@ -59,7 +51,7 @@ export const CX6200_JL726A: SwitchHardware = {
   id: 'aruba-cx-6200f-jl726a', vendor: 'hpe_aruba', series: 'CX 6200',
   marketingModel: 'Aruba CX 6200F Switch (JL726A)', model: 'CX 6200F JL726A', productNumber: 'JL726A',
   minimumVersion: MIN_VER, minimumVersionStatus: 'UNVERIFIED', ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6200f-jl726a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: 'JL726A: Aruba CX 6200F switch. VSF SUPPORTED max 8 members. Minimum version 10.05.0060 (UNVERIFIED floor).',
 }
 
@@ -67,7 +59,7 @@ export const CX6200_JL727A: SwitchHardware = {
   id: 'aruba-cx-6200f-jl727a', vendor: 'hpe_aruba', series: 'CX 6200',
   marketingModel: 'Aruba CX 6200F Switch (JL727A)', model: 'CX 6200F JL727A', productNumber: 'JL727A',
   minimumVersion: MIN_VER, minimumVersionStatus: 'UNVERIFIED', ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: true,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6200f-jl727a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: 'JL727A: Aruba CX 6200F PoE switch. VSF SUPPORTED max 8 members. Minimum version 10.05.0060 (UNVERIFIED floor).',
 }
 
@@ -75,7 +67,7 @@ export const CX6200_JL728A: SwitchHardware = {
   id: 'aruba-cx-6200m-jl728a', vendor: 'hpe_aruba', series: 'CX 6200',
   marketingModel: 'Aruba CX 6200M Switch (JL728A)', model: 'CX 6200M JL728A', productNumber: 'JL728A',
   minimumVersion: MIN_VER, minimumVersionStatus: 'UNVERIFIED', ports: [], totalAccessPorts: 0, totalUplinkPorts: 0, poeCapable: false,
-  vsf: VSF, capabilities: CAP, compatibilityRules: compat('aruba-cx-6200m-jl728a'),
+  vsf: VSF, capabilities: CAP, compatibilityRules: [],
   evidenceIds: EVIDENCE, notes: 'JL728A: Aruba CX 6200M modular-uplink switch. VSF SUPPORTED max 8 members. Minimum version 10.05.0060 (UNVERIFIED floor).',
 }
 

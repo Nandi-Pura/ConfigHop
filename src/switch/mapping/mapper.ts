@@ -76,7 +76,7 @@ export function mapCiscoToAosCx(
   const targetAcls = sourceIntent.acls.map((a) => mapAcl(a, defaultStatus, findings))
   const targetVrfs = sourceIntent.vrfs.map((v) => mapVrf(v, targetHardware, defaultStatus, findings))
   const targetStp = sourceIntent.stp ? mapStp(sourceIntent.stp, defaultStatus, findings) : undefined
-  const targetVsf = sourceIntent.vsf ? mapVsf(sourceIntent.vsf, targetHardware, findings) : undefined
+  const targetVsf = sourceIntent.vsf ? mapVsf(sourceIntent.vsf, targetHardware, findings, targetOs) : undefined
 
   let nacResult: ReturnType<typeof mapNac> = {
     servers: [],
