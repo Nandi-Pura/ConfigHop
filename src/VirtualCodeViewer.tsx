@@ -1,14 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 const LINE_HEIGHT = 16
 const OVERSCAN = 12
+function highlightXml(line: string): ReactNode[] {
+  const parts = line.split(/(<[^>]+>|"[^"]*"|'[^']*')/g)
+  return parts.map((part, index) => part.startsWith('<') ? <span className="syntax-tag" key={index}>{part}</span> : /^['"]/.test(part) ? <span className="syntax-string" key={index}>{part}</span> : part)
+}
 
-export default function VirtualCodeViewer({ lines, height = 190, scrollTop, onScrollTop, lineKinds }: {
+export default function VirtualCodeViewer({ lines, height = 190, scrollTop, onScrollTop, lineKinds, syntax }: {
   lines: string[]
   height?: number
   scrollTop?: number
   onScrollTop?: (value: number) => void
   lineKinds?: string[]
+  syntax?: 'xml'
 }) {
   const viewport = useRef<HTMLDivElement>(null)
   const [localTop, setLocalTop] = useState(0)
@@ -27,7 +32,7 @@ export default function VirtualCodeViewer({ lines, height = 190, scrollTop, onSc
       <div style={{ height: lines.length * LINE_HEIGHT, position: 'relative', minWidth: 'max-content' }}>
         <div style={{ position: 'absolute', top: first * LINE_HEIGHT, left: 0, right: 0 }}>
           {lines.slice(first, last).map((line, offset) => <div className={`code-line ${lineKinds?.[first + offset] ?? ''}`.trim()} style={{ height: LINE_HEIGHT }} key={first + offset}>
-            <span className="line-no">{first + offset + 1}</span><code>{line}</code>
+            <span className="line-no">{first + offset + 1}</span><code>{syntax === 'xml' ? highlightXml(line) : line}</code>
           </div>)}
         </div>
       </div>

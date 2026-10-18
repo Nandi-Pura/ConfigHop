@@ -60,7 +60,6 @@ async function workspace(t) {
     await route.fulfill({ json: result }).catch(() => {})
   })
   await page.goto(url, { timeout: 20000 })
-  await page.getByLabel('Target vendor').selectOption('Palo Alto Networks')
   await page.evaluate(mappings => localStorage.setItem('confighop-project', JSON.stringify({ project_id: 'synthetic-session', project_name: 'Synthetic async review', mappings })), mappings)
   await page.getByRole('button', { name: 'Load Project', exact: true }).click()
   const target = page.getByLabel('Target interface for ethernet1/5', { exact: true })
@@ -136,9 +135,9 @@ for (const action of ['mapping', 'source profile', 'source upload', 'target prof
   await target.selectOption('ethernet1/7')
   await stale.started
   if (action === 'mapping') await target.selectOption('ethernet1/8')
-  else if (action === 'source profile') await page.locator('.platform-card').first().getByLabel('Hardware Profile').selectOption('')
+  else if (action === 'source profile') { await page.locator('.platform-card').first().locator('.hardware-advanced summary').click(); await page.locator('.platform-card').first().getByLabel('Hardware Profile').selectOption('') }
   else if (action === 'source upload') await page.locator('input[type=file]').setInputFiles({ name: 'replacement.xml', mimeType: 'application/xml', buffer: Buffer.from('<config/>') })
-  else if (action === 'target profile') await page.locator('.platform-card').nth(1).getByLabel('Hardware Profile').selectOption(profiles[0].id)
+  else if (action === 'target profile') { await page.locator('.platform-card').nth(1).locator('.hardware-advanced summary').click(); await page.locator('.platform-card').nth(1).getByLabel('Hardware Profile').selectOption(profiles[0].id) }
   else if (action === 'target train') await page.locator('.platform-card').nth(1).getByLabel('PAN-OS Train').selectOption('11.0')
   else await page.getByRole('button', { name: action, exact: true }).click()
   stale.release()
