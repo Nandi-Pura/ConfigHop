@@ -23,6 +23,7 @@ from .services import (
     update_preview, upload_source,
 )
 from .switch import switch_router
+from .firewall import firewall_router
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -50,10 +51,11 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type", "X-ConfigHop-Client", "X-ConfigHop-Filename"])
     app.include_router(switch_router())
+    app.include_router(firewall_router())
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
-        if request.url.path.startswith('/api/v1/switch-projects') and request.method in {'POST', 'PUT'}:
+        if request.url.path.startswith(('/api/v1/switch-projects', '/api/v1/firewall-projects')) and request.method in {'POST', 'PUT'}:
             size = 0
             chunks = []
             async for chunk in request.stream():
