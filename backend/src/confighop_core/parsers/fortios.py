@@ -176,6 +176,8 @@ def parse_fortios(source: str, version: str) -> FirewallIR:
             for destination in policy.destinations:
                 if destination in vips:
                     vip = vips[destination]
+                    if 'protocol' in vip.values:
+                        ir.findings.append(Finding(severity='BLOCKED', code='VIP_PROTOCOL', message='Explicit VIP protocol matching needs manual packet-flow verification.', entity=vip.name, line=vip.line))
                     if not vip.get('extip') or not vip.get('mappedip') or vip.get('portforward', 'disable') != 'disable' or vip.get('extport') or vip.get('mappedport'):
                         ir.findings.append(Finding(severity='BLOCKED', code='VIP_COMPLEX', message='Only one-to-one VIP without port forwarding is supported.', entity=vip.name, line=vip.line))
                     else:

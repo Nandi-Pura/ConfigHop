@@ -61,6 +61,21 @@ export default function FirewallTranslationWorkspace({ onDomainChange, onTitleCh
     } catch (cause) { if (current === serial.current && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Source inspection failed.') }
     finally { if (current === serial.current) setLoading(false) }
   }
+  const uploadFile = async (file: File) => {
+    reset(); const current = serial.current
+    if (file.size > 2 * 1024 * 1024) { setError('Source exceeds the 2 MB limit.'); return }
+    try {
+      const text = await file.text()
+      if (current === serial.current) await upload(text, file.name)
+    } catch { if (current === serial.current) setError('Could not read the source file.') }
+  }
+  const paste = async () => {
+    reset(); const current = serial.current
+    try {
+      const text = await navigator.clipboard.readText()
+      if (current === serial.current) await upload(text, 'Clipboard source')
+    } catch { if (current === serial.current) setError('Clipboard access is unavailable.') }
+  }
   const changeSource = (next: Vendor) => {
     reset(); setSourceOS(next); setSourceVersion(sourceOptions[next][0]); setTargetVersion(sourceOptions[next === 'fortios' ? 'panos' : 'fortios'][0]); onTitleChange(`${label[next]} to ${label[next === 'fortios' ? 'panos' : 'fortios']}`)
   }
@@ -113,7 +128,7 @@ export default function FirewallTranslationWorkspace({ onDomainChange, onTitleCh
     <section className="section-card locked-top">
       <div className="locked-platform"><strong>Source Platform</strong><label>Vendor and OS<select aria-label="Source firewall OS" value={sourceOS} onChange={event => changeSource(event.target.value as Vendor)}><option value="fortios">Fortinet FortiOS</option><option value="panos">Palo Alto PAN-OS</option></select></label><label>OS version<select aria-label="Source firewall version" value={sourceVersion} onChange={event => { reset(); setSourceVersion(event.target.value) }}>{sourceOptions[sourceOS].map(version => <option key={version}>{version}</option>)}</select></label></div>
       <div className="locked-platform"><strong>Target Platform</strong><span>{label[targetOS]}</span><label>OS version<select aria-label="Target firewall version" value={targetVersion} onChange={event => setTargetVersion(event.target.value)}>{sourceOptions[targetOS].map(version => <option key={version}>{version}</option>)}</select></label><small>Hardware suitability requires separate verification.</small></div>
-      <div className="locked-platform"><strong>Source Configuration</strong><div className="locked-upload"><button className="btn accent-outline" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload File</button><button className="btn secondary" onClick={() => void navigator.clipboard.readText().then(value => upload(value, 'Clipboard source')).catch(() => setError('Clipboard access is unavailable.'))}><Clipboard size={14} /> Paste</button></div><input ref={fileRef} type="file" hidden accept={sourceOS === 'panos' ? '.xml,text/xml' : '.conf,.cfg,.txt,text/plain'} onChange={event => { const file = event.target.files?.[0]; if (file) { if (file.size > 2 * 1024 * 1024) setError('Source exceeds the 2 MB limit.'); else void file.text().then(text => upload(text, file.name)).catch(() => setError('Could not read the source file.')) } event.target.value = '' }} /><small>{name}</small></div>
+      <div className="locked-platform"><strong>Source Configuration</strong><div className="locked-upload"><button className="btn accent-outline" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload File</button><button className="btn secondary" onClick={() => void paste()}><Clipboard size={14} /> Paste</button></div><input ref={fileRef} type="file" hidden accept={sourceOS === 'panos' ? '.xml,text/xml' : '.conf,.cfg,.txt,text/plain'} onChange={event => { const file = event.target.files?.[0]; if (file) void uploadFile(file); event.target.value = '' }} /><small>{name}</small></div>
     </section>
     <section className="section-card locked-inventory"><strong>Source Inventory</strong><div className="locked-metrics">{[
       ['Interfaces', inventory?.interfaces.length], ['Zones', inventory?.zones.length], ['Addresses', inventory?.addresses.length], ['Address groups', inventory?.address_groups.length],

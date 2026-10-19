@@ -61,7 +61,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
             async for chunk in request.stream():
                 size += len(chunk)
                 if size > 3 * 1024 * 1024:
-                    return _error('SOURCE_TOO_LARGE', 'Switch request exceeds the 3 MB transport limit.', 413)
+                    return _error('SOURCE_TOO_LARGE', 'Configuration request exceeds the 3 MB transport limit.', 413)
                 chunks.append(chunk)
             request._body = b''.join(chunks)
         if request.method in {"POST", "PUT", "DELETE"} and request.url.path.startswith("/api/v1/"):
