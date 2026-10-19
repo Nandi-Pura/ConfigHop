@@ -22,6 +22,7 @@ from .services import (
     select_source_profile, assess_project,
     update_preview, upload_source,
 )
+from .switch import switch_router
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -48,9 +49,19 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         "http://localhost:5173,http://127.0.0.1:5173").split(",") if item.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST", "PUT", "DELETE"],
         allow_headers=["Content-Type", "X-ConfigHop-Client", "X-ConfigHop-Filename"])
+    app.include_router(switch_router())
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        if request.url.path.startswith('/api/v1/switch-projects') and request.method in {'POST', 'PUT'}:
+            size = 0
+            chunks = []
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > 3 * 1024 * 1024:
+                    return _error('SOURCE_TOO_LARGE', 'Switch request exceeds the 3 MB transport limit.', 413)
+                chunks.append(chunk)
+            request._body = b''.join(chunks)
         if request.method in {"POST", "PUT", "DELETE"} and request.url.path.startswith("/api/v1/"):
             if request.headers.get("x-confighop-client") != "web":
                 response = _error("CLIENT_HEADER_REQUIRED", "X-ConfigHop-Client: web is required.", 400)
@@ -86,7 +97,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         profiles = list_hardware_profiles()
         return {"domains": {"firewall": {"palo_alto_xml_inventory": True,
             "manual_interface_mapping": True, "dependency_preview": True, "panos_candidate_renderer": True},
-            "switch": {"backend_enabled": False}},
+            "switch": {"backend_enabled": True, "limited_pair": "IOS_XE_17.12_TO_AOS_CX_10.15", "hardware_optional_for_inspection": True}},
             "verified_hardware_profiles": [p.id for p in profiles if p.profile_status == "verified"],
             "synthetic_hardware_profiles": [p.id for p in profiles if p.profile_status == "synthetic"],
             "candidate_render_profiles": [p.id for p in profiles if p.profile_status == "verified" and p.target_render_support == "SUPPORTED"],

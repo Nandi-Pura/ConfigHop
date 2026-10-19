@@ -24,7 +24,7 @@ test('Firewall remains the default workflow and Switch has its own sections', as
     assert.ok(switchPage.includes('Conflicts (0)'))
     assert.ok(switchPage.includes('Chassis View'))
     assert.ok(lockedSwitch.includes('Target logical slots (48)'))
-    assert.ok(lockedSwitch.includes('Switch configuration generation is unavailable'))
+    assert.ok(lockedSwitch.includes('preview the limited AOS-CX candidate'))
     assert.ok(firewall.includes('>Hardware</button>'))
     assert.ok(!switchPage.includes('Security Policies'))
     assert.ok(!switchPage.includes('NAT Rules'))

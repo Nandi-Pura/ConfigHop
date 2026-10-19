@@ -2,29 +2,29 @@
 import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
-import { createServer } from 'vite'
+import { switchBrowserServer } from './switchBrowserServer.mjs'
 
-let server, browser, url
+let server, browser, url, backendServer
 before(async () => {
   const { chromium } = await import(process.env.CONFIGHOP_PLAYWRIGHT_MODULE || 'playwright')
-  server = await createServer({ configFile: false, server: { host: '127.0.0.1', port: 0 }, logLevel: 'silent' })
-  await server.listen()
-  url = `http://127.0.0.1:${server.httpServer.address().port}`
+  backendServer = await switchBrowserServer()
+  server = backendServer.server
+  url = backendServer.url
   browser = await chromium.launch({ headless: true, executablePath: process.env.CONFIGHOP_CHROMIUM_EXECUTABLE })
   await mkdir('artifacts/phase8b', { recursive: true })
 })
-after(async () => { await browser?.close(); await server?.close() })
+after(async () => { await browser?.close(); await backendServer?.close() })
 
-test('Switch UI inspects configured declarations, prevents duplicate slots and discloses unavailable output', async t => {
+test('Switch UI parses configured declarations, prevents duplicate slots and blocks unresolved output', async t => {
   const page = await browser.newPage({ viewport: { width: 1680, height: 980 } })
   t.after(() => page.close())
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
-  await page.route('**/api/v1/**', route => route.fulfill({ json: [] }))
   await page.goto(url)
   await page.getByLabel('Domain').selectOption('Switch')
   const source = 'hostname sw\ninterface GigabitEthernet1/0/1\n description user\ninterface GigabitEthernet1/0/2\ninterface Port-channel10\ninterface Vlan99'
   await page.locator('.switch-workspace input[type=file]').setInputFiles({ name: 'synthetic-switch.cfg', mimeType: 'text/plain', buffer: Buffer.from(source) })
+  await page.getByLabel('Logical target slot for GigabitEthernet1/0/1').waitFor()
   assert.equal(await page.getByText('Configured physical declarations').locator('..').locator('b').innerText(), '2')
   assert.equal(await page.locator('.locked-interface-row').count(), 4)
   const first = page.getByLabel('Logical target slot for GigabitEthernet1/0/1')
@@ -46,6 +46,7 @@ test('Switch UI inspects configured declarations, prevents duplicate slots and d
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await page.evaluate(() => navigator.clipboard.writeText('interface Gi1/0/5'))
   await page.getByRole('button', { name: 'Paste from Clipboard' }).click()
+  await page.getByLabel('Logical target slot for GigabitEthernet1/0/5').waitFor()
   assert.equal(await page.locator('.locked-interface-row').count(), 1)
   assert.equal(await page.getByText('Configured physical declarations').locator('..').locator('b').innerText(), '1')
   assert.deepEqual(errors, [])

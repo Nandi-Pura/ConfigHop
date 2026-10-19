@@ -7,7 +7,7 @@ export class ApiClientError extends Error {
   constructor(public code: string, message: string, public status: number) { super(message) }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, {

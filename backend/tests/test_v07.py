@@ -107,7 +107,7 @@ def test_api_catalog_and_analysis_only_gate():
         assert len(caps["verified_hardware_profiles"]) == 11
         assert len(caps["candidate_render_profiles"]) == 2
         assert len(caps["analysis_only_target_profiles"]) == 2
-        assert caps["domains"]["switch"]["backend_enabled"] is False
+        assert caps["domains"]["switch"]["backend_enabled"] is True
         project = client.post("/api/v1/projects", headers=HEADERS).json()["project_id"]
         for role, profile in (("source", "paloalto-pa-5410"), ("target", "paloalto-pa-5250")):
             response = client.put(f"/api/v1/projects/{project}/{role}-profile",
