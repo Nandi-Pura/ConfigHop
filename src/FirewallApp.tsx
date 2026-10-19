@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import MockWorkspace, { type MockActions } from './MockWorkspace'
 import SwitchWorkspace from './SwitchWorkspace'
+import FirewallTranslationWorkspace from './FirewallTranslationWorkspace'
 import LiveConfigEditor from './LiveConfigEditor'
 import { type Domain } from './platformCatalog'
 import VirtualCodeViewer from './VirtualCodeViewer'
@@ -22,6 +23,7 @@ const errorMessage = (error: unknown) => error instanceof ApiClientError ? error
 export default function FirewallApp() {
   const [domain, setDomain] = useState<Domain>('Firewall')
   const [backendMode, setBackendMode] = useState(true)
+  const [crossVendorMode, setCrossVendorMode] = useState(false)
   const [projectName, setProjectName] = useState('Palo Alto Firewall Migration')
   const [switchProjectName, setSwitchProjectName] = useState('C9300-48P → CX 6300M 48G')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -269,17 +271,17 @@ export default function FirewallApp() {
 
   const ready: PreviewStatus | null = preview?.overall_status ?? preview?.status ?? null
   const canGenerate = !!inventory && !!profile && (profile.profile_status === 'verified' || mappings.length > 0) && ready !== 'BLOCKED' && !!ready && !busy
-  return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+  return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${crossVendorMode && domain === 'Firewall' ? 'phase9b-mode' : ''}`}>
     <aside className="project-sidebar" aria-label="Project actions">
       <button className="sidebar-toggle" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>{sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}</button>
-      <button className="sidebar-action new-project" onClick={domain === 'Switch' || !backendMode ? () => mockActions.current?.reset() : newProject}><Plus size={18} /><span>New Project</span></button>
-      <button className="sidebar-action" onClick={domain === 'Switch' || !backendMode ? () => mockActions.current?.save() : saveProject}><Save size={17} /><span>Save Project</span></button>
-      <button className="sidebar-action" onClick={domain === 'Switch' || !backendMode ? () => mockActions.current?.load() : loadProject}><FolderOpen size={17} /><span>Load Project</span></button>
-      <button className="sidebar-action" onClick={domain === 'Switch' || !backendMode ? () => mockActions.current?.clear() : clearProject}><Trash2 size={17} /><span>Clear Project</span></button>
+      <button className="sidebar-action new-project" onClick={domain === 'Switch' || crossVendorMode || !backendMode ? () => mockActions.current?.reset() : newProject}><Plus size={18} /><span>New Project</span></button>
+      <button className="sidebar-action" onClick={domain === 'Switch' || crossVendorMode || !backendMode ? () => mockActions.current?.save() : saveProject}><Save size={17} /><span>Save Project</span></button>
+      <button className="sidebar-action" onClick={domain === 'Switch' || crossVendorMode || !backendMode ? () => mockActions.current?.load() : loadProject}><FolderOpen size={17} /><span>Load Project</span></button>
+      <button className="sidebar-action" onClick={domain === 'Switch' || crossVendorMode || !backendMode ? () => mockActions.current?.clear() : clearProject}><Trash2 size={17} /><span>Clear Project</span></button>
     </aside>
     <div className="app-content">
-      <header className="app-header"><div className="brand-text"><strong>ConfigHop</strong><span>Network Configuration Migration</span></div><div className="header-divider" /><div className="project-name"><input value={domain === 'Switch' ? switchProjectName : projectName} onChange={(event) => domain === 'Switch' ? setSwitchProjectName(event.target.value) : setProjectName(event.target.value)} aria-label="Project name" /><Pencil size={13} /></div></header>
-      {domain === 'Switch' ? <SwitchWorkspace onDomainChange={setDomain} onTitleChange={setSwitchProjectName} actionsRef={mockActions} /> : !backendMode ? <MockWorkspace key={domain} domain={domain} onDomainChange={setDomain} onBackend={() => { setBackendMode(true); setProjectName('Palo Alto → Palo Alto') }} actionsRef={mockActions} onTitleChange={setProjectName} /> :
+      <header className="app-header"><div className="brand-text"><strong>ConfigHop</strong><span>Network Configuration Migration</span></div><div className="header-divider" /><div className="project-name"><input value={domain === 'Switch' ? switchProjectName : projectName} onChange={(event) => domain === 'Switch' ? setSwitchProjectName(event.target.value) : setProjectName(event.target.value)} aria-label="Project name" /><Pencil size={13} /></div>{domain === 'Firewall' && <button className="btn secondary" onClick={() => { setProjectName(crossVendorMode ? 'Palo Alto Firewall Migration' : 'FortiOS to PAN-OS'); setCrossVendorMode(value => !value); setBackendMode(true) }}>{crossVendorMode ? 'Same-vendor PAN-OS' : 'Cross-vendor Firewall'}</button>}</header>
+      {domain === 'Switch' ? <SwitchWorkspace onDomainChange={setDomain} onTitleChange={setSwitchProjectName} actionsRef={mockActions} /> : crossVendorMode ? <FirewallTranslationWorkspace onDomainChange={setDomain} onTitleChange={setProjectName} actionsRef={mockActions} /> : !backendMode ? <MockWorkspace key={domain} domain={domain} onDomainChange={setDomain} onBackend={() => { setBackendMode(true); setProjectName('Palo Alto → Palo Alto') }} actionsRef={mockActions} onTitleChange={setProjectName} /> :
         <main className="workspace locked-workspace firewall-workspace">
           <div className="locked-title"><div><h1>Firewall Migration</h1><p>Migrate a PAN-OS configuration within verified Palo Alto hardware scope</p></div><label>Migration Type<select value="Firewall" onChange={() => setDomain('Switch')}><option>Firewall</option><option>Switch</option></select></label></div>
           {errorText && <div className="api-error" role="alert"><CircleAlert size={15} />{errorText}</div>}
