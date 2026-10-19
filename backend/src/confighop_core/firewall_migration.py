@@ -132,6 +132,23 @@ def validate_firewall(ir: FirewallIR, target: Vendor, mappings: FirewallMappings
             findings.append(_finding('NAT_KIND', 'NAT kind is unsupported.', nat.name))
         if not nat.translated_address:
             findings.append(_finding('NAT_TRANSLATION', 'Translated address is missing.', nat.name))
+        if nat.service.lower() not in {'any', 'all'} and nat.service not in service_names:
+            findings.append(_finding('NAT_SERVICE', 'NAT service reference is unresolved.', nat.name))
+        if nat.service in {group.name for group in ir.service_groups}:
+            findings.append(_finding('NAT_SERVICE', 'NAT group service matching is not in the supported subset.', nat.name))
+        if nat.related_policy:
+            related = next((policy for policy in ir.policies if policy.name == nat.related_policy), None)
+            if related is None:
+                findings.append(_finding('NAT_POLICY_LINK', 'NAT references a missing security policy.', nat.name))
+            else:
+                groups = {group.name: group.members for group in ir.service_groups}
+                values = related.services
+                seen = set()
+                while len(values) == 1 and values[0] in groups and values[0] not in seen:
+                    seen.add(values[0]); values = groups[values[0]]
+                related_service = values[0] if len(values) == 1 else None
+                if not related_service or (nat.service.lower() in {'any', 'all'}) != (related_service.lower() in {'any', 'all'}) or (nat.service.lower() not in {'any', 'all'} and nat.service != related_service):
+                    findings.append(_finding('NAT_SERVICE_MISMATCH', 'NAT and linked security policy have different service matches.', nat.name))
         translated = next((address.value for address in ir.addresses if address.name == nat.translated_address), nat.translated_address)
         try:
             translated_ip = ipaddress.ip_network(translated, strict=False)
@@ -301,7 +318,7 @@ def _render_panos(ir: FirewallIR, mappings: FirewallMappings) -> str:
         for path, values, mapping in [('from', nat.source_zones, mappings.zones), ('to', nat.destination_zones, mappings.zones),
                 ('source', nat.sources, mappings.addresses), ('destination', nat.destinations, mappings.addresses)]:
             _members(entry, path, _refs(values, mapping, 'any'))
-        _add(entry, 'service', 'any')
+        _add(entry, 'service', 'any' if nat.service.lower() in {'any', 'all'} else _name(nat.service, mappings.services))
         if nat.kind == 'dipp':
             _members(entry, 'source-translation/dynamic-ip-and-port/translated-address', [nat.translated_address])
         else:
@@ -398,7 +415,7 @@ def _render_fortios(ir: FirewallIR, mappings: FirewallMappings) -> str:
         *([('nat', 'enable'), ('ippool', 'enable'), ('poolname', f'pool-{next(nat.name for nat in ir.nat if nat.kind == "dipp" and nat.related_policy == item.name)}')]
             if any(nat.kind == 'dipp' and nat.related_policy == item.name for nat in ir.nat) else [])])
         for index, item in enumerate(ir.policies)])
-    return output
+    return output.rstrip() + '\n'
 
 
 def generate_firewall(ir: FirewallIR, target: Vendor, mappings: FirewallMappings, revision: int, target_version: str = '') -> FirewallCandidate:

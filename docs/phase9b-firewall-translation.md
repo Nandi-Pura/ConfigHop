@@ -45,7 +45,7 @@ The supported pair is **FortiOS 7.4 ↔ PAN-OS 11.1**, using synthetic fixtures 
 | Interfaces and zones | Same-vendor physical mapping | Explicit physical, simple VLAN/aggregate mappings; zone name mapping | NEW_IMPLEMENTATION; no hardware profile claim |
 | Static routes | PAN-OS inventory | IPv4 static route with optional mapped egress and IP next hop | NEW_IMPLEMENTATION; dynamic routing blocked |
 | Security policies | PAN-OS inventory | Ordered allow/deny, disabled state, address/service/zone refs, log-end and description | NEW_IMPLEMENTATION; App-ID, identity, profiles, negation, category blocked |
-| NAT | PAN-OS inventory | Single-address overload SNAT and one-to-one VIP/DNAT with explicit ingress and policy link | NEW_IMPLEMENTATION; port forwarding, central NAT, complex pools and ambiguous packet flow blocked; every emitted NAT rule requires engineer review |
+| NAT | PAN-OS inventory | Single-address overload SNAT and one-to-one VIP/DNAT with explicit ingress, one resolvable service match, and policy link | NEW_IMPLEMENTATION; port forwarding, central NAT, complex pools, combined SNAT/DNAT, and ambiguous packet flow blocked; every emitted NAT rule requires engineer review |
 | Schedules | Not translated | Inventory and findings | UNSUPPORTED for restricted/one-time/recurring conversion; no widening to `always` |
 | VPN, security profiles | Not translated | Detected when visible in parsed sections/policies | UNSUPPORTED, BLOCKED_PENDING_EVIDENCE |
 | Name mapping and reference integrity | Same-vendor interface mapping | Explicit interface mapping; zone/object/service/policy/NAT renames; missing/cyclic/duplicate checks | NEW_IMPLEMENTATION |

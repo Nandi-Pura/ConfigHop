@@ -19,7 +19,7 @@ def finalize_ir(ir: FirewallIR) -> FirewallIR:
             elif kind == 'policy':
                 item.dependencies = list(dict.fromkeys(item.source_zones + item.destination_zones + item.sources + item.destinations + item.services + ([item.schedule] if item.schedule != 'always' else [])))
             elif kind == 'nat':
-                item.dependencies = list(dict.fromkeys(item.source_zones + item.destination_zones + item.sources + item.destinations + ([item.related_policy] if item.related_policy else [])))
+                item.dependencies = list(dict.fromkeys(item.source_zones + item.destination_zones + item.sources + item.destinations + ([item.service] if item.service != 'any' else []) + ([item.related_policy] if item.related_policy else [])))
             elif kind == 'route':
                 item.dependencies = list(filter(None, [item.interface, item.router]))
             item.findings = [finding for finding in ir.findings if finding.entity == item.name]

@@ -130,6 +130,17 @@ def parse_fortios(source: str, version: str) -> FirewallIR:
             ir.findings.append(Finding(severity='BLOCKED', code='SCHEDULE_ONETIME', message='One-time schedule translation is unsupported.', entity=item.name, line=item.line))
         pools = {item.name: item for item in context.items('config firewall ippool')}
         vips = {item.name: item for item in context.items('config firewall vip')}
+        service_groups = {item.name: item.members for item in ir.service_groups}
+        def nat_service(policy: Policy, line: int) -> str:
+            values = policy.services
+            seen = set()
+            while len(values) == 1 and values[0] in service_groups and values[0] not in seen:
+                seen.add(values[0])
+                values = service_groups[values[0]]
+            if len(values) == 1 and (values[0] in {service.name for service in ir.services} or values[0].lower() in {'all', 'any'}):
+                return 'any' if values[0].lower() in {'all', 'any'} else values[0]
+            ir.findings.append(Finding(severity='BLOCKED', code='NAT_SERVICE', message='Policy NAT needs one resolvable service match.', entity=policy.name, line=line))
+            return ''
         for order, item in enumerate(context.items('config firewall policy')):
             policy = Policy(name=item.get('name', item.name), source_name=item.name, scope=scope, line=item.line,
                 source_zones=item.values.get('srcintf', []), destination_zones=item.values.get('dstintf', []),
@@ -138,10 +149,18 @@ def parse_fortios(source: str, version: str) -> FirewallIR:
                 disabled=item.get('status', 'enable') == 'disable', schedule=item.get('schedule', 'always'),
                 log=item.get('logtraffic', 'disable') != 'disable', description=item.get('comments'),
                 nat=item.get('nat') == 'enable', nat_pool=item.get('poolname') or None)
+            for key, allowed in [('status', {'enable', 'disable'}), ('nat', {'enable', 'disable'}),
+                    ('ippool', {'enable', 'disable'}), ('logtraffic', {'all', 'disable'})]:
+                if key in item.values and item.get(key) not in allowed:
+                    ir.findings.append(Finding(severity='BLOCKED', code='POLICY_ENUM', message=f'Unsupported {key} value.', entity=policy.name, line=item.line))
             for reference in policy.source_zones + policy.destination_zones:
                 if reference in {interface.name for interface in ir.interfaces} and reference not in {zone.name for zone in ir.zones}:
                     ir.zones.append(Zone(name=reference, scope=scope, line=item.line, interfaces=[reference]))
             ir.policies.append(policy)
+            if policy.nat and any(destination in vips for destination in policy.destinations):
+                ir.findings.append(Finding(severity='BLOCKED', code='COMBINED_NAT', message='Combined SNAT and VIP/DNAT needs a distinct packet-flow translation.', entity=policy.name, line=item.line))
+            if policy.disabled and (policy.nat or any(destination in vips for destination in policy.destinations)):
+                ir.findings.append(Finding(severity='BLOCKED', code='NAT_DISABLED_POLICY', message='NAT on a disabled policy cannot produce an active target rule.', entity=policy.name, line=item.line))
             if policy.nat:
                 if item.get('ippool') != 'enable' or not policy.nat_pool or policy.nat_pool not in pools:
                     ir.findings.append(Finding(severity='BLOCKED', code='SNAT_INTERFACE', message='Interface SNAT or missing pool cannot be translated without a verified egress address.', entity=policy.name, line=item.line))
@@ -151,21 +170,25 @@ def parse_fortios(source: str, version: str) -> FirewallIR:
                         ir.findings.append(Finding(severity='BLOCKED', code='SNAT_POOL_TYPE', message='Only a single-address overload pool is supported.', entity=pool.name, line=pool.line))
                     else:
                         ir.nat.append(Nat(name=f'snat-{item.name}', kind='dipp', scope=scope, line=item.line,
+                            service=nat_service(policy, item.line),
                             source_zones=policy.source_zones, destination_zones=policy.destination_zones,
                             sources=policy.sources, destinations=policy.destinations, translated_address=pool.get('startip'), related_policy=policy.name))
             for destination in policy.destinations:
                 if destination in vips:
                     vip = vips[destination]
-                    if not vip.get('extip') or not vip.get('mappedip') or vip.get('portforward', 'disable') != 'disable':
+                    if not vip.get('extip') or not vip.get('mappedip') or vip.get('portforward', 'disable') != 'disable' or vip.get('extport') or vip.get('mappedport'):
                         ir.findings.append(Finding(severity='BLOCKED', code='VIP_COMPLEX', message='Only one-to-one VIP without port forwarding is supported.', entity=vip.name, line=vip.line))
                     else:
                         ingress = [zone.name for zone in ir.zones if vip.get('extintf') in zone.interfaces]
                         if len(ingress) != 1:
                             ir.findings.append(Finding(severity='BLOCKED', code='VIP_INGRESS', message='VIP requires an explicit external interface in exactly one zone.', entity=vip.name, line=vip.line))
+                        elif ingress[0] not in policy.source_zones:
+                            ir.findings.append(Finding(severity='BLOCKED', code='VIP_INGRESS_ZONE', message='VIP ingress zone differs from the linked policy source zone.', entity=vip.name, line=vip.line))
                         if not any(address.name == vip.name for address in ir.addresses):
                             ir.addresses.append(Address(name=vip.name, scope=scope, line=vip.line,
                                 kind='ipmask', value=f"{vip.get('extip')}/32"))
                         ir.nat.append(Nat(name=f'dnat-{vip.name}', kind='dnat', scope=scope, line=vip.line,
+                            service=nat_service(policy, item.line),
                             source_zones=policy.source_zones, destination_zones=ingress,
                             sources=policy.sources, destinations=[vip.get('extip')], translated_address=vip.get('mappedip'),
                             related_policy=policy.name))

@@ -182,7 +182,7 @@
                   <destination>
                     <member>any</member>
                   </destination>
-                  <service>any</service>
+                  <service>TCP_8443</service>
                   <source-translation>
                     <dynamic-ip-and-port>
                       <translated-address>
@@ -204,7 +204,7 @@
                   <destination>
                     <member>203.0.113.100</member>
                   </destination>
-                  <service>any</service>
+                  <service>TCP_8443</service>
                   <destination-translation>
                     <translated-address>10.0.0.100</translated-address>
                   </destination-translation>

@@ -85,6 +85,9 @@ def parse_panos_firewall(source: str, version: str) -> FirewallIR:
             ir.findings.append(Finding(severity='BLOCKED', code='SCHEDULE_SEMANTICS', message='PAN-OS schedule translation requires manual design.', entity=entry.get('name', '')))
         for entry in container.findall('./rulebase/security/rules/entry'):
             name = entry.get('name', '')
+            for key in ('disabled', 'log-end', 'negate-source', 'negate-destination'):
+                if entry.find(key) is not None and _text(entry, key) not in {'yes', 'no'}:
+                    ir.findings.append(Finding(severity='BLOCKED', code='POLICY_ENUM', message=f'Unsupported {key} value.', entity=name))
             supported_policy_fields = {'from', 'to', 'source', 'destination', 'application', 'service', 'action',
                 'disabled', 'description', 'log-end', 'schedule', 'profile-setting', 'source-user',
                 'negate-source', 'negate-destination', 'category'}
@@ -106,6 +109,8 @@ def parse_panos_firewall(source: str, version: str) -> FirewallIR:
                 ir.findings.append(Finding(severity='BLOCKED', code='POLICY_MATCH', message='Negated or category-based matching needs manual migration.', entity=name))
         for entry in container.findall('./rulebase/nat/rules/entry'):
             name = entry.get('name', '')
+            if entry.find('disabled') is not None and _text(entry, 'disabled') not in {'yes', 'no'}:
+                ir.findings.append(Finding(severity='BLOCKED', code='NAT_ENUM', message='Unsupported NAT disabled value.', entity=name))
             for child in entry:
                 if child.tag not in {'from', 'to', 'source', 'destination', 'service', 'source-translation', 'destination-translation', 'disabled'}:
                     ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_NAT_FIELD', message=f'Unsupported NAT field {child.tag}.', entity=name))
@@ -113,9 +118,7 @@ def parse_panos_firewall(source: str, version: str) -> FirewallIR:
                 ir.findings.append(Finding(severity='BLOCKED', code='NAT_DISABLED', message='Disabled NAT rules require explicit target handling.', entity=name))
             common = dict(name=name, scope=scope, source_zones=_members(entry, './from/member'),
                 destination_zones=_members(entry, './to/member'), sources=_members(entry, './source/member'),
-                destinations=_members(entry, './destination/member'))
-            if _text(entry, 'service', 'any') != 'any':
-                ir.findings.append(Finding(severity='BLOCKED', code='NAT_SERVICE', message='Service-constrained NAT needs manual matching verification.', entity=name))
+                destinations=_members(entry, './destination/member'), service=_text(entry, 'service', 'any'))
             dipp = entry.find('./source-translation/dynamic-ip-and-port')
             dnat = entry.find('./destination-translation')
             if dipp is not None:

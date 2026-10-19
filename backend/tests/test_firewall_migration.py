@@ -19,6 +19,7 @@ def test_fortios_to_panos_candidate_preserves_order_and_policy_state():
     assert '<disabled>yes</disabled>' in candidate.text
     assert '<dynamic-ip-and-port>' in candidate.text
     assert '<destination-translation>' in candidate.text
+    assert '<service>TCP_8443</service>' in candidate.text
     assert candidate.text == (FIXTURE.parent / 'panos.xml').read_text()
     parsed = parse_panos_firewall(candidate.text, '11.1')
     assert len(parsed.policies) == 3
@@ -62,6 +63,27 @@ def test_dependency_cycle_missing_reference_schedule_and_vip_ingress_block():
     result = generate_firewall(ir, 'panos', FirewallMappings(interfaces={'port1': 'ethernet1/1', 'port2': 'ethernet1/2'}), 1)
     assert result.status == 'BLOCKED' and not result.text
     assert {'CYCLIC_GROUP', 'MISSING_REFERENCE', 'SCHEDULE', 'VIP_INGRESS'} <= {finding.code for finding in result.findings}
+
+
+def test_policy_nat_with_multiple_services_blocks_instead_of_broadening():
+    source = FIXTURE.read_text().replace('set member "TCP_8443"', 'set member "TCP_8443" "TCP_9000"')
+    ir = parse_fortios(source, '7.4')
+    result = generate_firewall(ir, 'panos', FirewallMappings(interfaces={'port1': 'ethernet1/1', 'port2': 'ethernet1/2'}), 1)
+    assert result.status == 'BLOCKED' and not result.text
+    assert any(f.code == 'NAT_SERVICE' for f in result.findings)
+
+
+def test_combined_or_disabled_policy_nat_cannot_become_active_target_nat():
+    source = FIXTURE.read_text().replace('set dstaddr "WEB_VIP"', 'set dstaddr "WEB_VIP"\n        set nat enable', 1)
+    ir = parse_fortios(source, '7.4')
+    result = generate_firewall(ir, 'panos', FirewallMappings(interfaces={'port1': 'ethernet1/1', 'port2': 'ethernet1/2'}), 1)
+    assert result.status == 'BLOCKED'
+    assert any(f.code == 'COMBINED_NAT' for f in result.findings)
+    source = FIXTURE.read_text().replace('set nat enable', 'set nat enable\n        set status disable', 1)
+    ir = parse_fortios(source, '7.4')
+    result = generate_firewall(ir, 'panos', FirewallMappings(interfaces={'port1': 'ethernet1/1', 'port2': 'ethernet1/2'}), 1)
+    assert result.status == 'BLOCKED'
+    assert any(f.code == 'NAT_DISABLED_POLICY' for f in result.findings)
 
 
 def test_ir_provenance_serialization_and_mapping_rename_are_deterministic():

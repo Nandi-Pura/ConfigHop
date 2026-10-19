@@ -79,6 +79,7 @@ class Policy(Resource):
 
 class Nat(Resource):
     kind: str
+    service: str = 'any'
     source_zones: list[str] = Field(default_factory=list)
     destination_zones: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)

@@ -9,12 +9,12 @@ const emptyMappings = (): FirewallMappings => ({ interfaces: {}, zones: {}, addr
 const sourceOptions = { fortios: ['7.4'], panos: ['11.1'] }
 const label = { fortios: 'Fortinet FortiOS', panos: 'Palo Alto PAN-OS' }
 type Vendor = 'fortios' | 'panos'
-type Props = { onDomainChange: (domain: 'Firewall' | 'Switch') => void; onTitleChange: (title: string) => void; actionsRef: RefObject<MockActions | null> }
+type Props = { onDomainChange: (domain: 'Firewall' | 'Switch') => void; onTitleChange: (title: string) => void; actionsRef: RefObject<MockActions | null>; initialSourceOS?: Vendor }
 
-export default function FirewallTranslationWorkspace({ onDomainChange, onTitleChange, actionsRef }: Props) {
-  const [sourceOS, setSourceOS] = useState<Vendor>('fortios')
-  const [sourceVersion, setSourceVersion] = useState('7.4')
-  const [targetVersion, setTargetVersion] = useState('11.1')
+export default function FirewallTranslationWorkspace({ onDomainChange, onTitleChange, actionsRef, initialSourceOS = 'fortios' }: Props) {
+  const [sourceOS, setSourceOS] = useState<Vendor>(initialSourceOS)
+  const [sourceVersion, setSourceVersion] = useState(initialSourceOS === 'fortios' ? '7.4' : '11.1')
+  const [targetVersion, setTargetVersion] = useState(initialSourceOS === 'fortios' ? '11.1' : '7.4')
   const targetOS: Vendor = sourceOS === 'fortios' ? 'panos' : 'fortios'
   const [project, setProject] = useState<FirewallProject | null>(null)
   const [preview, setPreview] = useState<FirewallPreview | null>(null)
@@ -120,7 +120,7 @@ export default function FirewallTranslationWorkspace({ onDomainChange, onTitleCh
       ['Services', inventory?.services.length], ['Service groups', inventory?.service_groups.length], ['Policies', inventory?.policies.length], ['NAT', inventory?.nat.length], ['Routes', inventory?.routes.length], ['Schedules', inventory?.schedules.length],
     ].map(([title, count]) => <div key={title}><b>{count ?? '—'}</b><span>{title}</span></div>)}</div>{inventory?.findings.length ? <small>{inventory.findings.length} source findings require review.</small> : null}</section>
     <div className="locked-main"><section className="section-card locked-mapping"><div className="section-heading"><strong>Configuration Mapping</strong><span>Names and interfaces must be checked on the target platform</span></div><div className="results-tabs">{categories.map(([key, values]) => <button key={key} className={category === key ? 'active' : ''} onClick={() => setCategory(key)}>{key} ({values.length})</button>)}</div><div className="phase9b-list">{active.map(item => <label key={`${item.scope}:${item.name}`}><span>{item.name}<small>{item.scope}{item.line ? ` · line ${item.line}` : ''}</small></span><input aria-label={`Target ${category} for ${item.name}`} placeholder={category === 'interfaces' ? 'Required target interface' : item.name} value={mappings[category][item.name] ?? ''} onChange={event => rename(category, item.name, event.target.value)} /></label>)}{!active.length && <div className="viewer-placeholder">No {category} parsed from this source.</div>}</div></section>
-      <LiveConfigEditor text={candidate?.text ?? ''} syntax={candidate?.syntax ?? (targetOS === 'panos' ? 'xml' : 'cli')} status={candidate?.status ?? (loading ? 'Updating' : 'Awaiting source')} message={candidate?.status === 'BLOCKED' ? 'Resolve blocking findings before a candidate can be rendered.' : 'Upload a source and provide target mappings.'} findings={candidate?.findings ?? inventory?.findings ?? []} loading={loading} onCopyError={() => setError('Clipboard access is unavailable.')} />
+      <LiveConfigEditor text={candidate?.text ?? ''} syntax={candidate?.syntax ?? (targetOS === 'panos' ? 'xml' : 'cli')} configurationLabel="Candidate Configuration" status={candidate?.status ?? (loading ? 'Updating' : 'Awaiting source')} message={candidate?.status === 'BLOCKED' ? 'Resolve blocking findings before a candidate can be rendered.' : 'Upload a source and provide target mappings.'} findings={candidate?.findings ?? inventory?.findings ?? []} loading={loading} onCopyError={() => setError('Clipboard access is unavailable.')} />
     </div>
     <section className="section-card phase9b-report"><strong>Translation Coverage</strong><div className="phase9b-coverage">{(candidate?.coverage ?? []).map(row => <span key={row.category}>{row.category}: {row.parsed} parsed · {row.translated} translated · {row.rendered} rendered · {row.validated} validated · {row.blocked} blocked</span>)}</div><p>{candidate?.status ?? 'INCOMPLETE'} · Candidate is for engineering review, not hardware deployment certification.</p></section>
     <div className="locked-export">{candidate?.status === 'REVIEW_REQUIRED' && <label><input type="checkbox" checked={ack} onChange={event => setAck(event.target.checked)} /> I acknowledge the current review findings.</label>}<button className="btn accent" disabled={!canExport} onClick={() => void exportCandidate()}><Download size={14} /> Export Migration Candidate</button></div>
