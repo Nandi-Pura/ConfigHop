@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-TranslationStatus = Literal['TRANSLATED', 'PRESERVED', 'REVIEW_REQUIRED', 'UNSUPPORTED', 'BLOCKED']
+TranslationStatus = Literal['TRANSLATED', 'PRESERVED', 'REVIEW_REQUIRED', 'MANUAL_REQUIRED', 'UNSUPPORTED', 'BLOCKED']
 
 
 class SwitchStatement(BaseModel):
@@ -26,7 +26,7 @@ class SwitchInterface(BaseModel):
 
 class SwitchMigrationIR(BaseModel):
     schema_version: Literal['1'] = '1'
-    source_os: Literal['IOS_XE'] = 'IOS_XE'
+    source_os: Literal['IOS_XE', 'AOS_CX'] = 'IOS_XE'
     source_version: str
     interfaces: list[SwitchInterface] = Field(default_factory=list)
     statements: list[SwitchStatement] = Field(default_factory=list)
@@ -59,6 +59,8 @@ class SwitchCoverage(BaseModel):
     translated_constructs: int
     preserved_for_review_constructs: int
     review_required_constructs: int
+    manual_required_constructs: int = 0
+    unsupported_constructs: int = 0
     blocked_constructs: int
     unsupported_feature_families: list[str]
     unresolved_dependencies: int

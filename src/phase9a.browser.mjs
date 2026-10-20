@@ -57,7 +57,7 @@ test('OS-based Switch preview and export work without a hardware profile', { tim
 
 test('real Switch path parses, renders globals and mappings, copies, expands and exports latest candidate', { timeout: 60000 }, async t => {
   const page = await uploaded(t)
-  assert.equal(await page.locator('.locked-interface-row').count(), 7)
+  assert.equal(await page.locator('.switch-map-row').count(), 7)
   await mapped(page)
   assert.equal(await page.getByLabel('Logical target slot for GigabitEthernet1/0/2').locator('option[value="24"]').count(), 0)
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])

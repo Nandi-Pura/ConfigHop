@@ -9,13 +9,15 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from confighop_core.models.switch_migration import SwitchCandidate, SwitchMigrationIR
 from confighop_core.parsers.cisco_iosxe.migration import MAX_SWITCH_BYTES, parse_migration
+from confighop_core.parsers.aruba_aoscx.migration import parse_aruba_migration
 from confighop_core.switch_migration import render_switch
+from confighop_core.switch_migration_cisco import render_cisco
 from .services import ServiceError
 
 
 class SourceRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    source_os: Literal['IOS_XE']
+    source_os: Literal['IOS_XE', 'AOS_CX']
     source_version: str = Field(max_length=32)
     text: str = Field(min_length=1, max_length=MAX_SWITCH_BYTES)
 
@@ -23,7 +25,7 @@ class SourceRequest(BaseModel):
 class SwitchPreviewRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     revision: int = Field(ge=1)
-    target_os: Literal['AOS_CX']
+    target_os: Literal['AOS_CX', 'IOS_XE']
     target_version: str = Field(max_length=32)
     capability_id: Literal['hpe-aruba-jl663a'] | None = None
     mappings: dict[str, StrictInt | StrictStr] = Field(default_factory=dict, max_length=512)
@@ -50,7 +52,7 @@ class SwitchPreviewView(BaseModel):
 
 
 class SwitchExportView(BaseModel):
-    filename: str = 'confighop-aos-cx-candidate.cfg'
+    filename: str = 'confighop-switch-candidate.cfg'
     text: str
     sha256: str
     revision: int
@@ -91,9 +93,11 @@ def switch_router() -> APIRouter:
         if len(sessions) >= 32:
             raise ServiceError('SESSION_LIMIT', 'Close an existing Switch session before uploading another.', 429)
         try:
-            inventory = parse_migration(body.text, body.source_version)
-        except ValueError:
-            raise ServiceError('INVALID_SWITCH_SOURCE', 'Expected a plain-text IOS XE source within the 2 MB and 20,000-line limits.', 400) from None
+            inventory = (parse_migration if body.source_os == 'IOS_XE' else parse_aruba_migration)(body.text, body.source_version)
+        except ValueError as exc:
+            if str(exc) == 'Operational transcript is not a running configuration.':
+                raise ServiceError('OPERATIONAL_TRANSCRIPT', 'Upload the running configuration, not show-command operational output.', 400) from None
+            raise ServiceError('INVALID_SWITCH_SOURCE', 'Expected a plain-text Switch source within the 2 MB and 20,000-line limits.', 400) from None
         project_id = str(uuid4())
         sessions[project_id] = Session(inventory=inventory)
         return view(project_id, sessions[project_id])
@@ -117,7 +121,7 @@ def switch_router() -> APIRouter:
             if body.revision <= session.revision:
                 raise ServiceError('STALE_REVISION', 'Preview revision must be newer than the current session revision.', 409)
             session.revision, session.candidate, session.settings = body.revision, None, body
-            candidate = render_switch(session.inventory, body.mappings, body.target_version, body.capability_id)
+            candidate = (render_switch if session.inventory.source_os == 'IOS_XE' and body.target_os == 'AOS_CX' else render_cisco)(session.inventory, body.mappings, body.target_version, body.capability_id)
             session.candidate = candidate
             return SwitchPreviewView(project_id=project_id, revision=session.revision, candidate=candidate)
 
