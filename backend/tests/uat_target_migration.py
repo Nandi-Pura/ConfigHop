@@ -178,6 +178,7 @@ def main():
         panel.get_by_text("No target baseline yet.", exact=False).wait_for()
 
         panel.get_by_label("Management IP").fill("192.0.2.20")
+        panel.get_by_label("Port").fill("443")
         panel.get_by_label("XML API key").fill("request-only-key")
         panel.get_by_label("CA certificate PEM", exact=False).fill("test-ca")
         panel.get_by_role("button", name="Test Target Connection").click()
@@ -193,9 +194,11 @@ def main():
         approve = panel.get_by_role("button", name="Approve Reviewed Package")
         assert approve.is_disabled()
         panel.locator(".target-finding.warning input").check()
-        panel.get_by_label("Confirm target hostname").fill("target-fw")
+        hostname_confirmation = panel.get_by_label("Confirm target hostname")
+        hostname_confirmation.fill("target-fw")
         assert approve.is_enabled()
-        approve.focus()
+        hostname_confirmation.focus()
+        page.keyboard.press("Tab")
         assert page.evaluate("document.activeElement.textContent") == "Approve Reviewed Package"
         approve.click()
         panel.get_by_text("Manual review recorded", exact=True).wait_for()
