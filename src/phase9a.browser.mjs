@@ -4,12 +4,13 @@ import { readFile, mkdir } from 'node:fs/promises'
 import { switchBrowserServer } from './switchBrowserServer.mjs'
 
 let app, browser
-const source = await readFile('backend/tests/fixtures/switch/phase9a-iosxe.cfg', 'utf8')
+const source = (await readFile('backend/tests/fixtures/switch/phase9a-iosxe.cfg', 'utf8')).replace(/\r\n/g, '\n')
 before(async () => {
   app = await switchBrowserServer()
   const { chromium } = await import(process.env.CONFIGHOP_PLAYWRIGHT_MODULE || 'playwright')
   browser = await chromium.launch({ headless: true, executablePath: process.env.CONFIGHOP_CHROMIUM_EXECUTABLE })
   await mkdir('artifacts/phase9a', { recursive: true })
+  await mkdir('artifacts/phase11a', { recursive: true })
 })
 after(async () => { await browser?.close(); await app?.close() })
 
@@ -22,7 +23,7 @@ async function uploaded(t) {
   await page.goto(app.url)
   await page.getByLabel('Domain').selectOption('Switch')
   await page.locator('.switch-workspace input[type=file]').setInputFiles({ name: 'synthetic-phase9a.cfg', mimeType: 'text/plain', buffer: Buffer.from(source) })
-  await page.getByLabel('Logical target slot for GigabitEthernet1/0/1').waitFor()
+  await page.getByLabel('Target interface for GigabitEthernet1/0/1').waitFor()
   return page
 }
 async function mapped(page) {
@@ -31,6 +32,28 @@ async function mapped(page) {
   for (const [index, slot] of [24, 10, 48, 7, 8].entries()) await page.getByLabel(`Logical target slot for GigabitEthernet1/0/${index + 1}`).selectOption(String(slot))
   await page.locator('.live-heading').getByText('REVIEW_REQUIRED', { exact: true }).waitFor()
 }
+
+test('OS-based Switch preview and export work without a hardware profile', { timeout: 60000 }, async t => {
+  const page = await uploaded(t)
+  await page.getByLabel('Target Network OS').selectOption('10.16')
+  assert.equal(await page.locator('.locked-port-grid').count(), 0)
+  for (const [index, slot] of [24, 10, 48, 7, 8].entries()) {
+    await page.getByLabel(`Target interface for GigabitEthernet1/0/${index + 1}`).fill(`1/1/${slot}`)
+  }
+  await page.locator('.live-heading').getByText('REVIEW_REQUIRED', { exact: true }).waitFor()
+  await page.getByText('Target capability and translation report', { exact: true }).click()
+  await page.getByText(/hardware NOT_VERIFIED/).waitFor()
+  await page.screenshot({ path: 'artifacts/phase11a/switch-os-based-desktop.png', fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: 'artifacts/phase11a/switch-os-based-narrow.png', fullPage: true })
+  await page.setViewportSize({ width: 1680, height: 980 })
+  await page.getByRole('tab', { name: /Validation/ }).click()
+  await page.getByText('REVIEW_REQUIRED: PORT_EXISTENCE_NOT_VERIFIED', { exact: true }).first().waitFor()
+  await page.getByLabel('I reviewed the current findings and deployment limitations.').check()
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: 'Export', exact: true }).click()
+  assert.match(await readFile(await (await download).path(), 'utf8'), /interface 1\/1\/24/)
+})
 
 test('real Switch path parses, renders globals and mappings, copies, expands and exports latest candidate', { timeout: 60000 }, async t => {
   const page = await uploaded(t)
@@ -102,8 +125,10 @@ test('legacy plaintext persistence is removed and missing VLAN dependency blocks
   await page.reload()
   await page.getByLabel('Domain').selectOption('Switch')
   assert.equal(await page.evaluate(() => localStorage.getItem('confighop-switch-workspace-v1')), null)
-  await page.locator('.switch-workspace input[type=file]').setInputFiles({ name: 'synthetic-missing-vlan.cfg', mimeType: 'text/plain', buffer: Buffer.from(source.replace('vlan 20\n name SERVERS\n!\n', '')) })
-  await page.getByLabel('Logical target slot for GigabitEthernet1/0/1').waitFor()
+  const missingVlan = source.replace('vlan 20\n name SERVERS\n!\n', '')
+  assert.notEqual(missingVlan, source)
+  await page.locator('.switch-workspace input[type=file]').setInputFiles({ name: 'synthetic-missing-vlan.cfg', mimeType: 'text/plain', buffer: Buffer.from(missingVlan) })
+  await page.getByLabel('Target interface for GigabitEthernet1/0/1').waitFor()
   await page.getByRole('tab', { name: /Validation/ }).click()
   const dependency = page.getByText('BLOCKED: DEPENDENCY_UNRESOLVED', { exact: true }).first()
   await dependency.waitFor()

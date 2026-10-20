@@ -1,0 +1,120 @@
+{
+  "retrieved_on": "2026-10-20",
+  "translation_direction": "Cisco IOS XE -> HPE Aruba Networking AOS-CX",
+  "releases": [
+    {
+      "vendor": "Cisco",
+      "os_family": "IOS XE",
+      "release_train": "17.12.x",
+      "lifecycle": "Extended-Support; end of sale 2025-03-30; last support 2028-03-31",
+      "evidence_url": "https://www.cisco.com/c/en/us/products/collateral/ios-nx-os-software/ios-xe-17/ios-xe-17-12-x-eol.html",
+      "parser_support": true,
+      "renderer_support": false,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    },
+    {
+      "vendor": "Cisco",
+      "os_family": "IOS XE",
+      "release_train": "17.15.x",
+      "lifecycle": "Extended-Support; end of sale 2026-03-30; last support 2029-03-31",
+      "evidence_url": "https://www.cisco.com/c/en/us/products/collateral/ios-nx-os-software/ios-xe-17/ios-xe-17-15-x-eol.html",
+      "parser_support": true,
+      "renderer_support": false,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    },
+    {
+      "vendor": "Cisco",
+      "os_family": "IOS XE",
+      "release_train": "17.18.x",
+      "lifecycle": "Extended-Support; last support date not verified",
+      "evidence_url": "https://www.cisco.com/c/en/us/support/docs/switches/catalyst-9300-series-switches/214814-recommended-releases-for-catalyst-9200-9.html",
+      "parser_support": true,
+      "renderer_support": false,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    },
+    {
+      "vendor": "HPE Aruba Networking",
+      "os_family": "AOS-CX",
+      "release_train": "10.10.x",
+      "lifecycle": "LSR; 5 years from initial release; exact EOST not verified",
+      "evidence_url": "https://arubanetworking.hpe.com/techdocs/AOS-CX/10.10/RN/rn_6000-6100_10-10-0002.pdf",
+      "parser_support": false,
+      "renderer_support": true,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    },
+    {
+      "vendor": "HPE Aruba Networking",
+      "os_family": "AOS-CX",
+      "release_train": "10.13.x",
+      "lifecycle": "LSR; 5 years from initial release; exact EOST not verified",
+      "evidence_url": "https://arubanetworking.hpe.com/techdocs/AOS-CX/10.13/RN/rn_6200_10-13-1000.pdf",
+      "parser_support": false,
+      "renderer_support": true,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    },
+    {
+      "vendor": "HPE Aruba Networking",
+      "os_family": "AOS-CX",
+      "release_train": "10.16.x",
+      "lifecycle": "LSR; 5 years from initial release; exact EOST not verified",
+      "evidence_url": "https://support.hpe.com/hpesc/public/docDisplay?docId=sd00007242en_us&docLocale=en_US&page=GUID-32C2FA9F-EB66-4BB3-AA0F-7E9651524219.html",
+      "parser_support": false,
+      "renderer_support": true,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    },
+    {
+      "vendor": "HPE Aruba Networking",
+      "os_family": "AOS-CX",
+      "release_train": "10.15.x",
+      "lifecycle": "SSR legacy Phase 9A adapter; current support status not verified",
+      "evidence_url": "https://arubanetworking.hpe.com/techdocs/AOS-CX/Consolidated_RNs/6000%20Release%20Notes/GUID-2885B166-95FF-4C90-BA75-D1BD512FC810_4.html",
+      "parser_support": false,
+      "renderer_support": true,
+      "validation_status": "TRANSLATION_SUPPORTED",
+      "evidence_retrieved_on": "2026-10-20",
+      "feature_profile": "limited_ios_xe_to_aos_cx"
+    }
+  ],
+  "qualification": "Synthetic parser, renderer, API and browser tests only; no lab or hardware validation. The subset is subject to platform feature availability.",
+  "feature_profiles": {
+    "limited_ios_xe_to_aos_cx": {
+      "supported_features": [
+        "VLANs and names",
+        "explicit access and trunk VLANs",
+        "administrative state",
+        "LAG/LACP",
+        "rapid PVST subset",
+        "IPv4 SVI and routed interfaces",
+        "static IPv4 routes",
+        "deny/permit IPv4 any-any ACLs",
+        "LLDP",
+        "NTP",
+        "local AAA method with account reentry"
+      ],
+      "known_unsupported_features": [
+        "OSPF/BGP",
+        "SNMP configuration",
+        "syslog translation",
+        "DHCP snooping",
+        "management ACLs",
+        "advanced ACL matches",
+        "credentials and local user secrets",
+        "loopbacks",
+        "VRF",
+        "platform-specific services"
+      ]
+    }
+  }
+}

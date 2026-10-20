@@ -48,6 +48,26 @@ class SwitchDependency(BaseModel):
     resolved: bool
 
 
+class SwitchCoverage(BaseModel):
+    source_vendor: str
+    source_os: str
+    source_version: str
+    target_vendor: str
+    target_os: str
+    target_version: str
+    meaningful_constructs: int
+    translated_constructs: int
+    preserved_for_review_constructs: int
+    review_required_constructs: int
+    blocked_constructs: int
+    unsupported_feature_families: list[str]
+    unresolved_dependencies: int
+    interface_mapping_complete: bool
+    version_limitations: list[str]
+    hardware_compatibility_status: Literal['PROFILE_CHECKED', 'NOT_VERIFIED']
+    output_validation_status: Literal['CHECKED_SUBSET', 'BLOCKED']
+
+
 class SwitchCandidate(BaseModel):
     text: str
     sha256: str
@@ -56,6 +76,7 @@ class SwitchCandidate(BaseModel):
     dependencies: list[SwitchDependency]
     report: list[SwitchStatement]
     coverage: dict[str, int]
+    translation_summary: SwitchCoverage
     resolved_interfaces: dict[str, str]
     syntax_compatible: bool
     hardware_context: str | None

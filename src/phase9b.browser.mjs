@@ -5,7 +5,7 @@ import { switchBrowserServer } from './switchBrowserServer.mjs'
 
 let app, browser
 const source = await readFile('backend/tests/fixtures/phase9b/fortios.conf', 'utf8')
-const panosSource = await readFile('backend/tests/fixtures/phase9b/panos.xml', 'utf8')
+const panosSource = (await readFile('backend/tests/fixtures/phase9b/panos.xml', 'utf8')).replace(/\r\n/g, '\n')
 before(async () => {
   app = await switchBrowserServer()
   const { chromium } = await import(process.env.CONFIGHOP_PLAYWRIGHT_MODULE || 'playwright')
@@ -67,7 +67,9 @@ test('real PAN-OS to FortiOS path renders CLI and blocks App-ID broadening', { t
   assert.match(text, /set poolname "pool-snat-1"/)
   assert.ok(await page.locator('.syntax-tag').count() > 0)
   await page.screenshot({ path: 'artifacts/phase9b/panos-to-fortios-desktop.png', fullPage: true })
-  await upload(panosSource.replace('<member>any</member>\n                  </application>', '<member>ssl</member>\n                  </application>'))
+  const restrictedSource = panosSource.replace('<member>any</member>\n                  </application>', '<member>ssl</member>\n                  </application>')
+  assert.notEqual(restrictedSource, panosSource)
+  await upload(restrictedSource)
   await page.getByLabel('Target interfaces for ethernet1/1').fill('port1')
   await page.getByLabel('Target interfaces for ethernet1/2').fill('port2')
   await page.locator('.live-heading').getByText('BLOCKED', { exact: true }).waitFor()
