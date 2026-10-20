@@ -61,7 +61,7 @@ def test_inventory_exposes_link_node_presence(api, settings, speed, duplex, spee
 def test_api_end_to_end(api, tmp_path):
     client, _store = api
     assert client.get("/api/v1/health").json() == {"status": "ok", "service": "confighop-api", "api_version": "v1"}
-    assert client.get("/api/v1/capabilities").json()["domains"]["switch"]["backend_enabled"] is False
+    assert client.get("/api/v1/capabilities").json()["domains"]["switch"]["backend_enabled"] is True
     assert client.get("/api/v1/hardware-profiles").json()[0]["profile_status"] == "synthetic"
     assert "ethernet1/50" in client.get(f"/api/v1/hardware-profiles/{PROFILE_ID}").json()["interfaces"]
     project_id = project(client)

@@ -1,6 +1,6 @@
 # ConfigHop
 
-ConfigHop is a local network configuration migration workbench. The Firewall path accepts PAN-OS XML, parses a real source inventory, previews manual physical interface mappings, and generates a preservation-first candidate XML through a FastAPI service. The Switch workspace remains a frontend mock.
+ConfigHop is a local network configuration migration workbench. The Firewall path accepts PAN-OS XML, parses a real source inventory, previews manual physical interface mappings, and generates a preservation-first candidate XML through a FastAPI service. The Switch workspace has a [limited IOS XE 17.12 to AOS-CX 10.15 migration engine](docs/phase9a-switch-migration.md) with explicit interface mapping, dependency findings, and review-gated export.
 
 ConfigHop includes 11 documentation-verified Palo Alto hardware profiles across PA-1400, PA-3200, PA-3400, PA-5200, and PA-5400, alongside a synthetic development profile. PA-3410 and PA-5410 support candidate rendering; the nine new models support source analysis and target analysis only. Candidate validation proves modeled transformations and XML preservation within the implemented scope; it does not prove PAN-OS import or production deployment safety. There is no live firewall connection.
 

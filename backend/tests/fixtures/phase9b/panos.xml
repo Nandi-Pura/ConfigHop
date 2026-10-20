@@ -1,0 +1,219 @@
+<config version="11.1.0">
+  <devices>
+    <entry name="localhost.localdomain">
+      <network>
+        <interface>
+          <ethernet>
+            <entry name="ethernet1/1">
+              <layer3>
+                <ip>
+                  <entry name="203.0.113.2/30" />
+                </ip>
+              </layer3>
+            </entry>
+            <entry name="ethernet1/2">
+              <layer3>
+                <ip>
+                  <entry name="10.0.0.1/24" />
+                </ip>
+              </layer3>
+            </entry>
+          </ethernet>
+        </interface>
+        <virtual-router>
+          <entry name="default">
+            <interface>
+              <member>ethernet1/2</member>
+            </interface>
+            <routing-table>
+              <ip>
+                <static-route>
+                  <entry name="1">
+                    <destination>0.0.0.0/0</destination>
+                    <nexthop>
+                      <ip-address>203.0.113.1</ip-address>
+                    </nexthop>
+                    <interface>ethernet1/1</interface>
+                  </entry>
+                </static-route>
+              </ip>
+            </routing-table>
+          </entry>
+        </virtual-router>
+      </network>
+      <vsys>
+        <entry name="vsys1">
+          <zone>
+            <entry name="WAN">
+              <network>
+                <layer3>
+                  <member>ethernet1/1</member>
+                </layer3>
+              </network>
+            </entry>
+            <entry name="LAN">
+              <network>
+                <layer3>
+                  <member>ethernet1/2</member>
+                </layer3>
+              </network>
+            </entry>
+          </zone>
+          <address>
+            <entry name="CLIENTS">
+              <ip-netmask>10.0.0.0/24</ip-netmask>
+            </entry>
+            <entry name="PUBLIC">
+              <ip-netmask>203.0.113.100/32</ip-netmask>
+            </entry>
+            <entry name="WEB_VIP">
+              <ip-netmask>203.0.113.100/32</ip-netmask>
+            </entry>
+          </address>
+          <address-group>
+            <entry name="CLIENT_GROUP">
+              <static>
+                <member>CLIENTS</member>
+              </static>
+            </entry>
+          </address-group>
+          <service>
+            <entry name="TCP_8443">
+              <protocol>
+                <tcp>
+                  <port>8443</port>
+                </tcp>
+              </protocol>
+            </entry>
+          </service>
+          <service-group>
+            <entry name="WEB_GROUP">
+              <members>
+                <member>TCP_8443</member>
+              </members>
+            </entry>
+          </service-group>
+          <rulebase>
+            <security>
+              <rules>
+                <entry name="Outbound Web">
+                  <from>
+                    <member>LAN</member>
+                  </from>
+                  <to>
+                    <member>WAN</member>
+                  </to>
+                  <source>
+                    <member>CLIENT_GROUP</member>
+                  </source>
+                  <destination>
+                    <member>any</member>
+                  </destination>
+                  <service>
+                    <member>WEB_GROUP</member>
+                  </service>
+                  <application>
+                    <member>any</member>
+                  </application>
+                  <action>allow</action>
+                  <disabled>no</disabled>
+                  <log-end>yes</log-end>
+                </entry>
+                <entry name="Inbound Web">
+                  <from>
+                    <member>WAN</member>
+                  </from>
+                  <to>
+                    <member>LAN</member>
+                  </to>
+                  <source>
+                    <member>any</member>
+                  </source>
+                  <destination>
+                    <member>WEB_VIP</member>
+                  </destination>
+                  <service>
+                    <member>TCP_8443</member>
+                  </service>
+                  <application>
+                    <member>any</member>
+                  </application>
+                  <action>allow</action>
+                  <disabled>no</disabled>
+                  <log-end>no</log-end>
+                </entry>
+                <entry name="Disabled Deny">
+                  <from>
+                    <member>WAN</member>
+                  </from>
+                  <to>
+                    <member>LAN</member>
+                  </to>
+                  <source>
+                    <member>any</member>
+                  </source>
+                  <destination>
+                    <member>any</member>
+                  </destination>
+                  <service>
+                    <member>any</member>
+                  </service>
+                  <application>
+                    <member>any</member>
+                  </application>
+                  <action>deny</action>
+                  <disabled>yes</disabled>
+                  <log-end>no</log-end>
+                </entry>
+              </rules>
+            </security>
+            <nat>
+              <rules>
+                <entry name="snat-1">
+                  <from>
+                    <member>LAN</member>
+                  </from>
+                  <to>
+                    <member>WAN</member>
+                  </to>
+                  <source>
+                    <member>CLIENT_GROUP</member>
+                  </source>
+                  <destination>
+                    <member>any</member>
+                  </destination>
+                  <service>TCP_8443</service>
+                  <source-translation>
+                    <dynamic-ip-and-port>
+                      <translated-address>
+                        <member>203.0.113.2</member>
+                      </translated-address>
+                    </dynamic-ip-and-port>
+                  </source-translation>
+                </entry>
+                <entry name="dnat-WEB_VIP">
+                  <from>
+                    <member>WAN</member>
+                  </from>
+                  <to>
+                    <member>WAN</member>
+                  </to>
+                  <source>
+                    <member>any</member>
+                  </source>
+                  <destination>
+                    <member>203.0.113.100</member>
+                  </destination>
+                  <service>TCP_8443</service>
+                  <destination-translation>
+                    <translated-address>10.0.0.100</translated-address>
+                  </destination-translation>
+                </entry>
+              </rules>
+            </nat>
+          </rulebase>
+        </entry>
+      </vsys>
+    </entry>
+  </devices>
+</config>

@@ -36,6 +36,23 @@ def parse_palo_alto_xml(path: str | Path) -> PaloAltoInventory:
     if root.tag != "config":
         raise UnsupportedConfigFormatError("Expected a Palo Alto config XML root.")
 
+    return _inventory_from_root(root)
+
+
+def parse_palo_alto_xml_bytes(data: bytes) -> PaloAltoInventory:
+    if len(data) > MAX_XML_BYTES:
+        raise ConfigTooLargeError("Configuration exceeds the 100 MiB limit.")
+    try:
+        root = SafeET.fromstring(data, forbid_dtd=True, forbid_entities=True, forbid_external=True)
+    except (SafeET.ParseError, DefusedXmlException) as exc:
+        raise MalformedXmlError("Configuration is malformed or contains prohibited XML constructs.") from exc
+    if root.tag != "config":
+        raise UnsupportedConfigFormatError("Expected a Palo Alto config XML root.")
+    return _inventory_from_root(root)
+
+
+def _inventory_from_root(root: Element) -> PaloAltoInventory:
+
     inventory = PaloAltoInventory(platform=PlatformMetadata(config_version=root.get("version"), detail_version=root.get("detail-version")))
     _parse_objects(root.find("shared"), ObjectScope(type="shared"), inventory)
     for device in root.findall("./devices/entry"):

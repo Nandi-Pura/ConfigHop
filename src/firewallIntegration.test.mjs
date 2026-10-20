@@ -4,18 +4,18 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
-test('Firewall starts in disclosed preview mode without a generated candidate', async () => {
+test('Firewall starts in the backend workbench without a generated candidate', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {
     const { default: App } = await vite.ssrLoadModule('/src/App.tsx')
     const html = renderToStaticMarkup(React.createElement(App))
-    assert.ok(html.includes('No mock candidate generated yet'))
-    assert.ok(html.includes('UI Preview / Mock Data'))
-    assert.ok(html.includes('Auto Map Suggestions'))
-    assert.ok(html.includes('Frontend Fixture'))
+    assert.ok(html.includes('Live Target Configuration Preview'))
+    assert.ok(html.includes('No migration generated yet'))
+    assert.ok(html.includes('Export Candidate'))
+    assert.ok(html.includes('Exact hardware profile required'))
+    assert.ok(!html.includes('UI Preview / Mock Data'))
     assert.ok(!html.includes('92%'))
     assert.ok(!html.includes('Verified Compatible'))
-    assert.ok(html.includes('Backend Adapter Not Connected'))
     assert.ok(!html.includes('TARGET_PROFILE_RENDERING_NOT_VERIFIED'))
   } finally { await vite.close() }
 })
