@@ -125,3 +125,68 @@ class EncryptedArtifactStore:
 
     def delete_target_baseline(self, project_id: str, baseline_id: str) -> None:
         self.target_baseline_path(project_id, baseline_id).unlink(missing_ok=True)
+
+    def deployable_path(self, project_id: str, package_id: str) -> Path:
+        project = _uuid_component(project_id)
+        package = _uuid_component(package_id)
+        return self.root / project / "packages" / package / "deployable.xml.aesgcm"
+
+    def _deployable_aad(self, project_id: str, package_id: str,
+        plaintext_sha256: str) -> bytes:
+        if len(plaintext_sha256) != 64 or any(character not in "0123456789abcdef"
+            for character in plaintext_sha256):
+            raise ArtifactIntegrityError("Artifact plaintext hash is invalid.")
+        return json.dumps({"artifact_format": ARTIFACT_FORMAT,
+            "artifact_kind": "TARGET_DEPLOYABLE_CONFIG", "package_id": _uuid_component(package_id),
+            "plaintext_sha256": plaintext_sha256, "project_id": _uuid_component(project_id)},
+            sort_keys=True, separators=(",", ":")).encode()
+
+    def write_deployable(self, project_id: str, package_id: str, plaintext: bytes,
+        plaintext_sha256: str) -> Path:
+        self.require_key()
+        if hashlib.sha256(plaintext).hexdigest() != plaintext_sha256:
+            raise ArtifactIntegrityError("Deployable plaintext hash does not match metadata.")
+        path = self.deployable_path(project_id, package_id)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        nonce = os.urandom(_NONCE_BYTES)
+        encrypted = AESGCM(self._key).encrypt(nonce, plaintext,
+            self._deployable_aad(project_id, package_id, plaintext_sha256))
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as stream:
+                temporary = Path(stream.name)
+                os.chmod(temporary, 0o600)
+                stream.write(_MAGIC + nonce + encrypted)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return path
+
+    def read_deployable(self, project_id: str, package_id: str,
+        plaintext_sha256: str, *, max_plaintext_bytes: int) -> bytes:
+        self.require_key()
+        path = self.deployable_path(project_id, package_id)
+        try:
+            if path.stat().st_size > len(_MAGIC) + _NONCE_BYTES + max_plaintext_bytes + _TAG_BYTES:
+                raise ArtifactIntegrityError("Encrypted deployable package exceeds the size limit.")
+            payload = path.read_bytes()
+        except FileNotFoundError as exc:
+            raise ArtifactIntegrityError("Encrypted deployable package is unavailable.") from exc
+        if len(payload) < len(_MAGIC) + _NONCE_BYTES + _TAG_BYTES or not payload.startswith(_MAGIC):
+            raise ArtifactIntegrityError("Encrypted deployable package format is invalid.")
+        nonce_start = len(_MAGIC)
+        nonce = payload[nonce_start:nonce_start + _NONCE_BYTES]
+        try:
+            plaintext = AESGCM(self._key).decrypt(nonce, payload[nonce_start + _NONCE_BYTES:],
+                self._deployable_aad(project_id, package_id, plaintext_sha256))
+        except InvalidTag as exc:
+            raise ArtifactIntegrityError("Encrypted deployable package authentication failed.") from exc
+        if len(plaintext) > max_plaintext_bytes or hashlib.sha256(plaintext).hexdigest() != plaintext_sha256:
+            raise ArtifactIntegrityError("Deployable plaintext integrity check failed.")
+        return plaintext
+
+    def delete_deployable(self, project_id: str, package_id: str) -> None:
+        self.deployable_path(project_id, package_id).unlink(missing_ok=True)

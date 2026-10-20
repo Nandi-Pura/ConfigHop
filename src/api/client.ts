@@ -1,4 +1,4 @@
-import type { CandidateMetadata, CompatibilityAssessment, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload } from './types'
+import type { CandidateMetadata, CompatibilityAssessment, DeploymentPackage, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload, TargetBaseline, TargetPreflight } from './types'
 
 const LOCAL_API_HOST = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1'
 export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || `http://${LOCAL_API_HOST}:8000/api/v1`).replace(/\/$/, '')
@@ -55,6 +55,23 @@ export const api = {
     method: 'POST', body: JSON.stringify(input), signal,
   }),
   collectSource: (id: string, input: SourceConnectionInput, signal?: AbortSignal) => request<SourceUpload>(`/projects/${id}/source/collect`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  testTargetConnection: (id: string, input: SourceConnectionInput, signal?: AbortSignal) => request<SourceConnectionTest>(`/projects/${id}/target/connection/test`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  collectTargetBaseline: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string }, signal?: AbortSignal) => request<TargetBaseline>(`/projects/${id}/target/baseline/collect`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  getTargetBaseline: (id: string, signal?: AbortSignal) => request<TargetBaseline>(`/projects/${id}/target/baseline`, { signal }),
+  getDeploymentPackage: (id: string, signal?: AbortSignal) => request<DeploymentPackage>(`/projects/${id}/deployment-package`, { signal }),
+  buildTargetPackage: (id: string, signal?: AbortSignal) => request<DeploymentPackage>(`/projects/${id}/target/package/build`, {
+    method: 'POST', signal,
+  }),
+  reviewTargetPackage: (id: string, confirmedTargetHostname: string, acceptedFindingCodes: string[], signal?: AbortSignal) => request<DeploymentPackage>(`/projects/${id}/target/package/review`, {
+    method: 'POST', body: JSON.stringify({ confirmed_target_hostname: confirmedTargetHostname, accepted_finding_codes: acceptedFindingCodes }), signal,
+  }),
+  checkTargetPreflight: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; recovery_path_confirmed: boolean }, signal?: AbortSignal) => request<TargetPreflight>(`/projects/${id}/target/preflight/check`, {
     method: 'POST', body: JSON.stringify(input), signal,
   }),
   getSource: (id: string, signal?: AbortSignal) => xml(`/projects/${id}/source`, signal),

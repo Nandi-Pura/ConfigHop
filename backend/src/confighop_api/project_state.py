@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .artifacts import ArtifactIntegrityError, ArtifactKeyError, EncryptedArtifactStore
+
 
 RENDERER_VERSION = "0.7.0"
 
@@ -40,6 +42,8 @@ class TargetBaseline(BaseModel):
     model: str = Field(min_length=1)
     hostname: str = Field(min_length=1)
     panos_version: str = Field(min_length=1)
+    multi_vsys: bool | None = None
+    operational_mode: str | None = None
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     artifact_format: Literal["AES_256_GCM_V1"] | None = None
     artifact_size_bytes: int | None = Field(default=None, ge=1)
@@ -52,6 +56,7 @@ class ReviewDecision(BaseModel):
     source_package_id: str
     input_sha256: str
     candidate_sha256: str
+    deployable_candidate_sha256: str | None = None
     accepted_finding_codes: list[str]
     actor_sha256: str
     decided_at_utc: datetime
@@ -60,7 +65,7 @@ class ReviewDecision(BaseModel):
 
 def make_review_decision(*, project_id: str, source_package_id: str,
     input_sha256: str, candidate_sha256: str, accepted_finding_codes: list[str],
-    actor_sha256: str) -> ReviewDecision:
+    actor_sha256: str, deployable_candidate_sha256: str | None = None) -> ReviewDecision:
     decided_at_utc = datetime.now(timezone.utc)
     review_id = str(uuid4())
     payload = dict(review_id=review_id, project_id=project_id,
@@ -68,12 +73,14 @@ def make_review_decision(*, project_id: str, source_package_id: str,
         candidate_sha256=candidate_sha256,
         accepted_finding_codes=sorted(set(accepted_finding_codes)),
         actor_sha256=actor_sha256, decided_at_utc=decided_at_utc.isoformat())
+    if deployable_candidate_sha256 is not None:
+        payload["deployable_candidate_sha256"] = deployable_candidate_sha256
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return ReviewDecision(**payload, decision_sha256=digest)
 
 
 def review_decision_digest(decision: ReviewDecision) -> str:
-    payload = decision.model_dump(mode="json", exclude={"decision_sha256"})
+    payload = decision.model_dump(mode="json", exclude={"decision_sha256"}, exclude_none=True)
     payload["decided_at_utc"] = decision.decided_at_utc.isoformat()
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
@@ -113,6 +120,20 @@ _FROZEN = {"BACKUP_CAPTURED", "IMPORTED", "CANDIDATE_LOADED", "VALIDATING",
     "RECOVERY_VALIDATING", "RECOVERY_COMMITTING", "RECOVERED"}
 
 
+class TargetPackageChange(BaseModel):
+    scope: str
+    object_name: str
+    action: Literal["ADDED", "REPLACED"]
+
+
+class TargetPackageFinding(BaseModel):
+    code: str
+    severity: Literal["INFO", "WARNING", "ERROR"]
+    scope: str
+    message: str
+    requires_acceptance: bool = False
+
+
 class DeploymentPackage(BaseModel):
     package_id: str
     project_id: str
@@ -129,6 +150,9 @@ class DeploymentPackage(BaseModel):
     target_serial: str | None = None
     candidate_sha256: str | None = None
     deployable_candidate_sha256: str | None = None
+    target_changes: list[TargetPackageChange] = Field(default_factory=list)
+    target_preservation: dict[str, Literal["PRESERVED"]] = Field(default_factory=dict)
+    target_findings: list[TargetPackageFinding] = Field(default_factory=list)
     review_id: str | None = None
     review_sha256: str | None = None
     backup_sha256: str | None = None
@@ -199,8 +223,9 @@ def package_input_hash(*, source_sha256: str, source_profile_id: str | None,
 
 
 class ProjectDatabase:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, artifacts: EncryptedArtifactStore | None = None):
         self.root = root
+        self.artifacts = artifacts
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         path = root / "projects.sqlite3"
         path.touch(mode=0o600, exist_ok=True)
@@ -322,7 +347,9 @@ class ProjectDatabase:
                 json.loads(row[0]).get("active_package_id") != decision.source_package_id or
                 package.status != "DRAFT_UNDEPLOYABLE" or
                 package.input_sha256 != decision.input_sha256 or
-                package.candidate_sha256 != decision.candidate_sha256
+                package.candidate_sha256 != decision.candidate_sha256 or
+                (decision.deployable_candidate_sha256 is not None and
+                    package.deployable_candidate_sha256 != decision.deployable_candidate_sha256)
             ):
                 raise ValueError("Review no longer matches the active draft")
             self.connection.execute("INSERT INTO review_decisions VALUES(?, ?, ?)",
@@ -330,6 +357,23 @@ class ProjectDatabase:
             self._event(decision.project_id, decision.source_package_id, "REVIEW_RECORDED",
                 "SUCCEEDED", None, decision.input_sha256,
                 evidence_sha256=decision.decision_sha256)
+
+    def update_draft_package(self, package: DeploymentPackage, *,
+        expected_input_sha256: str, action: str, evidence_sha256: str | None = None) -> None:
+        with self.connection:
+            current = self.package(package.package_id)
+            row = self.connection.execute("SELECT state_json FROM projects WHERE project_id=?",
+                (package.project_id,)).fetchone()
+            if current is None or row is None or current.project_id != package.project_id or (
+                json.loads(row[0]).get("active_package_id") != package.package_id or
+                current.status != "DRAFT_UNDEPLOYABLE" or
+                current.input_sha256 != expected_input_sha256 or
+                package.status != "DRAFT_UNDEPLOYABLE"):
+                raise ValueError("Active draft changed before it could be updated")
+            self.connection.execute("UPDATE deployment_packages SET package_json=? WHERE package_id=?",
+                (package.model_dump_json(), package.package_id))
+            self._event(package.project_id, package.package_id, action, "SUCCEEDED", None,
+                package.input_sha256, evidence_sha256=evidence_sha256)
 
     def review(self, review_id: str) -> ReviewDecision | None:
         row = self.connection.execute("SELECT review_json FROM review_decisions WHERE review_id=?",
@@ -451,7 +495,9 @@ class ProjectDatabase:
                     review.decision_sha256 != package.review_sha256 or
                     review_decision_digest(review) != review.decision_sha256 or
                     review.input_sha256 != unreviewed_input_sha256 or
-                    review.candidate_sha256 != package.candidate_sha256):
+                    review.candidate_sha256 != package.candidate_sha256 or
+                    (review.deployable_candidate_sha256 is not None and
+                        review.deployable_candidate_sha256 != package.deployable_candidate_sha256)):
                     raise ValueError("Review decision does not match package inputs")
             self.verify_package_artifacts(package)
             package.status = to_state
@@ -478,7 +524,16 @@ class ProjectDatabase:
             raise ValueError("Package artifact integrity check failed")
         if package.deployable_candidate_sha256:
             deployable_path = self.root / package.project_id / "packages" / package.package_id / "deployable.xml"
-            if not deployable_path.is_file() or sha256_file(deployable_path) != package.deployable_candidate_sha256:
+            if deployable_path.is_file():
+                if sha256_file(deployable_path) != package.deployable_candidate_sha256:
+                    raise ValueError("Deployable artifact integrity check failed")
+            elif self.artifacts is not None:
+                try:
+                    self.artifacts.read_deployable(package.project_id, package.package_id,
+                        package.deployable_candidate_sha256, max_plaintext_bytes=100 * 1024 * 1024)
+                except (ArtifactIntegrityError, ArtifactKeyError) as exc:
+                    raise ValueError("Deployable artifact integrity check failed") from exc
+            else:
                 raise ValueError("Deployable artifact integrity check failed")
 
     def events(self, project_id: str) -> list[DeploymentEvent]:

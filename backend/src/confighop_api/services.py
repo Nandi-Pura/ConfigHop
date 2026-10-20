@@ -41,9 +41,10 @@ from .panos_xml import (
     read_system_info,
 )
 from .project_state import (
-    DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, TargetBaseline, mapping_hash,
-    package_input_hash, sha256_file,
+    DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, TargetBaseline,
+    make_review_decision, mapping_hash, package_input_hash, sha256_file,
 )
+from .target_package import TargetPackageError, analyze_target_safety, build_target_package
 
 
 PROFILE_ID = "paloalto-synthetic-64"
@@ -149,8 +150,8 @@ class ProjectStore:
         self.root = tempfile.TemporaryDirectory(prefix="confighop-") if data_dir is None else None
         self.data_dir = Path(self.root.name) if self.root else Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.database = ProjectDatabase(self.data_dir)
         self.artifacts = EncryptedArtifactStore(self.data_dir, artifact_key)
+        self.database = ProjectDatabase(self.data_dir, artifacts=self.artifacts)
         self.projects: dict[str, ProjectSession] = {}
         self.lock = asyncio.Lock()
         self.max_source_bytes = MAX_XML_BYTES
@@ -584,6 +585,8 @@ async def collect_target_baseline_from_client(store: ProjectStore, project: Proj
                 "Target PAN-OS version differs from the selected train.", 409)
         baseline = TargetBaseline(serial=identity_before.serial, model=identity_before.model,
             hostname=identity_before.hostname, panos_version=identity_before.panos_version,
+            multi_vsys=identity_before.multi_vsys,
+            operational_mode=identity_before.operational_mode,
             sha256=hashlib.sha256(first).hexdigest(), artifact_format=ARTIFACT_FORMAT,
             artifact_size_bytes=len(first))
         previous = project.target_baseline
@@ -615,8 +618,133 @@ async def collect_target_baseline(store: ProjectStore, project: ProjectSession, 
             expected_serial=expected_serial, expected_model=expected_model)
 
 
+async def build_target_deployment_package(store: ProjectStore,
+    project: ProjectSession) -> DeploymentPackage:
+    async with project.lock:
+        require_inventory(project)
+        project.verify_source()
+        baseline = project.target_baseline
+        if baseline is None:
+            raise ServiceError("TARGET_BASELINE_REQUIRED", "Collect a target baseline first.", 409)
+        if not project.active_package_id:
+            raise ServiceError("PACKAGE_NOT_AVAILABLE", "Generate a source candidate after collecting the target baseline.", 409)
+        package = store.database.package(project.active_package_id)
+        if package is None or package.status != "DRAFT_UNDEPLOYABLE":
+            raise ServiceError("PACKAGE_NOT_BUILDABLE", "The active package cannot be rebuilt.", 409)
+        if package.target_baseline_sha256 != baseline.sha256 or package.target_serial != baseline.serial:
+            raise ServiceError("TARGET_BASELINE_MISMATCH", "The package is not bound to the current target baseline.", 409)
+        if package.review_id or package.deployable_candidate_sha256:
+            raise ServiceError("TARGET_PACKAGE_ALREADY_BUILT",
+                "The active target package is already built. Regenerate the source candidate to replace it.", 409)
+        try:
+            store.database.verify_package_artifacts(package)
+            target_xml = store.artifacts.read_target_baseline(project.project_id,
+                baseline.baseline_id, baseline.sha256, max_plaintext_bytes=store.max_source_bytes)
+        except ArtifactKeyError:
+            raise ServiceError("ARTIFACT_KEY_REQUIRED",
+                "Configure CONFIGHOP_ARTIFACT_KEY_B64 before building a target package.", 503) from None
+        except (ArtifactIntegrityError, ValueError):
+            raise ServiceError("TARGET_BASELINE_ARTIFACT_INTEGRITY_FAILED",
+                "The encrypted target baseline failed integrity verification.", 409) from None
+        candidate_path = project.workspace / "packages" / package.package_id / "candidate.xml"
+        try:
+            result = await asyncio.to_thread(build_target_package, target_xml, candidate_path.read_bytes())
+        except (OSError, TargetPackageError) as exc:
+            raise ServiceError("TARGET_PACKAGE_BUILD_BLOCKED", str(exc), 409) from None
+        if not result.changes:
+            raise ServiceError("TARGET_PACKAGE_EMPTY", "No migration-owned changes were found for the target.", 409)
+        deployable_sha256 = hashlib.sha256(result.xml).hexdigest()
+        try:
+            store.artifacts.write_deployable(project.project_id, package.package_id,
+                result.xml, deployable_sha256)
+            updated = package.model_copy(update={
+                "deployable_candidate_sha256": deployable_sha256,
+                "target_changes": result.changes,
+                "target_preservation": result.preservation,
+                "target_findings": result.findings,
+            })
+            store.database.update_draft_package(updated,
+                expected_input_sha256=package.input_sha256, action="TARGET_PACKAGE_BUILT",
+                evidence_sha256=deployable_sha256)
+        except (ArtifactIntegrityError, ArtifactKeyError) as exc:
+            store.artifacts.delete_deployable(project.project_id, package.package_id)
+            raise ServiceError("TARGET_PACKAGE_ARTIFACT_FAILED",
+                "The deployable package could not be stored securely.", 500) from exc
+        except Exception:
+            store.artifacts.delete_deployable(project.project_id, package.package_id)
+            raise
+        return updated
+
+
+async def review_target_deployment_package(store: ProjectStore, project: ProjectSession, *,
+    confirmed_target_hostname: str, accepted_finding_codes: list[str],
+    actor_sha256: str) -> DeploymentPackage:
+    async with project.lock:
+        baseline = project.target_baseline
+        if baseline is None or not project.active_package_id:
+            raise ServiceError("TARGET_PACKAGE_NOT_AVAILABLE", "Build a target package first.", 409)
+        package = store.database.package(project.active_package_id)
+        if package is None or not package.deployable_candidate_sha256:
+            raise ServiceError("TARGET_PACKAGE_NOT_AVAILABLE", "Build a target package first.", 409)
+        if package.review_id:
+            raise ServiceError("TARGET_PACKAGE_ALREADY_REVIEWED", "The target package is already reviewed.", 409)
+        if confirmed_target_hostname != baseline.hostname:
+            raise ServiceError("TARGET_HOSTNAME_CONFIRMATION_MISMATCH",
+                "The confirmed hostname does not match the collected target.", 409)
+        blocking = [item.code for item in package.target_findings if item.severity == "ERROR"]
+        if blocking:
+            raise ServiceError("TARGET_PACKAGE_FINDINGS_BLOCKED",
+                "Resolve blocking target package findings before review.", 409)
+        required = {item.code for item in package.target_findings if item.requires_acceptance}
+        accepted = set(accepted_finding_codes)
+        if accepted - required:
+            raise ServiceError("TARGET_PACKAGE_REVIEW_INVALID",
+                "Review contains finding codes that are not present in the package.", 400)
+        if required - accepted:
+            raise ServiceError("TARGET_PACKAGE_REVIEW_INCOMPLETE",
+                "Accept every required target package finding before review.", 409)
+        try:
+            store.database.verify_package_artifacts(package)
+        except ValueError:
+            raise ServiceError("PACKAGE_INTEGRITY_FAILED",
+                "Deployment package artifact integrity check failed.", 409) from None
+        decision = make_review_decision(project_id=project.project_id,
+            source_package_id=package.package_id, input_sha256=package.input_sha256,
+            candidate_sha256=package.candidate_sha256 or "",
+            deployable_candidate_sha256=package.deployable_candidate_sha256,
+            accepted_finding_codes=sorted(accepted), actor_sha256=actor_sha256)
+        try:
+            store.database.save_review(decision)
+            reviewed_input = package_input_hash(source_sha256=package.source_sha256,
+                source_profile_id=package.source_profile_id,
+                target_profile_id=package.target_profile_id,
+                source_panos_train=package.source_panos_train,
+                target_panos_train=package.target_panos_train,
+                mapping_sha256=package.mapping_sha256,
+                target_baseline_sha256=package.target_baseline_sha256,
+                candidate_sha256=package.candidate_sha256,
+                review_sha256=decision.decision_sha256,
+                deployable_candidate_sha256=package.deployable_candidate_sha256,
+                renderer_version=package.renderer_version)
+            reviewed = package.model_copy(update={"review_id": decision.review_id,
+                "review_sha256": decision.decision_sha256, "input_sha256": reviewed_input})
+            store.database.update_draft_package(reviewed,
+                expected_input_sha256=package.input_sha256, action="TARGET_PACKAGE_REVIEWED",
+                evidence_sha256=decision.decision_sha256)
+        except ValueError as exc:
+            raise ServiceError("TARGET_PACKAGE_REVIEW_STALE",
+                "Project inputs changed before the review could be recorded.", 409) from exc
+        return reviewed
+
+
+def _release_tuple(value: str | None) -> tuple[int, int] | None:
+    match = re.match(r"^(\d+)\.(\d+)", value or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
 async def check_target_preflight_from_client(store: ProjectStore, project: ProjectSession,
     client: httpx.AsyncClient, api_key: str, *, expected_serial: str, expected_model: str,
+    recovery_path_confirmed: bool = False,
     operation_timeout_seconds: float = 90.0) -> TargetPreflightView:
     async with project.lock:
         require_inventory(project)
@@ -628,6 +756,7 @@ async def check_target_preflight_from_client(store: ProjectStore, project: Proje
         if (expected_serial, expected_model) != (baseline.serial, baseline.model):
             raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
                 "Confirmed target identity differs from the collected baseline.", 409)
+        package = store.database.package(project.active_package_id) if project.active_package_id else None
         try:
             async with asyncio.timeout(operation_timeout_seconds):
                 identity_before = await read_system_info(client, api_key)
@@ -651,6 +780,11 @@ async def check_target_preflight_from_client(store: ProjectStore, project: Proje
             project.active_package_id = None
             raise ServiceError("TARGET_CHANGED_DURING_PREFLIGHT",
                 "Target identity or active configuration changed during preflight.", 409)
+        try:
+            safety = analyze_target_safety(running, multi_vsys=identity_before.multi_vsys)
+        except TargetPackageError:
+            raise ServiceError("TARGET_TOPOLOGY_UNRECOGNIZED",
+                "Target HA, Panorama, or virtual-system topology could not be evaluated.", 422) from None
         current_sha256 = hashlib.sha256(running).hexdigest()
         baseline_clear = (current_sha256 == baseline.sha256 and
             (identity_before.serial, identity_before.model, identity_before.hostname,
@@ -666,6 +800,17 @@ async def check_target_preflight_from_client(store: ProjectStore, project: Proje
             profile.model == identity_before.model and train is not None and
             train in profile.supported_panos_trains and
             identity_before.panos_version.startswith(train + "."))
+        current_release = _release_tuple(identity_before.panos_version)
+        minimum_release = _release_tuple(profile.first_supported_release)
+        minimum_release_clear = bool(current_release and minimum_release and
+            current_release >= minimum_release)
+        package_preserved = bool(package and package.deployable_candidate_sha256 and
+            package.target_preservation and
+            set(package.target_preservation.values()) == {"PRESERVED"} and
+            not any(item.severity == "ERROR" for item in package.target_findings))
+        review_clear = bool(package and package.review_id and package.review_sha256)
+        package_status_clear = bool(package and package.status in {
+            "DRAFT_UNDEPLOYABLE", "PREFLIGHT_PASSED"})
         checks = {
             "source_target_serial": "CLEAR" if source_serial and source_serial != baseline.serial else "BLOCKED",
             "profile_identity_and_train": "CLEAR" if profile_clear else "BLOCKED",
@@ -674,27 +819,44 @@ async def check_target_preflight_from_client(store: ProjectStore, project: Proje
             "change_summary_empty": "CLEAR" if change_summary_clear else "BLOCKED",
             "commit_locks_empty": "CLEAR" if commit_locks_clear else "BLOCKED",
             "pending_jobs_empty": "CLEAR" if pending_jobs_clear else "BLOCKED",
-            "ha_state": "NOT_CHECKED", "panorama_ownership": "NOT_CHECKED",
-            "multi_vsys": "NOT_CHECKED", "minimum_software_release": "NOT_CHECKED",
-            "recovery_path": "NOT_CHECKED",
-            "target_local_preservation": "NOT_CHECKED",
+            "ha_state": "CLEAR" if safety.ha_clear else "BLOCKED",
+            "panorama_ownership": "CLEAR" if safety.panorama_clear else "BLOCKED",
+            "multi_vsys": "CLEAR" if safety.multi_vsys_clear else "BLOCKED",
+            "minimum_software_release": "CLEAR" if minimum_release_clear else "BLOCKED",
+            "capability_matrix": "CLEAR" if profile_clear else "BLOCKED",
+            "recovery_path": "CLEAR" if recovery_path_confirmed else "BLOCKED",
+            "target_local_preservation": "CLEAR" if package_preserved else "BLOCKED",
+            "manual_review": "CLEAR" if review_clear else "BLOCKED",
+            "package_state": "CLEAR" if package_status_clear else "BLOCKED",
         }
+        blockers = [name for name, status in checks.items() if status != "CLEAR"]
+        if not blockers and package is not None and package.status == "DRAFT_UNDEPLOYABLE":
+            try:
+                package = store.database.transition_package(package.package_id,
+                    "PREFLIGHT_PASSED", expected_input_sha256=package.input_sha256)
+            except ValueError as exc:
+                raise ServiceError("TARGET_PREFLIGHT_STALE",
+                    "Package inputs changed before preflight could pass.", 409) from exc
+        passed = not blockers and package is not None and package.status == "PREFLIGHT_PASSED"
         return TargetPreflightView(target_serial=baseline.serial,
+            package_id=package.package_id if package else None,
             observed_at_utc=datetime.now(timezone.utc),
-            status="BLOCKED" if "BLOCKED" in checks.values() else "INCOMPLETE",
-            checks=checks)
+            status="PASSED" if passed else "BLOCKED",
+            checks=checks, blockers=blockers, deployment_allowed=passed)
 
 
 async def check_target_preflight(store: ProjectStore, project: ProjectSession, *,
     host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
-    expected_model: str, allowed_endpoints: set[tuple[str, int]]) -> TargetPreflightView:
+    expected_model: str, recovery_path_confirmed: bool,
+    allowed_endpoints: set[tuple[str, int]]) -> TargetPreflightView:
     try:
         client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
     except XmlApiError as exc:
         raise xml_api_service_error(exc) from None
     async with client:
         return await check_target_preflight_from_client(store, project, client, api_key,
-            expected_serial=expected_serial, expected_model=expected_model)
+            expected_serial=expected_serial, expected_model=expected_model,
+            recovery_path_confirmed=recovery_path_confirmed)
 
 
 def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:

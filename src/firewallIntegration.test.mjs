@@ -64,6 +64,48 @@ test('source API test and collect use the project endpoints with an explicit TLS
   } finally { globalThis.fetch = previous; await vite.close() }
 })
 
+test('target review client binds connection, package review, and preflight requests to one project', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  const previous = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url, init })
+    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    const { api, API_BASE } = await vite.ssrLoadModule('/src/api/client.ts')
+    const connection = { host: '192.0.2.20', port: 443, api_key: 'request-only-key', ca_certificate_pem: 'test-ca' }
+    await api.testTargetConnection('project-1', connection)
+    await api.collectTargetBaseline('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410' })
+    await api.buildTargetPackage('project-1')
+    await api.reviewTargetPackage('project-1', 'target-fw', ['TARGET_POLICY_ORDER_REVIEW_REQUIRED'])
+    await api.checkTargetPreflight('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', recovery_path_confirmed: true })
+    assert.deepEqual(calls.map((call) => call.url), [
+      `${API_BASE}/projects/project-1/target/connection/test`,
+      `${API_BASE}/projects/project-1/target/baseline/collect`,
+      `${API_BASE}/projects/project-1/target/package/build`,
+      `${API_BASE}/projects/project-1/target/package/review`,
+      `${API_BASE}/projects/project-1/target/preflight/check`,
+    ])
+    assert.ok(calls.every((call) => call.init.headers['X-ConfigHop-Client'] === 'web'))
+    assert.deepEqual(JSON.parse(calls[3].init.body), { confirmed_target_hostname: 'target-fw', accepted_finding_codes: ['TARGET_POLICY_ORDER_REVIEW_REQUIRED'] })
+    assert.equal(JSON.parse(calls[4].init.body).recovery_path_confirmed, true)
+  } finally { globalThis.fetch = previous; await vite.close() }
+})
+
+test('target migration panel discloses its read-only boundary before any request', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  try {
+    const { default: TargetMigrationPanel } = await vite.ssrLoadModule('/src/TargetMigrationPanel.tsx')
+    const html = renderToStaticMarkup(React.createElement(TargetMigrationPanel,
+      { projectId: 'project-1', candidateAvailable: true, targetModel: 'PA-5410' }))
+    assert.ok(html.includes('Direct-firewall, single-vsys workflow'))
+    assert.ok(html.includes('No configuration is staged or committed here'))
+    assert.ok(html.includes('Loading target baseline and package state'))
+    assert.ok(!html.includes('Deploy to Target'))
+  } finally { await vite.close() }
+})
+
 test('manual source provenance stays unverified in the dashboard', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {

@@ -23,6 +23,8 @@ class DeviceIdentity:
     serial: str
     model: str
     panos_version: str
+    multi_vsys: bool | None = None
+    operational_mode: str | None = None
 
 
 def _endpoint_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
@@ -205,4 +207,18 @@ async def read_system_info(client: httpx.AsyncClient, api_key: str) -> DeviceIde
         if not value or len(value) > 128:
             raise XmlApiError("XML_API_INVALID_SYSTEM_INFO", "The source API omitted a required device identity field.")
         values.append(value)
-    return DeviceIdentity(*values)
+    multi_vsys_text = (system.findtext("multi-vsys") or "").strip().lower()
+    if multi_vsys_text in {"on", "yes", "true"}:
+        multi_vsys = True
+    elif multi_vsys_text in {"off", "no", "false"}:
+        multi_vsys = False
+    elif multi_vsys_text:
+        raise XmlApiError("XML_API_INVALID_SYSTEM_INFO",
+            "The source API returned an unrecognized multi-vsys state.")
+    else:
+        multi_vsys = None
+    operational_mode = (system.findtext("operational-mode") or "").strip() or None
+    if operational_mode is not None and len(operational_mode) > 128:
+        raise XmlApiError("XML_API_INVALID_SYSTEM_INFO",
+            "The source API returned an invalid operational mode.")
+    return DeviceIdentity(*values, multi_vsys=multi_vsys, operational_mode=operational_mode)

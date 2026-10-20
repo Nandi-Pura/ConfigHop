@@ -106,12 +106,23 @@ class TargetBaselineCollectRequest(SourceConnectionRequest):
     expected_model: str = Field(min_length=1, max_length=128)
 
 
+class TargetPreflightRequest(TargetBaselineCollectRequest):
+    recovery_path_confirmed: bool = False
+
+
+class TargetPackageReviewRequest(BaseModel):
+    confirmed_target_hostname: str = Field(min_length=1, max_length=128)
+    accepted_finding_codes: list[str] = Field(default_factory=list, max_length=100)
+
+
 class TargetPreflightView(BaseModel):
     target_serial: str
+    package_id: str | None = None
     observed_at_utc: datetime
-    status: Literal["BLOCKED", "INCOMPLETE"]
+    status: Literal["BLOCKED", "INCOMPLETE", "PASSED"]
     checks: dict[str, Literal["CLEAR", "BLOCKED", "NOT_CHECKED"]]
-    deployment_allowed: Literal[False] = False
+    blockers: list[str] = Field(default_factory=list)
+    deployment_allowed: bool = False
 
 
 class DeviceIdentityView(BaseModel):

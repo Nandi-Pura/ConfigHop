@@ -51,6 +51,7 @@ export interface ProjectState {
   source_filename: string | null
   source_size_bytes: number | null
   source_provenance: SourceProvenance | null
+  active_package_id: string | null
   target_profile_id: string | null
   source_profile_id: string | null
   source_panos_train: string | null
@@ -60,6 +61,46 @@ export interface ProjectState {
   candidate_available: boolean
   candidate_sha256: string | null
   candidate_size_bytes: number | null
+}
+
+export interface TargetBaseline {
+  baseline_id: string
+  serial: string
+  model: string
+  hostname: string
+  panos_version: string
+  multi_vsys: boolean | null
+  operational_mode: string | null
+  sha256: string
+  artifact_format: 'AES_256_GCM_V1' | null
+  artifact_size_bytes: number | null
+  observed_at_utc: string
+}
+
+export interface TargetPackageChange { scope: string; object_name: string; action: 'ADDED' | 'REPLACED' }
+export interface TargetPackageFinding { code: string; severity: 'INFO' | 'WARNING' | 'ERROR'; scope: string; message: string; requires_acceptance: boolean }
+export interface DeploymentPackage {
+  package_id: string
+  target_baseline_sha256: string | null
+  target_serial: string | null
+  candidate_sha256: string | null
+  deployable_candidate_sha256: string | null
+  target_changes: TargetPackageChange[]
+  target_preservation: Record<string, 'PRESERVED'>
+  target_findings: TargetPackageFinding[]
+  review_id: string | null
+  review_sha256: string | null
+  status: string
+}
+
+export interface TargetPreflight {
+  target_serial: string
+  package_id: string | null
+  observed_at_utc: string
+  status: 'BLOCKED' | 'INCOMPLETE' | 'PASSED'
+  checks: Record<string, 'CLEAR' | 'BLOCKED' | 'NOT_CHECKED'>
+  blockers: string[]
+  deployment_allowed: boolean
 }
 
 export interface InventorySummary {

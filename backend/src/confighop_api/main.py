@@ -17,14 +17,15 @@ from .schemas import (
     CandidateMetadata, CandidateRequest, ErrorView, HealthView, InventoryView,
     PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest,
     SourceCollectRequest, SourceConnectionRequest, SourceConnectionTestView, SourceProvenance, SourceView,
-    TargetBaselineCollectRequest, TargetPreflightView,
+    TargetBaselineCollectRequest, TargetPackageReviewRequest, TargetPreflightRequest,
+    TargetPreflightView,
 )
 from .services import (
-    PROFILE_ID, ProjectStore, ServiceError, candidate_metadata, check_target_preflight,
-    collect_source, collect_target_baseline,
+    PROFILE_ID, ProjectStore, ServiceError, build_target_deployment_package,
+    candidate_metadata, check_target_preflight, collect_source, collect_target_baseline,
     generate_candidate, inventory_view,
     profile_detail, profile_summary, project_deployment_plan, project_view, require_inventory, require_live, select_profile,
-    select_source_profile, assess_project, test_source_connection,
+    review_target_deployment_package, select_source_profile, assess_project, test_source_connection,
     update_preview, upload_source,
 )
 from .panos_xml import XmlApiError, normalize_source_endpoint
@@ -141,7 +142,10 @@ def create_app(store: ProjectStore | None = None, *,
         action = {("GET", "source"): "SOURCE_ARTIFACT_ACCESS",
             ("POST", "source/connection/test"): "SOURCE_CONNECTION_TEST",
             ("POST", "source/collect"): "SOURCE_COLLECT",
+            ("POST", "target/connection/test"): "TARGET_CONNECTION_TEST",
             ("POST", "target/baseline/collect"): "TARGET_BASELINE_COLLECT",
+            ("POST", "target/package/build"): "TARGET_PACKAGE_BUILD",
+            ("POST", "target/package/review"): "TARGET_PACKAGE_REVIEW",
             ("POST", "target/preflight/check"): "TARGET_PREFLIGHT_CHECK"}.get((request.method, suffix))
         audit = request.app.state.audit
         digest = project.source_provenance.sha256 if project.source_provenance else None
@@ -204,7 +208,9 @@ def create_app(store: ProjectStore | None = None, *,
         return {"domains": {"firewall": {"palo_alto_xml_inventory": True,
             "manual_interface_mapping": True, "dependency_preview": True, "panos_candidate_renderer": True,
             "panos_xml_api_collect": bool(request.app.state.allowed_source_endpoints),
-            "panos_target_baseline_collect": bool(request.app.state.allowed_target_endpoints)},
+            "panos_target_baseline_collect": bool(request.app.state.allowed_target_endpoints),
+            "panos_target_package_builder": request.app.state.store.artifacts.available,
+            "panos_target_read_only_preflight": bool(request.app.state.allowed_target_endpoints)},
             "switch": {"backend_enabled": False}},
             "verified_hardware_profiles": [p.id for p in profiles if p.profile_status == "verified"],
             "synthetic_hardware_profiles": [p.id for p in profiles if p.profile_status == "synthetic"],
@@ -288,6 +294,14 @@ def create_app(store: ProjectStore | None = None, *,
             expected_model=body.expected_model,
             allowed_endpoints=request.app.state.allowed_target_endpoints)
 
+    @app.post("/api/v1/projects/{project_id}/target/connection/test", response_model=SourceConnectionTestView)
+    async def post_test_target_connection(project_id: str, body: SourceConnectionRequest,
+        request: Request):
+        current_store(request).get(project_id)
+        return await test_source_connection(host=body.host, port=body.port,
+            api_key=body.api_key.get_secret_value(), ca_pem=body.ca_certificate_pem,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
+
     @app.get("/api/v1/projects/{project_id}/target/baseline", response_model=TargetBaseline)
     async def get_target_baseline(project_id: str, request: Request):
         project = current_store(request).get(project_id)
@@ -295,12 +309,27 @@ def create_app(store: ProjectStore | None = None, *,
             raise ServiceError("TARGET_BASELINE_NOT_AVAILABLE", "No target baseline has been collected.", 409)
         return project.target_baseline
 
+    @app.post("/api/v1/projects/{project_id}/target/package/build", response_model=DeploymentPackage)
+    async def post_build_target_package(project_id: str, request: Request):
+        return await build_target_deployment_package(current_store(request),
+            current_store(request).get(project_id))
+
+    @app.post("/api/v1/projects/{project_id}/target/package/review", response_model=DeploymentPackage)
+    async def post_review_target_package(project_id: str, body: TargetPackageReviewRequest,
+        request: Request):
+        actor = ProjectAccess.fingerprint(request.cookies.get(SESSION_COOKIE))
+        return await review_target_deployment_package(current_store(request),
+            current_store(request).get(project_id),
+            confirmed_target_hostname=body.confirmed_target_hostname,
+            accepted_finding_codes=body.accepted_finding_codes, actor_sha256=actor)
+
     @app.post("/api/v1/projects/{project_id}/target/preflight/check", response_model=TargetPreflightView)
-    async def post_check_target_preflight(project_id: str, body: TargetBaselineCollectRequest, request: Request):
+    async def post_check_target_preflight(project_id: str, body: TargetPreflightRequest, request: Request):
         return await check_target_preflight(current_store(request), current_store(request).get(project_id),
             host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
             ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
             expected_model=body.expected_model,
+            recovery_path_confirmed=body.recovery_path_confirmed,
             allowed_endpoints=request.app.state.allowed_target_endpoints)
 
     async def xml_stream(project, path: Path):

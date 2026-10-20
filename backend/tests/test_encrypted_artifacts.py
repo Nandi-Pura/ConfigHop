@@ -96,3 +96,21 @@ def test_missing_key_and_invalid_identity_fail_closed(tmp_path):
 
 def test_artifact_format_is_stable():
     assert ARTIFACT_FORMAT == "AES_256_GCM_V1"
+
+
+def test_encrypted_deployable_round_trip_and_tamper_detection(tmp_path):
+    project_id, package_id = identities()
+    digest = hashlib.sha256(PLAINTEXT).hexdigest()
+    store = EncryptedArtifactStore(tmp_path, KEY)
+
+    path = store.write_deployable(project_id, package_id, PLAINTEXT, digest)
+
+    assert path.name == "deployable.xml.aesgcm"
+    assert PLAINTEXT not in path.read_bytes()
+    assert store.read_deployable(project_id, package_id, digest,
+        max_plaintext_bytes=1024) == PLAINTEXT
+    payload = bytearray(path.read_bytes())
+    payload[-1] ^= 1
+    path.write_bytes(payload)
+    with pytest.raises(ArtifactIntegrityError, match="authentication failed"):
+        store.read_deployable(project_id, package_id, digest, max_plaintext_bytes=1024)
