@@ -30,6 +30,7 @@ from .services import (
 from .panos_xml import XmlApiError, normalize_source_endpoint
 from .access_audit import AuditStore, ProjectAccess, SESSION_COOKIE, SESSION_SECONDS
 from .project_state import DeploymentEvent, DeploymentPackage, SourceSnapshot, TargetBaseline, sha256_file
+from .artifacts import decode_artifact_key
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -79,7 +80,8 @@ def create_app(store: ProjectStore | None = None, *,
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = store if store is not None else ProjectStore(
-            Path(os.getenv("CONFIGHOP_PROJECT_DATA_DIR", ".confighop/projects")))
+            Path(os.getenv("CONFIGHOP_PROJECT_DATA_DIR", ".confighop/projects")),
+            artifact_key=decode_artifact_key(os.getenv("CONFIGHOP_ARTIFACT_KEY_B64")))
         app.state.allowed_source_endpoints = (allowed_source_endpoints if allowed_source_endpoints is not None
             else _source_endpoints(os.getenv("CONFIGHOP_SOURCE_ENDPOINTS", "")))
         app.state.allowed_target_endpoints = (allowed_target_endpoints if allowed_target_endpoints is not None

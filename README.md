@@ -10,6 +10,7 @@ Use Python 3.12 or newer. In `backend`:
 
 ```powershell
 python -m pip install -e ".[api,dev]"
+$env:CONFIGHOP_ARTIFACT_KEY_B64 = python -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"
 python -m uvicorn confighop_api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
@@ -20,7 +21,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost. Project files live only in a temporary server workspace and disappear when the server stops or a project is deleted.
+Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost. The normal server keeps project state under `backend/.confighop`; deleting a project removes its workspace. Keep the artifact key stable across restarts: losing or changing it makes encrypted target baselines unreadable. Source snapshots and generated candidates are not yet encrypted at rest.
 
 ## Test
 

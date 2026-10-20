@@ -32,6 +32,9 @@ from .schemas import (
     DeviceIdentityView, PlatformView, ProfileDetail, ProfileSummary, ProjectView,
     SourceConnectionTestView, SourceProvenance, SourceView, TargetPreflightView,
 )
+from .artifacts import (
+    ARTIFACT_FORMAT, ArtifactIntegrityError, ArtifactKeyError, EncryptedArtifactStore,
+)
 from .panos_xml import (
     XmlApiError, create_source_client, create_target_client, export_configuration,
     read_candidate_configuration, read_preflight_probe, read_running_configuration,
@@ -142,11 +145,12 @@ class ProjectSession:
 
 
 class ProjectStore:
-    def __init__(self, data_dir: Path | None = None):
+    def __init__(self, data_dir: Path | None = None, *, artifact_key: bytes | None = None):
         self.root = tempfile.TemporaryDirectory(prefix="confighop-") if data_dir is None else None
         self.data_dir = Path(self.root.name) if self.root else Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.database = ProjectDatabase(self.data_dir)
+        self.artifacts = EncryptedArtifactStore(self.data_dir, artifact_key)
         self.projects: dict[str, ProjectSession] = {}
         self.lock = asyncio.Lock()
         self.max_source_bytes = MAX_XML_BYTES
@@ -552,6 +556,11 @@ async def collect_target_baseline_from_client(store: ProjectStore, project: Proj
         if expected_model != profile.model:
             raise ServiceError("TARGET_MODEL_MISMATCH", "Expected target model differs from the selected profile.", 409)
         try:
+            store.artifacts.require_key()
+        except ArtifactKeyError:
+            raise ServiceError("ARTIFACT_KEY_REQUIRED",
+                "Configure CONFIGHOP_ARTIFACT_KEY_B64 before collecting a target configuration.", 503) from None
+        try:
             async with asyncio.timeout(operation_timeout_seconds):
                 identity_before = await read_system_info(client, api_key)
                 first = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
@@ -575,8 +584,22 @@ async def collect_target_baseline_from_client(store: ProjectStore, project: Proj
                 "Target PAN-OS version differs from the selected train.", 409)
         baseline = TargetBaseline(serial=identity_before.serial, model=identity_before.model,
             hostname=identity_before.hostname, panos_version=identity_before.panos_version,
-            sha256=hashlib.sha256(first).hexdigest())
-        record_target_baseline(project, baseline)
+            sha256=hashlib.sha256(first).hexdigest(), artifact_format=ARTIFACT_FORMAT,
+            artifact_size_bytes=len(first))
+        previous = project.target_baseline
+        try:
+            store.artifacts.write_target_baseline(project.project_id, baseline.baseline_id,
+                first, baseline.sha256)
+            record_target_baseline(project, baseline)
+        except (ArtifactIntegrityError, ArtifactKeyError) as exc:
+            store.artifacts.delete_target_baseline(project.project_id, baseline.baseline_id)
+            raise ServiceError("TARGET_BASELINE_ARTIFACT_FAILED",
+                "Target baseline could not be stored securely.", 500) from exc
+        except Exception:
+            store.artifacts.delete_target_baseline(project.project_id, baseline.baseline_id)
+            raise
+        if previous and previous.baseline_id != baseline.baseline_id:
+            store.artifacts.delete_target_baseline(project.project_id, previous.baseline_id)
         return baseline
 
 

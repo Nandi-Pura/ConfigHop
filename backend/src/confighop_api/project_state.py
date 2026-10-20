@@ -41,6 +41,8 @@ class TargetBaseline(BaseModel):
     hostname: str = Field(min_length=1)
     panos_version: str = Field(min_length=1)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    artifact_format: Literal["AES_256_GCM_V1"] | None = None
+    artifact_size_bytes: int | None = Field(default=None, ge=1)
     observed_at_utc: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

@@ -15,6 +15,11 @@ FIXTURE = Path(__file__).parent / "fixtures/paloalto/pa_complex_synthetic.xml"
 SOURCE = ("10.0.0.10", 443)
 TARGET = ("10.0.0.20", 443)
 HEADERS = {"X-ConfigHop-Client": "web"}
+ARTIFACT_KEY = b"target-baseline-test-key-32byte!"
+
+
+def target_store(path: Path) -> ProjectStore:
+    return ProjectStore(path, artifact_key=ARTIFACT_KEY)
 
 
 def system_info(serial: str, model: str = "PA-5410", version: str = "11.1.2") -> bytes:
@@ -107,7 +112,7 @@ def test_collect_target_baseline_binds_read_only_hash_and_audit(monkeypatch, tmp
     monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs: target_client())
     root = tmp_path / "projects"
-    with TestClient(create_app(ProjectStore(root), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(root), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         project_id, base = prepare_project(client)
         response = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS)
@@ -115,6 +120,8 @@ def test_collect_target_baseline_binds_read_only_hash_and_audit(monkeypatch, tmp
         baseline = response.json()
         assert baseline["serial"] == "target-serial"
         assert baseline["model"] == "PA-5410"
+        assert baseline["artifact_format"] == "AES_256_GCM_V1"
+        assert baseline["artifact_size_bytes"] > 0
         assert baseline["sha256"] == hashlib.sha256(
             b'<config><devices><entry name="localhost.localdomain"><deviceconfig><system>'
             b'<hostname>one</hostname></system></deviceconfig></entry></devices></config>').hexdigest()
@@ -125,12 +132,57 @@ def test_collect_target_baseline_binds_read_only_hash_and_audit(monkeypatch, tmp
             "STARTED", "SUCCEEDED"]
         assert "secret-key" not in str(audit)
         assert client.get(base).json()["active_package_id"] is None
+        artifact = root / project_id / "target-baselines" / f'{baseline["baseline_id"]}.xml.aesgcm'
+        assert artifact.is_file()
+        encrypted = artifact.read_bytes()
+        assert b"<config" not in encrypted
+        assert b"<hostname>one</hostname>" not in encrypted
         owner_cookie = client.cookies.get(SESSION_COOKIE)
-    with TestClient(create_app(ProjectStore(root), allowed_target_endpoints={TARGET},
+    with TestClient(create_app(target_store(root), allowed_target_endpoints={TARGET},
         audit_path=tmp_path / "audit.sqlite3")) as client:
         assert client.get(base + "/target/baseline").status_code == 403
         client.cookies.set(SESSION_COOKIE, owner_cookie)
         assert client.get(base + "/target/baseline").json() == baseline
+        assert client.app.state.store.artifacts.read_target_baseline(project_id,
+            baseline["baseline_id"], baseline["sha256"], max_plaintext_bytes=1024).startswith(b"<config")
+
+
+def test_target_collect_requires_artifact_key_before_device_read(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+
+    def reject_request(_: httpx.Request) -> httpx.Response:
+        pytest.fail("Target device must not be read without an artifact encryption key.")
+
+    target = httpx.AsyncClient(transport=httpx.MockTransport(reject_request),
+        base_url="https://10.0.0.20")
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs: target)
+    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        _, base = prepare_project(client)
+        response = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS)
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "ARTIFACT_KEY_REQUIRED"
+        assert client.get(base + "/target/baseline").status_code == 409
+
+
+def test_successful_recollect_replaces_encrypted_artifact(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs: target_client())
+    root = tmp_path / "projects"
+    with TestClient(create_app(target_store(root), allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
+        project_id, base = prepare_project(client)
+        first = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).json()
+        old_path = root / project_id / "target-baselines" / f'{first["baseline_id"]}.xml.aesgcm'
+        assert old_path.is_file()
+
+        second = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).json()
+
+        assert second["baseline_id"] != first["baseline_id"]
+        assert old_path.exists() is False
+        assert (root / project_id / "target-baselines" /
+            f'{second["baseline_id"]}.xml.aesgcm').is_file()
 
 
 @pytest.mark.parametrize("expected_serial,device_serial,expected_model,device_model,code", [
@@ -144,7 +196,7 @@ def test_target_identity_mismatch_does_not_bind(monkeypatch, tmp_path,
     monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         target_client(serial=device_serial, model=device_model))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         response = client.post(base + "/target/baseline/collect", json=target_body(
@@ -159,7 +211,7 @@ def test_target_config_drift_does_not_replace_previous_baseline(monkeypatch, tmp
     target_clients = iter([target_client(), target_client(second=active_config("two"))])
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         next(target_clients))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         first = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).json()
@@ -171,7 +223,7 @@ def test_target_config_drift_does_not_replace_previous_baseline(monkeypatch, tmp
 
 def test_target_endpoint_requires_separate_allowlist(monkeypatch, tmp_path):
     monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints=set(), audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         response = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS)
@@ -182,7 +234,7 @@ def test_target_endpoint_requires_separate_allowlist(monkeypatch, tmp_path):
 
 def test_target_baseline_requires_source_serial(monkeypatch, tmp_path):
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs: target_client())
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_target_endpoints={TARGET},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_target_endpoints={TARGET},
         audit_path=tmp_path / "audit.sqlite3")) as client:
         project_id = client.post("/api/v1/projects", headers=HEADERS).json()["project_id"]
         base = f"/api/v1/projects/{project_id}"
@@ -199,7 +251,7 @@ def test_target_panos_train_mismatch_does_not_bind(monkeypatch, tmp_path):
     monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         target_client(version="10.2.8"))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         response = client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS)
@@ -213,7 +265,7 @@ def test_read_only_preflight_reports_incomplete_without_authorizing_deployment(m
     target_clients = iter([target_client(), preflight_client()])
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         next(target_clients))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
@@ -244,7 +296,7 @@ def test_preflight_blocks_unsafe_target_state(monkeypatch, tmp_path, override, c
     target_clients = iter([target_client(), preflight_client(**override)])
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         next(target_clients))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
@@ -260,7 +312,7 @@ def test_preflight_rejects_unrecognized_probe_response(monkeypatch, tmp_path):
     target_clients = iter([target_client(), preflight_client(locks=b'<response status="success"/>')])
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         next(target_clients))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
@@ -274,7 +326,7 @@ def test_preflight_rejects_candidate_api_error(monkeypatch, tmp_path):
     target_clients = iter([target_client(), preflight_client(candidate=b'<response status="error"/>')])
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         next(target_clients))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         _, base = prepare_project(client)
         assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
@@ -288,7 +340,7 @@ def test_preflight_baseline_drift_detaches_current_draft(monkeypatch, tmp_path):
     target_clients = iter([target_client(), preflight_client(running=active_config("changed"))])
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs:
         next(target_clients))
-    with TestClient(create_app(ProjectStore(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
+    with TestClient(create_app(target_store(tmp_path / "projects"), allowed_source_endpoints={SOURCE},
         allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3")) as client:
         project_id, base = prepare_project(client)
         assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
