@@ -1,14 +1,19 @@
-"""Limited IOS XE 17.12 -> AOS-CX 10.15 semantic migration."""
+"""Limited IOS XE -> AOS-CX semantic migration."""
 from collections import Counter, defaultdict
 from hashlib import sha256
 from ipaddress import IPv4Address, IPv4Interface
 import re
 
-from .hardware.switch import JL663A
-from .models.switch_migration import SwitchCandidate, SwitchDependency, SwitchFinding, SwitchMigrationIR
+from .hardware.switch import JL663A, switch_version_support
+from .models.switch_migration import SwitchCandidate, SwitchCoverage, SwitchDependency, SwitchFinding, SwitchMigrationIR
 
 
-def render_switch(ir: SwitchMigrationIR, mappings: dict[str, int], target_version: str,
+TARGET_INTERFACE = re.compile(r'[1-9]\d*/[1-9]\d*/[1-9]\d*')
+SOURCE_TRAINS = {'17.12', '17.15', '17.18'}
+TARGET_TRAINS = {'10.10', '10.13', '10.16', '10.15'}  # 10.15 retains the accepted Phase 9A path.
+
+
+def render_switch(ir: SwitchMigrationIR, mappings: dict[str, str | int], target_version: str,
                   capability_id: str | None = None) -> SwitchCandidate:
     report = [s.model_copy(deep=True) for s in ir.statements]
     findings: list[SwitchFinding] = []
@@ -17,28 +22,45 @@ def render_switch(ir: SwitchMigrationIR, mappings: dict[str, int], target_versio
     def finding(code, message, scope='global', line=None, severity='BLOCKED'):
         findings.append(SwitchFinding(code=code, message=message, scope=scope, line=line, severity=severity))
 
-    compatible = bool(re.fullmatch(r'17\.12(?:\.\d+)?', ir.source_version) and re.fullmatch(r'10\.15(?:\.\d+)?', target_version))
+    source_train = '.'.join(ir.source_version.split('.')[:2])
+    target_train = '.'.join(target_version.split('.')[:2])
+    compatible = bool(re.fullmatch(r'17\.\d+(?:\.\d+)?', ir.source_version)
+                      and re.fullmatch(r'10\.\d+(?:\.\d+)?', target_version)
+                      and source_train in SOURCE_TRAINS and target_train in TARGET_TRAINS
+                      and (target_train != '10.15' or source_train == '17.12'))
     if not compatible:
-        finding('OS_VERSION_UNVERIFIED', 'Only IOS XE 17.12 to AOS-CX 10.15 is covered by this limited adapter.')
+        finding('OS_VERSION_UNVERIFIED', 'This IOS XE and AOS-CX release-train pair is outside the tested translation subset.')
+    hardware_version_checked = capability_id == JL663A.id and switch_version_support(JL663A.id, target_version) == 'SUPPORTED'
+    if capability_id == JL663A.id and not hardware_version_checked:
+        finding('TARGET_HARDWARE_OS_NOT_VERIFIED', 'The selected JL663A profile has no verified support rule for this AOS-CX train.', severity='REVIEW_REQUIRED')
     for s in report:
         if s.feature == 'source_version' and '.'.join(s.values[0].split('.')[:2]) != '.'.join(ir.source_version.split('.')[:2]):
             finding('SOURCE_VERSION_MISMATCH', 'The source version declaration differs from the selected train.', line=s.line)
         if not s.render_supported:
             finding('SOURCE_' + s.status, f'Line {s.line}: {s.feature} is not safely translated; inspect the redacted translation report.', s.scope, s.line)
     physical = {i.name for i in ir.interfaces if i.kind == 'Physical'}
-    counts = Counter(mappings.values())
     resolved = {}
-    if capability_id != JL663A.id:
-        finding('TARGET_CAPABILITY_REQUIRED', 'Select the exact JL663A standalone capability context to resolve physical ports and capacity.')
-    for name, slot in sorted(mappings.items()):
-        if name not in physical or type(slot) is not int or not 1 <= slot <= 48:
-            finding('INVALID_MAPPING', 'Only parsed physical interfaces and integer slots 1–48 are eligible.', name)
-        elif counts[slot] > 1:
-            finding('DUPLICATE_TARGET', 'Each target slot must have one source owner.', name)
-        elif capability_id == JL663A.id:
-            # Logical slots resolve against the existing exact-SKU inventory, never an OS naming guess.
-            port = JL663A.interfaces[slot - 1]
-            resolved[name] = port.name
+    for name, target in sorted(mappings.items()):
+        if name not in physical:
+            finding('INVALID_MAPPING', 'Only parsed physical interfaces may be mapped.', name)
+        elif type(target) is int:
+            if capability_id != JL663A.id or not 1 <= target <= 48:
+                finding('INVALID_MAPPING', 'Legacy numeric slots require a valid JL663A capability and slot.', name)
+            else:
+                resolved[name] = JL663A.interfaces[target - 1].name
+        elif isinstance(target, str) and TARGET_INTERFACE.fullmatch(target):
+            if capability_id == JL663A.id and target not in {port.name for port in JL663A.interfaces}:
+                finding('TARGET_PORT_NOT_IN_PROFILE', 'The target interface is absent from the selected JL663A profile.', name)
+            else:
+                resolved[name] = target
+        else:
+            finding('INVALID_MAPPING', 'Enter a physical AOS-CX interface such as 1/1/24.', name)
+    target_counts = Counter(resolved.values())
+    for name, target in resolved.items():
+        if target_counts[target] > 1:
+            finding('DUPLICATE_TARGET', 'Each target interface must have one source owner.', name)
+    if not capability_id and resolved:
+        finding('PORT_EXISTENCE_NOT_VERIFIED', 'Target interface names passed OS grammar checks; physical port existence requires optional platform evidence.', severity='REVIEW_REQUIRED')
     groups = defaultdict(list)
     for s in report:
         groups[s.scope].append(s)
@@ -103,6 +125,8 @@ def render_switch(ir: SwitchMigrationIR, mappings: dict[str, int], target_versio
         mode = f.get('mode', [''])[0]
         if (mode == 'access' and any(k in f for k in ('native_vlan', 'allowed_vlans'))) or (mode == 'trunk' and 'access_vlan' in f):
             finding('SWITCHPORT_MODE_CONFLICT', 'VLAN attributes do not agree with the explicit switchport mode.', name)
+        if mode == 'trunk' and 'native_vlan' in f and 'allowed_vlans' in f and f['native_vlan'][0] not in f['allowed_vlans']:
+            finding('TRUNK_NATIVE_NOT_ALLOWED', 'The native VLAN is excluded from the target allowed list; review the source trunk intent.', name)
         if ('address' in f and mode in {'access', 'trunk'}) or (mode == 'routed' and any(k in f for k in ('access_vlan', 'native_vlan', 'allowed_vlans'))):
             finding('L2_L3_CONFLICT', 'Interface has conflicting Layer 2 and Layer 3 declarations.', name)
         if kind == 'SVI' and any(k in f for k in ('mode', 'lag_member', 'access_vlan', 'native_vlan', 'allowed_vlans', 'edge', 'bpdu_guard')):
@@ -138,7 +162,8 @@ def render_switch(ir: SwitchMigrationIR, mappings: dict[str, int], target_versio
         finding('ROUTING_DEFAULT_REVIEW', 'Target routing defaults differ; verify intended forwarding and management reachability.', severity='REVIEW_REQUIRED')
     finding('DEPLOYMENT_REVIEW', 'Limited syntax translation only. Verify target baseline, firmware patch, cabling, resource limits and management access in a lab before deployment.', severity='REVIEW_REQUIRED')
 
-    lines = ['! ConfigHop limited IOS XE 17.12 -> AOS-CX 10.15 candidate', '! Review findings before deployment; no device validation performed.']
+    header = f'! ConfigHop limited IOS XE {source_train} -> AOS-CX {target_train} candidate' if compatible else '! ConfigHop unsupported Switch version pair'
+    lines = [header, '! Review findings before deployment; no device validation performed.']
     if compatible:
         if 'hostname' in global_features:
             lines.append('hostname ' + global_features['hostname'][0])
@@ -222,7 +247,19 @@ def render_switch(ir: SwitchMigrationIR, mappings: dict[str, int], target_versio
     declarations = [line for line in lines if re.fullmatch(r'(?:interface .+|vlan \d+|access-list ip .+)', line)]
     if len(declarations) != len(set(declarations)):
         finding('CANDIDATE_DUPLICATE_DECLARATION', 'Generated candidate contains duplicate object declarations.')
+    blocked = any(f.severity == 'BLOCKED' for f in findings)
+    counts = Counter(s.status for s in report)
+    summary = SwitchCoverage(source_vendor='Cisco', source_os=ir.source_os, source_version=ir.source_version,
+        target_vendor='HPE Aruba Networking', target_os='AOS_CX', target_version=target_version, meaningful_constructs=len(report),
+        translated_constructs=counts['TRANSLATED'], preserved_for_review_constructs=counts['PRESERVED'],
+        review_required_constructs=counts['REVIEW_REQUIRED'], blocked_constructs=counts['BLOCKED'] + counts['UNSUPPORTED'],
+        unsupported_feature_families=sorted({s.feature for s in report if not s.render_supported}),
+        unresolved_dependencies=sum(not d.resolved for d in dependencies),
+        interface_mapping_complete=physical <= resolved.keys(),
+        version_limitations=[] if compatible else ['OS_VERSION_UNVERIFIED'],
+        hardware_compatibility_status='PROFILE_CHECKED' if hardware_version_checked else 'NOT_VERIFIED',
+        output_validation_status='BLOCKED' if blocked else 'CHECKED_SUBSET')
     return SwitchCandidate(text=text, sha256=sha256(text.encode()).hexdigest(),
-        status='BLOCKED' if any(f.severity == 'BLOCKED' for f in findings) else 'REVIEW_REQUIRED',
+        status='BLOCKED' if blocked else 'REVIEW_REQUIRED',
         findings=findings, dependencies=dependencies, report=report, coverage=dict(Counter(s.status for s in report)),
-        resolved_interfaces=resolved, syntax_compatible=compatible, hardware_context=capability_id)
+        translation_summary=summary, resolved_interfaces=resolved, syntax_compatible=compatible, hardware_context=capability_id)

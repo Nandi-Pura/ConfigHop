@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from confighop_core.models.switch_migration import SwitchCandidate, SwitchMigrationIR
 from confighop_core.parsers.cisco_iosxe.migration import MAX_SWITCH_BYTES, parse_migration
@@ -26,7 +26,7 @@ class SwitchPreviewRequest(BaseModel):
     target_os: Literal['AOS_CX']
     target_version: str = Field(max_length=32)
     capability_id: Literal['hpe-aruba-jl663a'] | None = None
-    mappings: dict[str, StrictInt] = Field(default_factory=dict, max_length=48)
+    mappings: dict[str, StrictInt | StrictStr] = Field(default_factory=dict, max_length=512)
 
 
 class SwitchExportRequest(BaseModel):

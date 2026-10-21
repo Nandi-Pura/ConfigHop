@@ -10,8 +10,8 @@ const firewall = {
   'Juniper Networks': { family: 'SRX', models: ['SRX345', 'SRX1500', 'SRX4100'], softwareProduct: 'Junos OS', versions: ['22.4R3', '23.4R1'] },
 }
 const sw = {
-  Cisco: { family: 'Catalyst 9300 Series', models: ['C9200-48P', 'C9300-48P', 'C9407R'], softwareProduct: 'IOS-XE', versions: ['17.9', '17.12'] },
-  'HPE Aruba Networking': { family: 'CX 6300 Series', models: ['CX 6100 48G', 'CX 6200F 48G', 'CX 6300M 48G', 'CX 6405'], softwareProduct: 'AOS-CX', versions: ['10.13', '10.15'] },
+  Cisco: { family: 'Catalyst 9300 Series', models: ['C9200-48P', 'C9300-48P', 'C9407R'], softwareProduct: 'IOS-XE', versions: ['17.9', '17.12', '17.15', '17.18'] },
+  'HPE Aruba Networking': { family: 'CX 6300 Series', models: ['CX 6100 48G', 'CX 6200F 48G', 'CX 6300M 48G', 'CX 6405'], softwareProduct: 'AOS-CX', versions: ['10.10', '10.13', '10.15', '10.16'] },
   'Juniper Networks': { family: 'EX Series', models: ['EX3400-48P', 'EX4100-48P', 'EX4400-48P', 'EX4650-48Y'], softwareProduct: 'Junos OS', versions: ['22.4R3', '23.4R1'] },
   Huawei: { family: 'CloudEngine', models: ['CloudEngine S5735', 'CloudEngine S6730-H', 'CloudEngine S12700E'], softwareProduct: 'VRP', versions: ['V200R023', 'V600R023'] },
 }

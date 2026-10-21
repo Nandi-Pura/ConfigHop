@@ -30,6 +30,58 @@ def test_golden_and_determinism():
     assert 'vlan trunk native 99\n    vlan trunk allowed 10,20,99' in result.text
 
 
+@pytest.mark.parametrize('source_train', ['17.12', '17.15', '17.18'])
+@pytest.mark.parametrize('target_train', ['10.10', '10.13', '10.16'])
+def test_os_based_translation_without_hardware(source_train, target_train):
+    source = SOURCE.replace('version 17.12', f'version {source_train}')
+    names = {name: f'1/1/{slot}' for name, slot in MAPPINGS.items()}
+    ir = parse_migration(source, source_train)
+    result = render_switch(ir, names, target_train)
+    assert result.status == 'REVIEW_REQUIRED', result.findings
+    assert result == render_switch(ir, names, target_train)
+    assert result.resolved_interfaces == names
+    assert result.translation_summary.source_version == source_train
+    assert result.translation_summary.target_version == target_train
+    assert result.translation_summary.interface_mapping_complete
+    assert result.translation_summary.hardware_compatibility_status == 'NOT_VERIFIED'
+    assert result.translation_summary.output_validation_status == 'CHECKED_SUBSET'
+    assert 'PORT_EXISTENCE_NOT_VERIFIED' in {finding.code for finding in result.findings}
+
+
+@pytest.mark.parametrize('mapping,code', [
+    ({'GigabitEthernet1/0/1': '1/1/0'}, 'INVALID_MAPPING'),
+    ({'GigabitEthernet1/0/1': '1/1/2; no shutdown'}, 'INVALID_MAPPING'),
+    ({'GigabitEthernet1/0/1': '1/1/24', 'GigabitEthernet1/0/2': '1/1/24'}, 'DUPLICATE_TARGET'),
+])
+def test_manual_mapping_rejects_unsafe_names_and_duplicates(mapping, code):
+    result = candidate(mappings=mapping, capability=None)
+    assert result.status == 'BLOCKED'
+    assert code in {finding.code for finding in result.findings}
+
+
+def test_optional_hardware_profile_checks_manual_target():
+    result = candidate(mappings={'GigabitEthernet1/0/1': '9/9/9'}, capability='hpe-aruba-jl663a')
+    assert result.status == 'BLOCKED'
+    assert 'TARGET_PORT_NOT_IN_PROFILE' in {finding.code for finding in result.findings}
+    newer = candidate(version='10.16')
+    assert newer.translation_summary.hardware_compatibility_status == 'NOT_VERIFIED'
+    assert 'TARGET_HARDWARE_OS_NOT_VERIFIED' in {finding.code for finding in newer.findings}
+
+
+def test_native_vlan_excluded_from_target_allowed_list_blocks():
+    source = SOURCE.replace('switchport trunk allowed vlan 10,20,99', 'switchport trunk allowed vlan 10,20')
+    result = candidate(source)
+    assert result.status == 'BLOCKED'
+    assert 'TRUNK_NATIVE_NOT_ALLOWED' in {finding.code for finding in result.findings}
+
+
+def test_legacy_ssr_pair_does_not_expand_to_untested_source_train():
+    source = SOURCE.replace('version 17.12', 'version 17.18')
+    result = render_switch(parse_migration(source, '17.18'), MAPPINGS, '10.15', 'hpe-aruba-jl663a')
+    assert result.status == 'BLOCKED'
+    assert 'OS_VERSION_UNVERIFIED' in {finding.code for finding in result.findings}
+
+
 @pytest.mark.parametrize('ending', ['\n', '\r\n'])
 def test_parser_inventory_provenance(ending):
     ir = parse_migration(SOURCE.replace('\n', ending), '17.12')
@@ -90,7 +142,7 @@ def test_dependencies_and_unknowns(text, code):
 
 def test_versions_and_secrets():
     assert candidate(version='').status == 'BLOCKED'
-    assert candidate(version='10.13').status == 'BLOCKED'
+    assert candidate(version='10.13').status == 'REVIEW_REQUIRED'
     assert candidate(SOURCE.replace('version 17.12', 'version 17.9')).status == 'BLOCKED'
     text = SOURCE + '\nusername admin secret 9 SYNTHETIC_SECRET\nsnmp-server community SYNTHETIC_COMMUNITY ro\n'
     ir = parse_migration(text, '17.12')
@@ -175,7 +227,19 @@ def test_api_sessions_revisions_export_and_safe_errors():
         settings.update(revision=2, capability_id=None)
         assert client.put(f'{root}/{one}/preview', headers=HEADERS, json=settings).status_code == 200
         assert client.post(f'{root}/{one}/export', headers=HEADERS, json=body).status_code == 409
+        settings.update(revision=3, target_version='10.16', mappings={name: f'1/1/{slot}' for name, slot in MAPPINGS.items()})
+        os_preview = client.put(f'{root}/{one}/preview', headers=HEADERS, json=settings)
+        assert os_preview.status_code == 200, os_preview.text
+        assert os_preview.json()['candidate']['status'] == 'REVIEW_REQUIRED'
+        assert os_preview.json()['candidate']['translation_summary']['hardware_compatibility_status'] == 'NOT_VERIFIED'
+        assert client.post(f'{root}/{one}/export', headers=HEADERS, json=body).status_code == 409
+        os_body = {'revision': 3, 'sha256': os_preview.json()['candidate']['sha256'], 'acknowledge_review': True}
+        assert client.post(f'{root}/{one}/export', headers=HEADERS, json=os_body).status_code == 200
+        settings.update(revision=4, target_version='10.17')
+        assert client.put(f'{root}/{one}/preview', headers=HEADERS, json=settings).json()['candidate']['status'] == 'BLOCKED'
+        assert client.post(f'{root}/{one}/export', headers=HEADERS, json=os_body).status_code == 409
         settings['mappings'] = {'GigabitEthernet1/0/1': True}
+        settings['revision'] = 5
         assert client.put(f'{root}/{one}/preview', headers=HEADERS, json=settings).status_code == 400
         assert client.delete(f'{root}/{one}', headers=HEADERS).status_code == 204
         assert client.get(f'{root}/{one}').status_code == 404
