@@ -92,7 +92,9 @@ def render_cisco(ir: SwitchMigrationIR, mappings: dict[str, str | int], target_v
             finding('TRUNK_NATIVE_NOT_ALLOWED', 'Native VLAN is excluded from the allowed set.', scope)
         if 'lag_member' in f and any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans', 'address')):
             finding('LAG_MEMBER_FEATURE', 'LAG members must inherit switching intent from the logical LAG.', scope)
-        if 'address' in f and any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans')):
+        if 'lag_member' in f and any(key in f for key in ('mode', 'switching')):
+            finding('LAG_MEMBER_MODE_CONFLICT', f'{scope}: physical routing mode conflicts with LAG membership; configure mode on the logical LAG.', scope)
+        if 'address' in f and any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans', 'switching')):
             finding('L2_L3_CONFLICT', 'Interface combines routed and switched settings.', scope)
         if f.get('mode') == ['routed'] and any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans', 'switching')):
             finding('L2_L3_CONFLICT', 'Explicit routed mode conflicts with switching settings.', scope)

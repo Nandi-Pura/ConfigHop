@@ -158,6 +158,62 @@ def test_explicit_routing_without_address_emits_no_switchport():
     assert 'L2_L3_CONFLICT' in {f.code for f in blocked.findings}
 
 
+@pytest.mark.parametrize('source,expected', [
+    ('interface 1/1/1\n no shutdown\n routing\n', ' no switchport\n no shutdown\n'),
+    ('interface 1/1/1\n no shutdown\n routing\n ip address 192.0.2.2/24\n',
+     ' no switchport\n ip address 192.0.2.2 255.255.255.0\n no shutdown\n'),
+    ('vlan 101\ninterface 1/1/1\n no shutdown\n no routing\n vlan access 101\n',
+     ' switchport mode access\n switchport access vlan 101\n no shutdown\n'),
+    ('vlan 101\ninterface lag 1\n no shutdown\n vlan access 101\n lacp mode active\n'
+     'interface 1/1/1\n no shutdown\n lag 1\n', ' channel-group 1 mode active\n no shutdown\n'),
+])
+def test_reverse_valid_interface_modes_remain_translated(source, expected):
+    result = render_cisco(parse_aruba_migration(source, '10.13'),
+                          {'1/1/1': 'GigabitEthernet1/0/1'}, '17.18')
+    assert result.status == 'REVIEW_REQUIRED', result.findings
+    assert expected in result.text
+    assert all(s.status == 'TRANSLATED' for s in result.report)
+
+
+@pytest.mark.parametrize('source,code,conflicting_features', [
+    ('interface 1/1/1\n no shutdown\n no routing\n ip address 192.0.2.2/24\n',
+     'L2_L3_CONFLICT', {'switching', 'address'}),
+    ('vlan 101\ninterface lag 1\n no shutdown\n lacp mode active\n vlan access 101\n'
+     'interface 1/1/1\n no shutdown\n routing\n lag 1\n',
+     'LAG_MEMBER_MODE_CONFLICT', {'mode', 'lag_member'}),
+    ('vlan 101\ninterface lag 1\n no shutdown\n lacp mode active\n vlan access 101\n'
+     'interface 1/1/1\n no shutdown\n no routing\n lag 1\n',
+     'LAG_MEMBER_MODE_CONFLICT', {'switching', 'lag_member'}),
+])
+def test_reverse_mode_conflicts_block_renderer_and_acknowledged_export(source, code, conflicting_features):
+    mapping = {'1/1/1': 'GigabitEthernet1/0/1'}
+    result = render_cisco(parse_aruba_migration(source, '10.13'), mapping, '17.18')
+    assert result.status == 'BLOCKED'
+    assert any(f.code == code and f.scope == '1/1/1' and f.severity == 'BLOCKED' for f in result.findings)
+    assert conflicting_features <= {s.feature for s in result.report if s.scope == '1/1/1' and s.status == 'BLOCKED'}
+    assert 'interface GigabitEthernet1/0/1\n' not in result.text
+
+    with TestClient(create_app()) as client:
+        headers = {'X-ConfigHop-Client': 'web'}
+        root = '/api/v1/switch-projects'
+        project = client.post(root, headers=headers, json={
+            'source_os': 'AOS_CX', 'source_version': '10.13', 'text': source,
+        }).json()
+        ident = project['project_id']
+        preview = client.put(f'{root}/{ident}/preview', headers=headers, json={
+            'revision': 1, 'target_os': 'IOS_XE', 'target_version': '17.18', 'mappings': mapping,
+        })
+        assert preview.status_code == 200, preview.text
+        candidate = preview.json()['candidate']
+        assert candidate['status'] == 'BLOCKED'
+        assert any(f['code'] == code and f['scope'] == '1/1/1' for f in candidate['findings'])
+        assert conflicting_features <= {s['feature'] for s in candidate['report']
+                                        if s['scope'] == '1/1/1' and s['status'] == 'BLOCKED'}
+        assert client.post(f'{root}/{ident}/export', headers=headers, json={
+            'revision': 1, 'sha256': candidate['sha256'], 'acknowledge_review': True,
+        }).status_code == 409
+
+
 @pytest.mark.parametrize('source,code', [
     ('spanning-tree\n', 'STP_MODE_REQUIRED'),
     ('spanning-tree mode rpvst\n', 'STP_ENABLEMENT_REQUIRED'),

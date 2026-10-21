@@ -12,7 +12,8 @@ HPE identifies [10.10](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.10/RN/
 | --- | --- | --- |
 | IOS XE 17.12/17.15/17.18 | AOS-CX 10.10/10.13/10.16 | `TRANSLATION_SUPPORTED` for the bounded feature subset below; synthetic tests only |
 | IOS XE 17.12 | AOS-CX 10.15 | Legacy SSR subset retained; synthetic tests only |
-| AOS-CX to IOS XE, or any other pair | Any | `NOT_IMPLEMENTED`; candidate blocked or unavailable |
+| AOS-CX 10.13.x | IOS XE 17.18.x | `TRANSLATION_SUPPORTED` for the bounded Phase 11B feature subset; synthetic tests only |
+| Other AOS-CX to IOS XE release pairs, or any other pair | Any | `NOT_IMPLEMENTED`; candidate blocked or unavailable |
 
 The shared AOS-CX renderer emits only command forms covered by the existing 10.15 adapter and the documented common subset in [10.10 Layer-2](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.10/PDF/l2_bridging_8400.pdf), [10.13 Layer-2](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.13/PDF/l2_bridging_8400.pdf), and [10.16 CLI](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.16/PDF/cli_8100-8360.pdf) references. These references do **not** prove that every command or feature is present on every device. Selected source and target trains gate preview; unrecognized trains produce `BLOCKED`. Any future syntax divergence requires a small version-specific adapter and new evidence before support is extended.
 
