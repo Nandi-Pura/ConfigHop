@@ -69,6 +69,8 @@ def render_cisco(ir: SwitchMigrationIR, mappings: dict[str, str | int], target_v
             finding('EMPTY_LAG', 'LAG has no declared physical members.', lag)
         if 'lacp_mode' not in values(lag):
             finding('LACP_MODE_REQUIRED', 'An explicit LACP mode is required for a translated LAG.', lag)
+            for member in members[lag]:
+                finding('LACP_MODE_REQUIRED', 'The member cannot be rendered without its LAG LACP mode.', member)
     for s in report:
         for target in s.dependencies:
             if target.startswith('next-hop:'):
@@ -80,7 +82,7 @@ def render_cisco(ir: SwitchMigrationIR, mappings: dict[str, str | int], target_v
             dependencies.append(SwitchDependency(source=s.scope, target=target, relation=s.feature, line=s.line, resolved=ok))
             if not ok:
                 finding('DEPENDENCY_UNRESOLVED', f'Line {s.line}: required {target} is unresolved.', s.scope, s.line)
-    for scope in sorted(physical | lags):
+    for scope in sorted(physical | lags | {i.name for i in ir.interfaces if i.kind == 'SVI'}):
         f = values(scope)
         if scope in physical and 'lag_member' not in f and not any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans', 'address', 'mode')):
             finding('INTERFACE_MODE_INCOMPLETE', 'Explicit access, trunk, or routed intent is required.', scope)
@@ -92,10 +94,24 @@ def render_cisco(ir: SwitchMigrationIR, mappings: dict[str, str | int], target_v
             finding('LAG_MEMBER_FEATURE', 'LAG members must inherit switching intent from the logical LAG.', scope)
         if 'address' in f and any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans')):
             finding('L2_L3_CONFLICT', 'Interface combines routed and switched settings.', scope)
+        if f.get('mode') == ['routed'] and any(key in f for key in ('access_vlan', 'native_vlan', 'allowed_vlans', 'switching')):
+            finding('L2_L3_CONFLICT', 'Explicit routed mode conflicts with switching settings.', scope)
         if 'admin' not in f:
-            finding('ADMIN_STATE_UNRESOLVED', 'Source does not explicitly define administrative state.', scope, severity='REVIEW_REQUIRED')
-    if any(s.feature == 'stp_vlans' for s in report) and 'stp_mode' not in values('global'):
+            finding('ADMIN_STATE_UNRESOLVED', 'Explicit shutdown/no shutdown is required; source and target defaults are not assumed.', scope)
+    has_stp_enable = 'stp_enabled' in values('global')
+    has_stp_mode = 'stp_mode' in values('global')
+    if has_stp_enable and not has_stp_mode:
+        finding('STP_MODE_REQUIRED', 'Standalone STP enablement has no verified equivalent without an explicit RPVST mode.')
+    if has_stp_mode and not has_stp_enable:
+        finding('STP_ENABLEMENT_REQUIRED', 'RPVST mode alone does not establish source STP enablement.')
+    if any(s.feature == 'stp_vlans' for s in report) and not has_stp_mode:
         finding('STP_MODE_REQUIRED', 'Explicit RPVST mode is required for VLAN-scoped STP.')
+    if has_stp_enable != has_stp_mode or any(s.feature == 'stp_vlans' for s in report) and not has_stp_mode:
+        for s in report:
+            if s.feature == 'stp_vlans' and set(s.values) != {v[5:] for v in vlans}:
+                finding('STP_VLAN_SCOPE_UNRESOLVED', 'Explicit source STP VLAN scope differs from defined VLANs; target default could widen STP.', s.scope, s.line)
+            if s.feature in {'stp_enabled', 'stp_mode', 'stp_vlans'} and s.render_supported:
+                s.status, s.render_supported = 'BLOCKED', False
     finding('DEPLOYMENT_REVIEW', 'Synthetic subset only; verify configuration on the actual target in a lab.', severity='REVIEW_REQUIRED')
     lines = ['! ConfigHop limited AOS-CX 10.13 -> IOS XE 17.18 candidate', '! Review findings; no device validation performed.'] if compatible else ['! ConfigHop unsupported Switch version pair']
     blocked_scopes = {f.scope for f in findings if f.severity == 'BLOCKED' and f.scope != 'global'}
@@ -149,7 +165,7 @@ def render_cisco(ir: SwitchMigrationIR, mappings: dict[str, str | int], target_v
                         lines.append(' switchport trunk native vlan ' + f['native_vlan'][0])
                     if 'allowed_vlans' in f:
                         lines.append(' switchport trunk allowed vlan ' + (f['allowed_vlans'][0] if f['allowed_vlans'] == ['all'] else ','.join(f['allowed_vlans'])))
-                elif 'address' in f:
+                elif f.get('mode') == ['routed'] or 'address' in f:
                     lines.append(' no switchport')
             if 'address' in f:
                 address = IPv4Interface(f['address'][0])

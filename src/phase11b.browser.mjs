@@ -63,3 +63,16 @@ test('security-bearing Aruba source yields a redacted draft and blocks validated
   assert.match(draft, /MANUAL_REQUIRED/)
   assert.doesNotMatch(draft, /SYNTHETIC_SECRET/)
 })
+
+test('Cisco aliases collide in manual and confirmed bulk mapping', { timeout: 60000 }, async t => {
+  const page = await workspace(t)
+  await page.getByLabel('Target interface for 1/1/2').fill('Gi1/0/11')
+  await page.getByLabel('Target interface for 1/1/1').fill('GigabitEthernet1/0/11')
+  await page.getByText('Target interface is already assigned.').waitFor()
+  assert.equal(await page.getByLabel('Target interface for 1/1/1').inputValue(), '')
+  await page.getByLabel('Source range end').selectOption('1/1/1')
+  await page.getByLabel('Sequential target start').fill('GigabitEthernet1/0/11')
+  await page.getByRole('button', { name: 'Preview Bulk Mapping' }).click()
+  await page.getByText('Bulk mapping collides with an existing assignment.').waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Apply Mapping' }).count(), 0)
+})

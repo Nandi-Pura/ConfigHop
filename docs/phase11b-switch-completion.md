@@ -8,15 +8,17 @@ The tested reverse direction is AOS-CX **10.13.x** to Cisco IOS XE **17.18.x**. 
 
 | Feature | Reverse path | Limit |
 | --- | --- | --- |
-| Hostname, VLAN IDs/names, access ports, descriptions, shutdown state | AUTO | VLAN names are normalized to the safe IOS XE identifier subset; port names require explicit mapping. |
+| Hostname, VLAN IDs/names, access ports, descriptions, shutdown state | AUTO | VLAN names are normalized to the safe IOS XE identifier subset; port names require explicit mapping. Missing explicit administrative state on a physical, LAG, or SVI interface blocks export. |
 | Trunks, LAG/LACP, static IPv4 SVI, static routes, NTP, DNS, syslog | AUTO | Dependencies, explicit mode, and next-hop reachability are checked. A static route conditionally emits `ip routing` because [Cisco documents it as disabled by default](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/software/release/17-18/configuration_guide/rtng/b_1718_rtng_9300_cg/configuring_ip_unicast_routing.pdf); target forwarding role and license require review. |
-| RPVST mode | AUTO + REVIEW | Explicit VLAN scope is preserved in the report; target STP behavior requires verification. |
+| RPVST mode and enablement | AUTO + REVIEW | Both `spanning-tree mode rpvst` and `spanning-tree` must appear. Standalone enablement or mode blocks export. Explicit VLAN scope is preserved in the report; target STP behavior requires verification. |
 | DHCP-addressed SVI, banner, timezone | MANUAL | No executable substitute is guessed. |
 | AAA, TACACS/RADIUS, local users and ciphertext, SSH/HTTPS management intent | MANUAL + BLOCKED | No credentials, authentication defaults, or plain HTTP are generated. Engineer must design and validate recovery and bindings. |
 | VSF/VSX/stack links | MANUAL + BLOCKED | No StackWise or provisioning CLI is generated. |
 | Unknown syntax, DHCP snooping, client tracking, advanced policy | UNSUPPORTED + BLOCKED | No source command is copied into target CLI. |
 
 The review draft is a JSON artifact with findings, redacted source dispositions, coverage, and partial CLI. It is not a deployable candidate. Validated export remains disabled while any blocking finding exists; a review-required candidate needs current-digest acknowledgement. Hardware is optional, and Cisco port existence is always `NOT_VERIFIED` without independent platform evidence.
+
+Explicit Aruba `routing` on a physical port renders Cisco `no switchport`, including when no IPv4 address is configured. Conflicting routed and switching declarations block export. Aruba documents that `spanning-tree` enables STP and that its default mode is MSTP. Cisco's IOS XE 17.18 configuration guide describes Rapid PVST+ as the Catalyst 9300 default, while its command reference describes the `spanning-tree mode` default as PVST+. Because that evidence is inconsistent, the renderer never relies on an implicit Cisco mode: it emits explicit `spanning-tree mode rapid-pvst` only when the supported Aruba mode and enablement are both present. [Aruba enablement](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.13/HTML/l2_bridging_8400/Content/Chp_stp/mstp_cmds/spa-tre.htm), [Aruba mode](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.13/HTML/l2_bridging_8400/Content/Chp_stp/rpvst_cmds/spa-tre-mod.htm), [Cisco IOS XE 17.18 STP guide](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/software/release/17-18/configuration_guide/lyr2/b_1718_lyr2_9300_cg/configuring_spanning_tree_protocol.pdf), [Cisco IOS XE 17.18 command reference](https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/software/release/17-18/command_reference/b_1718_9300_cr.pdf).
 
 ## Sanitized acceptance evidence
 

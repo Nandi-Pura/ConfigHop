@@ -121,7 +121,10 @@ def switch_router() -> APIRouter:
             if body.revision <= session.revision:
                 raise ServiceError('STALE_REVISION', 'Preview revision must be newer than the current session revision.', 409)
             session.revision, session.candidate, session.settings = body.revision, None, body
-            candidate = (render_switch if session.inventory.source_os == 'IOS_XE' and body.target_os == 'AOS_CX' else render_cisco)(session.inventory, body.mappings, body.target_version, body.capability_id)
+            try:
+                candidate = (render_switch if session.inventory.source_os == 'IOS_XE' and body.target_os == 'AOS_CX' else render_cisco)(session.inventory, body.mappings, body.target_version, body.capability_id)
+            except (ValueError, KeyError, TypeError, IndexError):
+                raise ServiceError('INVALID_SWITCH_PREVIEW', 'Switch preview could not be validated; no candidate is available for export.', 422) from None
             session.candidate = candidate
             return SwitchPreviewView(project_id=project_id, revision=session.revision, candidate=candidate)
 

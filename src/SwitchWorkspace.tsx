@@ -5,6 +5,7 @@ import { platform, platformCatalog, vendors, type Domain, type PlatformSelection
 import type { MockActions } from './MockWorkspace'
 import { switchApi, type SwitchProject, type SwitchPreview } from './api/switch'
 import SwitchReview from './SwitchReview'
+import { canonicalSwitchTarget } from './switchBulkMapping'
 
 const KEY = 'confighop-switch-session-v2'
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024
@@ -89,7 +90,7 @@ export default function SwitchWorkspace({ onDomainChange, onTitleChange, actions
     else { setTarget(next); if (next.vendor !== previous.vendor) { setAssignments({}); setCapability('') }; onTitleChange(`${source.softwareProduct} to ${next.softwareProduct}`) }
   }
   const choose = (name: string, targetName: string | number) => {
-    if (targetName && Object.entries(assignments).some(([other, value]) => other !== name && value === targetName)) { setError('Target interface is already assigned.'); return }
+    if (targetName && Object.entries(assignments).some(([other, value]) => other !== name && canonicalSwitchTarget(value) === canonicalSwitchTarget(targetName))) { setError('Target interface is already assigned.'); return }
     invalidate(); setError('')
     setAssignments(current => { const next = { ...current }; if (targetName) next[name] = targetName; else delete next[name]; return next })
   }

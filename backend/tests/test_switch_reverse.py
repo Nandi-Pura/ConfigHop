@@ -143,3 +143,77 @@ def test_sensitive_tokens_in_supported_fields_never_enter_ir_or_draft():
     assert result.status == 'BLOCKED'
     assert 'SYNTHETIC_SECRET' not in ir.model_dump_json() + result.model_dump_json()
     assert 'SYNTHETIC_MARKER' not in ir.model_dump_json() + result.model_dump_json()
+
+
+def test_explicit_routing_without_address_emits_no_switchport():
+    ir = parse_aruba_migration('interface 1/1/1\n no shutdown\n routing\n', '10.13')
+    assert [(s.line, s.feature) for s in ir.statements] == [(1, 'interface'), (2, 'admin'), (3, 'mode')]
+    result = render_cisco(ir, {'1/1/1': 'GigabitEthernet1/0/1'}, '17.18')
+    assert result.status == 'REVIEW_REQUIRED'
+    assert 'interface GigabitEthernet1/0/1\n no switchport\n no shutdown\n' in result.text
+    assert all(s.status == 'TRANSLATED' for s in result.report)
+    conflict = parse_aruba_migration('vlan 101\ninterface 1/1/1\n no shutdown\n routing\n vlan access 101\n', '10.13')
+    blocked = render_cisco(conflict, {'1/1/1': 'GigabitEthernet1/0/1'}, '17.18')
+    assert blocked.status == 'BLOCKED'
+    assert 'L2_L3_CONFLICT' in {f.code for f in blocked.findings}
+
+
+@pytest.mark.parametrize('source,code', [
+    ('spanning-tree\n', 'STP_MODE_REQUIRED'),
+    ('spanning-tree mode rpvst\n', 'STP_ENABLEMENT_REQUIRED'),
+])
+def test_incomplete_stp_is_blocked_and_not_misreported_as_translated(source, code):
+    ir = parse_aruba_migration(source, '10.13')
+    assert ir.statements[0].line == 1
+    result = render_cisco(ir, {}, '17.18')
+    assert result.status == 'BLOCKED'
+    assert code in {f.code for f in result.findings}
+    assert result.report[0].status == 'BLOCKED'
+    assert 'spanning-tree mode rapid-pvst' not in result.text
+
+
+def test_missing_lacp_mode_is_a_blocked_candidate_and_api_never_crashes():
+    source = 'vlan 1\ninterface lag 1\n no shutdown\n vlan access 1\ninterface 1/1/1\n no shutdown\n lag 1\n'
+    ir = parse_aruba_migration(source, '10.13')
+    assert [(i.name, i.kind) for i in ir.interfaces] == [('Port-channel1', 'LAG'), ('1/1/1', 'Physical')]
+    result = render_cisco(ir, {'1/1/1': 'GigabitEthernet1/0/1'}, '17.18')
+    assert result.status == 'BLOCKED'
+    assert {f.scope for f in result.findings if f.code == 'LACP_MODE_REQUIRED'} == {'Port-channel1', '1/1/1'}
+    assert 'channel-group' not in result.text
+    with TestClient(create_app()) as client:
+        headers = {'X-ConfigHop-Client': 'web'}
+        root = '/api/v1/switch-projects'
+        project = client.post(root, headers=headers, json={'source_os': 'AOS_CX', 'source_version': '10.13', 'text': source}).json()
+        response = client.put(f"{root}/{project['project_id']}/preview", headers=headers, json={
+            'revision': 1, 'target_os': 'IOS_XE', 'target_version': '17.18',
+            'mappings': {'1/1/1': 'GigabitEthernet1/0/1'},
+        })
+        assert response.status_code == 200, response.text
+        candidate = response.json()['candidate']
+        assert candidate['status'] == 'BLOCKED'
+        assert client.post(f"{root}/{project['project_id']}/export", headers=headers, json={
+            'revision': 1, 'sha256': candidate['sha256'], 'acknowledge_review': True,
+        }).status_code == 409
+
+
+@pytest.mark.parametrize('source,code', [
+    ('vlan 101\ninterface 1/1/1\n vlan access 101\n', 'ADMIN_STATE_UNRESOLVED'),
+    ('vlan 101\ninterface vlan 101\n ip address 192.0.2.2/24\n', 'ADMIN_STATE_UNRESOLVED'),
+    ('spanning-tree\n', 'STP_MODE_REQUIRED'),
+])
+def test_unsafe_reverse_sources_cannot_export_even_with_acknowledgement(source, code):
+    with TestClient(create_app()) as client:
+        headers = {'X-ConfigHop-Client': 'web'}
+        root = '/api/v1/switch-projects'
+        project = client.post(root, headers=headers, json={'source_os': 'AOS_CX', 'source_version': '10.13', 'text': source}).json()
+        mappings = {'1/1/1': 'GigabitEthernet1/0/1'} if 'interface 1/1/1' in source else {}
+        preview = client.put(f"{root}/{project['project_id']}/preview", headers=headers, json={
+            'revision': 1, 'target_os': 'IOS_XE', 'target_version': '17.18', 'mappings': mappings,
+        })
+        assert preview.status_code == 200, preview.text
+        candidate = preview.json()['candidate']
+        assert candidate['status'] == 'BLOCKED'
+        assert code in {f['code'] for f in candidate['findings']}
+        assert client.post(f"{root}/{project['project_id']}/export", headers=headers, json={
+            'revision': 1, 'sha256': candidate['sha256'], 'acknowledge_review': True,
+        }).status_code == 409
