@@ -1,4 +1,7 @@
 from pathlib import Path
+from xml.etree import ElementTree as ET
+
+import pytest
 
 from confighop_core.firewall_migration import FirewallMappings, generate_firewall
 from confighop_core.parsers.fortios import parse_fortios, parse_fortios_tree
@@ -6,6 +9,238 @@ from confighop_core.parsers.panos_firewall import parse_panos_firewall
 
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'phase9b' / 'fortios.conf'
+PANOS = FIXTURE.parent / 'panos.xml'
+PANOS_MAPPINGS = FirewallMappings(interfaces={'ethernet1/1': 'port1', 'ethernet1/2': 'port2'})
+FORTIOS_MAPPINGS = FirewallMappings(interfaces={'port1': 'ethernet1/1', 'port2': 'ethernet1/2'})
+
+
+def _panos_with(change):
+    root = ET.fromstring(PANOS.read_text())
+    change(root)
+    return ET.tostring(root, encoding='unicode')
+
+
+def _extra_address(root, path='./devices/entry/network/interface/ethernet/entry/layer3/ip', count=1):
+    ip = root.find(path)
+    assert ip is not None
+    for index in range(count):
+        ET.SubElement(ip, 'entry', {'name': f'203.0.113.{6 + index * 4}/30'})
+
+
+def _translated_port(root, port='9443'):
+    dnat = root.find('.//destination-translation')
+    assert dnat is not None
+    ET.SubElement(dnat, 'translated-port').text = port
+
+
+def _extra_router(root, with_route=True):
+    routers = root.find('./devices/entry/network/virtual-router')
+    assert routers is not None
+    second = ET.SubElement(routers, 'entry', {'name': 'VR2'})
+    ET.SubElement(ET.SubElement(second, 'interface'), 'member').text = 'ethernet1/1'
+    if with_route:
+        original = routers.find('./entry/routing-table')
+        assert original is not None
+        copied = ET.fromstring(ET.tostring(original))
+        copied.find('./ip/static-route/entry').set('name', 'VR2-route')
+        second.append(copied)
+
+
+def _assert_blocked(candidate, code, entity):
+    assert candidate.status == 'BLOCKED' and candidate.text == ''
+    assert any(f.code == code and f.entity == entity and f.severity == 'BLOCKED' for f in candidate.findings)
+    assert all(c.translated == 0 and c.rendered == 0 for c in candidate.coverage)
+
+
+@pytest.mark.parametrize(('category', 'source', 'target'), [
+    ('zones', 'LAN', 'any'), ('zones', 'LAN', 'AnY'),
+    ('zones', 'LAN', 'AnY '),
+    ('addresses', 'CLIENTS', 'any'), ('addresses', 'CLIENT_GROUP', 'any'),
+    ('services', 'TCP_8443', 'any'), ('services', 'WEB_GROUP', 'any'),
+    ('services', 'TCP_8443', 'application-default'),
+])
+def test_concrete_fortios_identity_cannot_become_panos_wildcard(category, source, target):
+    ir = parse_fortios(FIXTURE.read_text(), '7.4')
+    mappings = FORTIOS_MAPPINGS.model_copy(deep=True)
+    getattr(mappings, category)[source] = target
+    candidate = generate_firewall(ir, 'panos', mappings, 1)
+    _assert_blocked(candidate, 'RESERVED_TARGET_IDENTITY', source)
+    if source in {'LAN', 'CLIENT_GROUP', 'WEB_GROUP'}:
+        assert any('References:' in f.message for f in candidate.findings if f.code == 'RESERVED_TARGET_IDENTITY' and f.entity == source)
+
+
+def test_reserved_source_identity_and_casefold_collision_block_but_safe_rename_remains():
+    ir = parse_fortios(FIXTURE.read_text(), '7.4')
+    collision = FORTIOS_MAPPINGS.model_copy(deep=True)
+    collision.zones = {'LAN': 'Inside', 'WAN': 'inside'}
+    _assert_blocked(generate_firewall(ir, 'panos', collision, 1), 'NAME_COLLISION', 'LAN')
+    safe = FORTIOS_MAPPINGS.model_copy(deep=True)
+    safe.zones = {'LAN': 'Inside'}
+    assert generate_firewall(ir, 'panos', safe, 1).status == 'REVIEW_REQUIRED'
+    ir.zones[0].name = 'any'
+    _assert_blocked(generate_firewall(ir, 'panos', FORTIOS_MAPPINGS, 1), 'RESERVED_TARGET_IDENTITY', 'any')
+
+
+def test_fortios_reserved_target_and_explicit_source_wildcard():
+    ir = parse_panos_firewall(PANOS.read_text(), '11.1')
+    mappings = PANOS_MAPPINGS.model_copy(deep=True)
+    mappings.addresses['CLIENTS'] = 'ALL'
+    _assert_blocked(generate_firewall(ir, 'fortios', mappings, 1), 'RESERVED_TARGET_IDENTITY', 'CLIENTS')
+    vip = next(item for item in ir.nat if item.kind == 'dnat')
+    mappings = PANOS_MAPPINGS.model_copy(deep=True)
+    mappings.nat[vip.name] = 'all'
+    _assert_blocked(generate_firewall(ir, 'fortios', mappings, 1), 'RESERVED_TARGET_IDENTITY', vip.name)
+    assert generate_firewall(parse_fortios(FIXTURE.read_text(), '7.4'), 'panos', FORTIOS_MAPPINGS, 1).status == 'REVIEW_REQUIRED'
+
+
+@pytest.mark.parametrize('port', ['9443', '8080'])
+def test_translated_port_dnat_is_blocked_with_source_disposition(port):
+    source = _panos_with(lambda root: _translated_port(root, port))
+    ir = parse_panos_firewall(source, '11.1')
+    nat = next(item for item in ir.nat if item.translated_port == port)
+    assert nat.translation_status == 'BLOCKED' and nat.source_location
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_DNAT_TRANSLATED_PORT', nat.name)
+    assert generate_firewall(parse_panos_firewall(PANOS.read_text(), '11.1'), 'fortios', PANOS_MAPPINGS, 1).status == 'REVIEW_REQUIRED'
+
+
+@pytest.mark.parametrize('count', [1, 2])
+def test_secondary_physical_addresses_block_before_adapter_loss(count):
+    ir = parse_panos_firewall(_panos_with(lambda root: _extra_address(root, count=count)), '11.1')
+    interface = next(item for item in ir.interfaces if item.name == 'ethernet1/1')
+    assert interface.translation_status == 'BLOCKED' and interface.source_location
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'MULTIPLE_INTERFACE_ADDRESSES', 'ethernet1/1')
+
+
+@pytest.mark.parametrize(('kind', 'path', 'name'), [
+    ('aggregate', './devices/entry/network/interface/aggregate-ethernet/entry/layer3/ip', 'ae1'),
+    ('subinterface', './devices/entry/network/interface/ethernet/entry/layer3/units/entry/ip', 'ethernet1/1.101'),
+])
+def test_secondary_aggregate_and_subinterface_addresses_block(kind, path, name):
+    def add(root):
+        interfaces = root.find('./devices/entry/network/interface')
+        assert interfaces is not None
+        if kind == 'aggregate':
+            ip = ET.SubElement(ET.SubElement(ET.SubElement(interfaces, 'aggregate-ethernet'), 'entry', {'name': name}), 'layer3')
+            ET.SubElement(ET.SubElement(ip, 'ip'), 'entry', {'name': '192.0.2.1/30'})
+        else:
+            parent = root.find('./devices/entry/network/interface/ethernet/entry/layer3')
+            assert parent is not None
+            unit = ET.SubElement(ET.SubElement(parent, 'units'), 'entry', {'name': name})
+            ET.SubElement(unit, 'tag').text = '101'
+            ET.SubElement(ET.SubElement(unit, 'ip'), 'entry', {'name': '192.0.2.1/30'})
+        _extra_address(root, path)
+    ir = parse_panos_firewall(_panos_with(add), '11.1')
+    assert next(item for item in ir.interfaces if item.name == name).translation_status == 'BLOCKED'
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'MULTIPLE_INTERFACE_ADDRESSES', name)
+
+
+@pytest.mark.parametrize('tag', ['dhcp-client', 'ipv6'])
+def test_unmodeled_interface_addressing_blocks(tag):
+    def add(root):
+        layer3 = root.find('./devices/entry/network/interface/ethernet/entry/layer3')
+        assert layer3 is not None
+        ET.SubElement(layer3, tag)
+    ir = parse_panos_firewall(_panos_with(add), '11.1')
+    assert ir.interfaces[0].translation_status == 'BLOCKED'
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_INTERFACE_ADDRESSING', 'ethernet1/1')
+
+
+def test_duplicate_address_has_no_distinct_secondary_semantic():
+    def duplicate(root):
+        ip = root.find('./devices/entry/network/interface/ethernet/entry/layer3/ip')
+        assert ip is not None
+        ET.SubElement(ip, 'entry', {'name': '203.0.113.2/30'})
+    ir = parse_panos_firewall(_panos_with(duplicate), '11.1')
+    assert generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1).status == 'REVIEW_REQUIRED'
+
+
+def test_aggregate_subinterface_is_blocked_before_adapter_omits_it():
+    def add(root):
+        interfaces = root.find('./devices/entry/network/interface')
+        assert interfaces is not None
+        aggregate = ET.SubElement(ET.SubElement(interfaces, 'aggregate-ethernet'), 'entry', {'name': 'ae1'})
+        unit = ET.SubElement(ET.SubElement(ET.SubElement(aggregate, 'layer3'), 'units'), 'entry', {'name': 'ae1.101'})
+        ET.SubElement(unit, 'tag').text = '101'
+    ir = parse_panos_firewall(_panos_with(add), '11.1')
+    assert next(item for item in ir.interfaces if item.name == 'ae1').translation_status == 'BLOCKED'
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_INTERFACE_KIND', 'ae1')
+
+
+@pytest.mark.parametrize('kind', ['vlan', 'loopback'])
+def test_unmodeled_logical_interfaces_block(kind):
+    def add(root):
+        interfaces = root.find('./devices/entry/network/interface')
+        assert interfaces is not None
+        ET.SubElement(ET.SubElement(ET.SubElement(interfaces, kind), 'units'), 'entry', {'name': f'{kind}.1'})
+    ir = parse_panos_firewall(_panos_with(add), '11.1')
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_INTERFACE_KIND', f'{kind}.1')
+
+
+def test_validator_blocks_direct_ir_translated_port_and_nondefault_route():
+    ir = parse_panos_firewall(PANOS.read_text(), '11.1')
+    dnat = next(item for item in ir.nat if item.kind == 'dnat')
+    dnat.translated_port = '9443'
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_DNAT_TRANSLATED_PORT', dnat.name)
+    dnat.translated_port = None
+    ir.routes[0].router = 'VR2'
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_ROUTING_CONTEXT', ir.routes[0].name)
+
+
+@pytest.mark.parametrize('with_route', [True, False])
+def test_second_router_blocks_even_if_it_has_no_routes(with_route):
+    ir = parse_panos_firewall(_panos_with(lambda root: _extra_router(root, with_route)), '11.1')
+    candidate = generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1)
+    _assert_blocked(candidate, 'UNSUPPORTED_ROUTING_CONTEXT', 'VR2')
+    if with_route:
+        assert any(route.translation_status == 'BLOCKED' for route in ir.routes)
+
+
+def test_single_nondefault_router_blocks_and_default_route_is_preserved():
+    def rename(root):
+        root.find('./devices/entry/network/virtual-router/entry').set('name', 'VR2')
+    ir = parse_panos_firewall(_panos_with(rename), '11.1')
+    _assert_blocked(generate_firewall(ir, 'fortios', PANOS_MAPPINGS, 1), 'UNSUPPORTED_ROUTING_CONTEXT', 'VR2')
+    assert generate_firewall(parse_panos_firewall(PANOS.read_text(), '11.1'), 'fortios', PANOS_MAPPINGS, 1).status == 'REVIEW_REQUIRED'
+
+
+@pytest.mark.parametrize(('source_os', 'text', 'target_os', 'mapping', 'code'), [
+    ('fortios', None, 'panos', {'zones': {'LAN': 'any'}}, 'RESERVED_TARGET_IDENTITY'),
+    ('fortios', None, 'panos', {'addresses': {'CLIENTS': 'AnY'}}, 'RESERVED_TARGET_IDENTITY'),
+    ('fortios', None, 'panos', {'addresses': {'CLIENT_GROUP': 'any'}}, 'RESERVED_TARGET_IDENTITY'),
+    ('fortios', None, 'panos', {'services': {'TCP_8443': 'any'}}, 'RESERVED_TARGET_IDENTITY'),
+    ('fortios', None, 'panos', {'services': {'WEB_GROUP': 'any'}}, 'RESERVED_TARGET_IDENTITY'),
+    ('panos', None, 'fortios', {'addresses': {'CLIENTS': 'ALL'}}, 'RESERVED_TARGET_IDENTITY'),
+    ('panos', 'port', 'fortios', {}, 'UNSUPPORTED_DNAT_TRANSLATED_PORT'),
+    ('panos', 'address', 'fortios', {}, 'MULTIPLE_INTERFACE_ADDRESSES'),
+    ('panos', 'router', 'fortios', {}, 'UNSUPPORTED_ROUTING_CONTEXT'),
+    ('panos', 'empty_router', 'fortios', {}, 'UNSUPPORTED_ROUTING_CONTEXT'),
+    ('panos', 'nondefault_router', 'fortios', {}, 'UNSUPPORTED_ROUTING_CONTEXT'),
+])
+def test_semantic_blockers_reject_acknowledged_api_export(source_os, text, target_os, mapping, code):
+    from fastapi.testclient import TestClient
+    from confighop_api.main import create_app
+
+    def nondefault_router(root):
+        root.find('./devices/entry/network/virtual-router/entry').set('name', 'VR2')
+    changes = {'port': _translated_port, 'address': _extra_address, 'router': _extra_router,
+        'empty_router': lambda root: _extra_router(root, False), 'nondefault_router': nondefault_router}
+    source = FIXTURE.read_text() if source_os == 'fortios' else _panos_with(changes[text]) if text else PANOS.read_text()
+    interfaces = FORTIOS_MAPPINGS.interfaces if source_os == 'fortios' else PANOS_MAPPINGS.interfaces
+    headers = {'X-ConfigHop-Client': 'web'}
+    with TestClient(create_app()) as client:
+        response = client.post('/api/v1/firewall-projects', headers=headers,
+            json={'text': source, 'source_os': source_os, 'source_version': '7.4' if source_os == 'fortios' else '11.1'})
+        assert response.status_code == 200, response.text
+        path = f"/api/v1/firewall-projects/{response.json()['project_id']}"
+        preview = client.put(path + '/preview', headers=headers, json={
+            'revision': 1, 'target_os': target_os, 'target_version': '11.1' if target_os == 'panos' else '7.4',
+            'mappings': {'interfaces': interfaces, **mapping}})
+        assert preview.status_code == 200, preview.text
+        candidate = preview.json()['candidate']
+        assert candidate['status'] == 'BLOCKED' and not candidate['text']
+        assert any(item['code'] == code and item['severity'] == 'BLOCKED' for item in candidate['findings'])
+        export = {'revision': 1, 'sha256': candidate['sha256'], 'acknowledge_review': True}
+        assert client.post(path + '/export', headers=headers, json=export).status_code == 409
 
 
 def test_fortios_to_panos_candidate_preserves_order_and_policy_state():
