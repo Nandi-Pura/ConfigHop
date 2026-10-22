@@ -12,7 +12,8 @@ HPE identifies [10.10](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.10/RN/
 | --- | --- | --- |
 | IOS XE 17.12/17.15/17.18 | AOS-CX 10.10/10.13/10.16 | `TRANSLATION_SUPPORTED` for the bounded feature subset below; synthetic tests only |
 | IOS XE 17.12 | AOS-CX 10.15 | Legacy SSR subset retained; synthetic tests only |
-| AOS-CX to IOS XE, or any other pair | Any | `NOT_IMPLEMENTED`; candidate blocked or unavailable |
+| AOS-CX 10.13.x | IOS XE 17.18.x | `TRANSLATION_SUPPORTED` for the bounded Phase 11B feature subset; synthetic tests only |
+| Other AOS-CX to IOS XE release pairs, or any other pair | Any | `NOT_IMPLEMENTED`; candidate blocked or unavailable |
 
 The shared AOS-CX renderer emits only command forms covered by the existing 10.15 adapter and the documented common subset in [10.10 Layer-2](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.10/PDF/l2_bridging_8400.pdf), [10.13 Layer-2](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.13/PDF/l2_bridging_8400.pdf), and [10.16 CLI](https://arubanetworking.hpe.com/techdocs/AOS-CX/10.16/PDF/cli_8100-8360.pdf) references. These references do **not** prove that every command or feature is present on every device. Selected source and target trains gate preview; unrecognized trains produce `BLOCKED`. Any future syntax divergence requires a small version-specific adapter and new evidence before support is extended.
 
@@ -26,7 +27,7 @@ The unchanged phase-8A Palo Alto hardware mapping and firewall translator are se
 
 Implemented semantic subset: VLANs and names, explicit access/trunk VLAN sets and native VLAN, explicit shutdown state, LAG/LACP, rapid PVST subset, IPv4 SVI/routed interfaces, static IPv4 routes, limited `permit/deny ip any any` ACLs, LLDP, NTP, and local AAA method with separate account reentry. Source statements carry redacted provenance and a disposition. Unknown, malformed, secret-bearing, and unsupported statements produce findings and block export. The renderer does not copy unrecognized source text to target CLI. Native VLANs excluded from an explicit allowed list now block pending engineering review.
 
-Unsupported: advanced ACL matches, OSPF/BGP, SNMP configuration, syslog translation, DHCP snooping, management ACLs, VRFs, loopbacks, credentials/local users, and platform-specific services. The parser may recognize some of these to classify them; recognition is not translation support. No Aruba-to-Cisco renderer exists.
+Unsupported in the Phase 11A direction: advanced ACL matches, OSPF/BGP, SNMP configuration, syslog translation, DHCP snooping, management ACLs, VRFs, loopbacks, credentials/local users, and platform-specific services. The parser may recognize some of these to classify them; recognition is not translation support. Phase 11B adds a separate, bounded AOS-CX 10.13.x to IOS XE 17.18.x renderer; see [Phase 11B limits](phase11b-switch-completion.md).
 
 Each preview includes a machine-readable `translation_summary` with OS/version, construct disposition counts, unsupported families, unresolved dependencies, mapping completeness, hardware verification status, and scoped output-validation status. `CHECKED_SUBSET` means parser/renderer and structural checks passed for this bounded grammar, not that the CLI was executed on a switch. A `BLOCKED` candidate cannot be exported. Every permitted candidate remains `REVIEW_REQUIRED` and requires acknowledgement for its current SHA-256 digest.
 

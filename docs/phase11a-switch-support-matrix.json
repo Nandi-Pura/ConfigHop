@@ -116,5 +116,31 @@
         "platform-specific services"
       ]
     }
-  }
+  },
+  "directions": [
+    {
+      "source": "Cisco IOS XE 17.12/17.15/17.18",
+      "target": "AOS-CX 10.10/10.13/10.16",
+      "status": "TRANSLATION_SUPPORTED",
+      "qualification": "Phase 11A bounded subset; synthetic tests"
+    },
+    {
+      "source": "Cisco IOS XE 17.12",
+      "target": "AOS-CX 10.15",
+      "status": "TRANSLATION_SUPPORTED",
+      "qualification": "Legacy Phase 9A bounded subset; synthetic tests"
+    },
+    {
+      "source": "AOS-CX 10.13",
+      "target": "Cisco IOS XE 17.18",
+      "status": "TRANSLATION_SUPPORTED",
+      "qualification": "Phase 11B bounded subset; synthetic tests; management security requires manual handling"
+    },
+    {
+      "source": "AOS-CX 10.10/10.16",
+      "target": "Cisco IOS XE 17.12/17.15/17.18",
+      "status": "RELEASE_RECOGNIZED",
+      "qualification": "Reverse translation not implemented; preview blocked"
+    }
+  ]
 }

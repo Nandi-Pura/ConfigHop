@@ -29,5 +29,16 @@ jobs:
         run: npm ci
       - name: Frontend tests
         run: npm test
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests
+        run: npm run test:browser
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: artifacts/
+          if-no-files-found: ignore
       - name: Frontend build
         run: npm run build
