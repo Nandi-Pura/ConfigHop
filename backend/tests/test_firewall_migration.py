@@ -93,6 +93,91 @@ def test_fortios_reserved_target_and_explicit_source_wildcard():
     assert generate_firewall(parse_fortios(FIXTURE.read_text(), '7.4'), 'panos', FORTIOS_MAPPINGS, 1).status == 'REVIEW_REQUIRED'
 
 
+@pytest.mark.parametrize(('address_mapping', 'nat_mapping', 'address_source'), [
+    ({}, {'dnat-WEB_VIP': 'CLIENTS'}, 'CLIENTS'),
+    ({'CLIENTS': 'dnat-WEB_VIP'}, {}, 'CLIENTS'),
+    ({}, {'dnat-WEB_VIP': 'CLIENT_GROUP'}, 'CLIENT_GROUP'),
+    ({}, {'dnat-WEB_VIP': 'clients'}, 'CLIENTS'),
+])
+def test_fortios_vip_destination_name_collision_blocks_candidate(address_mapping, nat_mapping, address_source):
+    ir = parse_panos_firewall(PANOS.read_text(), '11.1')
+    mappings = PANOS_MAPPINGS.model_copy(deep=True)
+    mappings.addresses = address_mapping
+    mappings.nat = nat_mapping
+    candidate = generate_firewall(ir, 'fortios', mappings, 1)
+    _assert_blocked(candidate, 'FORTIOS_VIP_ADDRESS_NAME_COLLISION', 'dnat-WEB_VIP')
+    finding = next(f for f in candidate.findings if f.code == 'FORTIOS_VIP_ADDRESS_NAME_COLLISION')
+    assert address_source in finding.message and 'Inbound Web' in finding.message
+    assert (nat_mapping.get('dnat-WEB_VIP') or 'dnat-WEB_VIP') in finding.message
+
+
+def test_fortios_vip_destination_multiple_collisions_are_deterministic():
+    ir = parse_panos_firewall(PANOS.read_text(), '11.1')
+    second = ir.nat[-1].model_copy(deep=True)
+    second.name = 'dnat-SECOND'
+    ir.nat.append(second)
+    mappings = PANOS_MAPPINGS.model_copy(deep=True)
+    mappings.nat = {'dnat-WEB_VIP': 'CLIENTS', 'dnat-SECOND': 'PUBLIC'}
+    candidate = generate_firewall(ir, 'fortios', mappings, 1)
+    assert candidate.status == 'BLOCKED' and candidate.text == ''
+    messages = [f.message for f in candidate.findings if f.code == 'FORTIOS_VIP_ADDRESS_NAME_COLLISION']
+    assert len(messages) == 2 and len(set(messages)) == 2
+    assert 'CLIENTS' in messages[0] and 'PUBLIC' in messages[1]
+
+
+def test_fortios_distinct_vip_and_unrelated_service_name_remain_reviewable():
+    ir = parse_panos_firewall(PANOS.read_text(), '11.1')
+    mappings = PANOS_MAPPINGS.model_copy(deep=True)
+    mappings.nat = {'dnat-WEB_VIP': 'VIP-WEB-PUBLIC'}
+    mappings.services = {'TCP_8443': 'VIP-WEB-PUBLIC'}
+    candidate = generate_firewall(ir, 'fortios', mappings, 1)
+    assert candidate.status == 'REVIEW_REQUIRED'
+    assert not any(f.code == 'FORTIOS_VIP_ADDRESS_NAME_COLLISION' for f in candidate.findings)
+    assert 'set dstaddr "VIP-WEB-PUBLIC"' in candidate.text
+    assert 'set service "VIP-WEB-PUBLIC"' in candidate.text
+
+
+@pytest.mark.parametrize(('address_mapping', 'nat_mapping'), [
+    ({}, {'dnat-WEB_VIP': 'CLIENTS'}),
+    ({'CLIENTS': 'dnat-WEB_VIP'}, {}),
+    ({}, {'dnat-WEB_VIP': 'CLIENT_GROUP'}),
+    ({}, {'dnat-WEB_VIP': 'clients'}),
+])
+def test_fortios_vip_collision_rejects_acknowledged_api_export(address_mapping, nat_mapping):
+    from fastapi.testclient import TestClient
+    from confighop_api.main import create_app
+
+    headers = {'X-ConfigHop-Client': 'web'}
+    with TestClient(create_app()) as client:
+        source = client.post('/api/v1/firewall-projects', headers=headers,
+            json={'text': PANOS.read_text(), 'source_os': 'panos', 'source_version': '11.1'})
+        assert source.status_code == 200, source.text
+        path = f"/api/v1/firewall-projects/{source.json()['project_id']}"
+        mappings = {'interfaces': PANOS_MAPPINGS.interfaces, 'addresses': address_mapping, 'nat': nat_mapping}
+        preview = client.put(path + '/preview', headers=headers, json={
+            'revision': 1, 'target_os': 'fortios', 'target_version': '7.4', 'mappings': mappings})
+        assert preview.status_code == 200, preview.text
+        candidate = preview.json()['candidate']
+        assert candidate['status'] == 'BLOCKED' and candidate['text'] == ''
+        assert any(f['code'] == 'FORTIOS_VIP_ADDRESS_NAME_COLLISION' and f['severity'] == 'BLOCKED'
+            for f in candidate['findings'])
+        export = {'revision': 1, 'sha256': candidate['sha256'], 'acknowledge_review': True}
+        assert client.post(path + '/export', headers=headers, json=export).status_code == 409
+        assert client.post(path + '/export', headers=headers,
+            json={**export, 'sha256': '0' * 64}).status_code == 409
+        safe = client.put(path + '/preview', headers=headers, json={
+            'revision': 2, 'target_os': 'fortios', 'target_version': '7.4',
+            'mappings': {**mappings, 'addresses': {}, 'nat': {'dnat-WEB_VIP': 'VIP-WEB-PUBLIC'}}})
+        assert safe.status_code == 200, safe.text
+        current = safe.json()['candidate']
+        assert current['status'] == 'REVIEW_REQUIRED'
+        assert 'set dstaddr "VIP-WEB-PUBLIC"' in current['text']
+        assert client.post(path + '/export', headers=headers, json=export).status_code == 409
+        approved = client.post(path + '/export', headers=headers,
+            json={'revision': 2, 'sha256': current['sha256'], 'acknowledge_review': True})
+        assert approved.status_code == 200 and approved.json()['text'] == current['text']
+
+
 @pytest.mark.parametrize('port', ['9443', '8080'])
 def test_translated_port_dnat_is_blocked_with_source_disposition(port):
     source = _panos_with(lambda root: _translated_port(root, port))

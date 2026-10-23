@@ -70,6 +70,21 @@ def validate_firewall(ir: FirewallIR, target: Vendor, mappings: FirewallMappings
         for name in assigned:
             if not (_INTERFACE_NAME if label == 'interface' else _NAME).fullmatch(name):
                 findings.append(_finding('INVALID_NAME', f'{label} target name is outside the conservative portable subset.', name))
+    if target == 'fortios':
+        addresses_by_target: dict[str, list[tuple[str, str]]] = {}
+        for kind, items in [('address', ir.addresses), ('address group', ir.address_groups)]:
+            for item in items:
+                name = _name(item.name, mappings.addresses)
+                addresses_by_target.setdefault(name.strip().casefold(), []).append((kind, item.name))
+        for nat in ir.nat:
+            if nat.kind != 'dnat':
+                continue
+            name = _name(nat.name, mappings.nat)
+            for kind, source in addresses_by_target.get(name.strip().casefold(), []):
+                policy = f'; policy {nat.related_policy} destination' if nat.related_policy else ''
+                findings.append(_finding('FORTIOS_VIP_ADDRESS_NAME_COLLISION',
+                    f'FortiOS VIP {nat.name} and {kind} {source} resolve to target name {name}{policy}; '
+                    'choose distinct target identities.', nat.name))
     interface_names = {item.name for item in ir.interfaces}
     zone_names = {item.name for item in ir.zones}
     address_names = {item.name for item in ir.addresses + ir.address_groups}
