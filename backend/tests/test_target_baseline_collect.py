@@ -131,6 +131,86 @@ def target_body(*, serial: str = "target-serial", model: str = "PA-5410") -> dic
         "expected_serial": serial, "expected_model": model}
 
 
+def prepare_passed_target_package(client: TestClient, base: str) -> dict:
+    assert client.post(base + "/target/baseline/collect", json=target_body(), headers=HEADERS).status_code == 200
+    assert client.put(base + "/source-profile", json={"profile_id": "paloalto-pa-5220",
+        "panos_train": "11.1"}, headers=HEADERS).status_code == 200
+    candidate = client.post(base + "/candidate", json={"mappings": [
+        {"source_interface": "ethernet1/12", "target_interface": "ethernet1/8"}],
+        "allow_review": True}, headers=HEADERS)
+    assert candidate.status_code == 200 and candidate.json()["candidate_available"] is True
+    built_response = client.post(base + "/target/package/build", headers=HEADERS)
+    assert built_response.status_code == 200, built_response.text
+    built = built_response.json()
+    accepted = sorted({item["code"] for item in built["target_findings"]
+        if item["requires_acceptance"]})
+    reviewed = client.post(base + "/target/package/review", json={
+        "confirmed_target_hostname": "fw-target-serial",
+        "accepted_finding_codes": accepted}, headers=HEADERS)
+    assert reviewed.status_code == 200, reviewed.text
+    preflight = client.post(base + "/target/preflight/check", json={
+        **target_body(), "recovery_path_confirmed": True}, headers=HEADERS)
+    assert preflight.status_code == 200 and preflight.json()["status"] == "PASSED"
+    return built
+
+
+def stage_client(deployable: bytes, *, baseline: bytes = b"", import_timeout: bool = False) -> httpx.AsyncClient:
+    count = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal count
+        count += 1
+        assert request.headers["X-PAN-KEY"] == "secret-key"
+        if count == 1:
+            return httpx.Response(200, content=system_info("target-serial"))
+        if count in {2, 3}:
+            return httpx.Response(200, content=baseline or active_config())
+        if count == 4:
+            assert "multipart/form-data" in request.headers["content-type"]
+            assert deployable in request.content
+            if import_timeout:
+                raise httpx.ReadTimeout("private timeout", request=request)
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><msg><line>Imported</line></msg></result></response>'))
+        form = parse_qs(request.content.decode())
+        if count == 5:
+            assert form["cmd"][0].startswith("<load><config><from>confighop-")
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><msg><line>Loaded</line></msg></result></response>'))
+        if count == 6:
+            assert form["action"] == ["get"]
+            return httpx.Response(200, content=(b'<response status="success"><result>' +
+                deployable + b'</result></response>'))
+        if count == 7:
+            assert form["cmd"] == ["<show><config><list><change-summary/></list></config></show>"]
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><change-summary><entry name="vsys1"/>'
+                b'</change-summary></result></response>'))
+        if count == 8:
+            assert form["cmd"] == ["<validate><full></full></validate>"]
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><job>42</job></result></response>'))
+        assert form["cmd"] == ["<show><jobs><id>42</id></jobs></show>"]
+        state = b'<status>FIN</status><result>OK</result>'
+        return httpx.Response(200, content=(b'<response status="success"><result><job><id>42</id>' +
+            state + b'</job></result></response>'))
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
+def reconcile_client(*, running: bytes, candidate: bytes,
+    summary: bytes = b'<response status="success"><result/></response>') -> httpx.AsyncClient:
+    documents = iter([system_info("target-serial"), running, candidate, summary])
+    expected = iter([("op", None), ("config", "show"), ("config", "get"), ("op", None)])
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        form = parse_qs(request.content.decode())
+        assert (form["type"][0], form.get("action", [None])[0]) == next(expected)
+        return httpx.Response(200, content=next(documents))
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
 def test_collect_target_baseline_binds_read_only_hash_and_audit(monkeypatch, tmp_path):
     monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
     monkeypatch.setattr("confighop_api.services.create_target_client", lambda *args, **kwargs: target_client())
@@ -456,3 +536,97 @@ def test_preflight_baseline_drift_detaches_current_draft(monkeypatch, tmp_path):
         assert client.get(base).json()["candidate_available"] is True
         assert any(event["reason"] == "TARGET_BASELINE_DRIFT" for event in
             client.get(base + "/deployment-events").json())
+
+
+def test_target_stage_is_disabled_by_default(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: source_client())
+    with TestClient(create_app(target_store(tmp_path / "projects"),
+        allowed_source_endpoints={SOURCE}, allowed_target_endpoints={TARGET},
+        audit_path=tmp_path / "audit.sqlite3")) as client:
+        _, base = prepare_project(client)
+        capabilities = client.get("/api/v1/capabilities").json()["domains"]["firewall"]
+        assert capabilities["deployment_mode"] == "disabled"
+        assert capabilities["panos_target_stage_validate"] is False
+        response = client.post(base + "/target/stage", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "LIVE_DEPLOYMENT_DISABLED"
+
+
+def test_stage_captures_encrypted_backups_loads_exact_candidate_and_validates_job(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: single_vsys_source_client())
+    target_config = package_target_config()
+    target_clients = [target_client(first=target_config, second=target_config),
+        preflight_client(running=target_config, candidate=target_config)]
+    monkeypatch.setattr("confighop_api.services.create_target_client",
+        lambda *args, **kwargs: target_clients.pop(0))
+    root = tmp_path / "projects"
+    store = target_store(root)
+    with TestClient(create_app(store, allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3",
+        deployment_mode="lab")) as client:
+        project_id, base = prepare_project(client)
+        built = prepare_passed_target_package(client, base)
+        deployable = store.artifacts.read_deployable(project_id, built["package_id"],
+            built["deployable_candidate_sha256"], max_plaintext_bytes=store.max_source_bytes)
+        target_clients.append(stage_client(deployable, baseline=target_config))
+
+        response = client.post(base + "/target/stage", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+
+        assert response.status_code == 200, response.text
+        report = response.json()
+        assert report["status"] == "VALIDATED"
+        assert report["validation_job_id"] == "42"
+        assert report["commit_created"] is False
+        package = client.get(base + "/deployment-package").json()
+        assert package["status"] == "VALIDATED"
+        assert package["running_backup_sha256"] == package["candidate_backup_sha256"]
+        assert package["loaded_candidate_sha256"] == built["deployable_candidate_sha256"]
+        for kind in ("running", "candidate"):
+            encrypted = root / project_id / "packages" / built["package_id"] / "backups" / f"{kind}.xml.aesgcm"
+            assert encrypted.is_file()
+            assert b"<config" not in encrypted.read_bytes()
+        events = client.get(base + "/deployment-events").json()
+        states = [event["to_state"] for event in events if event["action"] == "DEPLOYMENT_STATE_CHANGED"]
+        assert states[-5:] == ["BACKUP_CAPTURED", "IMPORTED", "CANDIDATE_LOADED", "VALIDATING", "VALIDATED"]
+        audit = client.get(base + "/audit").json()
+        assert "secret-key" not in str(events) + str(audit) + response.text
+        assert [item["outcome"] for item in audit["events"] if item["action"] == "TARGET_STAGE"] == [
+            "STARTED", "SUCCEEDED"]
+
+
+def test_import_timeout_enters_status_unknown_without_retry(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: single_vsys_source_client())
+    target_config = package_target_config()
+    target_clients = [target_client(first=target_config, second=target_config),
+        preflight_client(running=target_config, candidate=target_config)]
+    monkeypatch.setattr("confighop_api.services.create_target_client",
+        lambda *args, **kwargs: target_clients.pop(0))
+    root = tmp_path / "projects"
+    store = target_store(root)
+    with TestClient(create_app(store, allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3",
+        deployment_mode="lab")) as client:
+        project_id, base = prepare_project(client)
+        built = prepare_passed_target_package(client, base)
+        deployable = store.artifacts.read_deployable(project_id, built["package_id"],
+            built["deployable_candidate_sha256"], max_plaintext_bytes=store.max_source_bytes)
+        target_clients.append(stage_client(deployable, baseline=target_config, import_timeout=True))
+
+        response = client.post(base + "/target/stage", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+
+        assert response.status_code == 504
+        assert response.json()["error"]["code"] == "XML_API_TIMEOUT"
+        package = client.get(base + "/deployment-package").json()
+        assert package["status"] == "STATUS_UNKNOWN"
+        assert package["ambiguous_operation"] == "IMPORT"
+        assert package["running_backup_sha256"] and package["candidate_backup_sha256"]
+        target_clients.append(reconcile_client(running=target_config, candidate=target_config))
+        reconciled = client.post(base + "/target/stage/reconcile", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+        assert reconciled.status_code == 200, reconciled.text
+        assert reconciled.json()["reconciliation"] == "STILL_AMBIGUOUS"
+        assert reconciled.json()["commit_created"] is False
+        assert client.get(base + "/deployment-package").json()["status"] == "STATUS_UNKNOWN"

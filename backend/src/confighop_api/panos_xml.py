@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+import hashlib
 import ipaddress
+import re
 import ssl
 from collections.abc import Collection
 from typing import Literal
@@ -25,6 +27,19 @@ class DeviceIdentity:
     panos_version: str
     multi_vsys: bool | None = None
     operational_mode: str | None = None
+
+
+@dataclass(frozen=True)
+class OperationReceipt:
+    response_sha256: str
+    job_id: str | None = None
+
+
+@dataclass(frozen=True)
+class JobResult:
+    job_id: str
+    state: Literal["PENDING", "SUCCEEDED", "FAILED"]
+    response_sha256: str
 
 
 def _endpoint_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
@@ -117,6 +132,123 @@ async def _request_bytes(client: httpx.AsyncClient, api_key: str, payload: dict[
     return b"".join(chunks)
 
 
+async def _request_multipart(client: httpx.AsyncClient, api_key: str,
+    payload: dict[str, str], filename: str, content: bytes, *, max_bytes: int) -> bytes:
+    if not api_key:
+        raise XmlApiError("XML_API_KEY_REQUIRED", "A device API key is required.")
+    if client.base_url.scheme != "https":
+        raise XmlApiError("XML_API_TLS_REQUIRED", "The device API endpoint must use HTTPS.")
+    if max_bytes < 1:
+        raise ValueError("max_bytes must be positive")
+    try:
+        async with client.stream("POST", "/api/", data=payload,
+            files={"file": (filename, content, "application/xml")},
+            headers={"X-PAN-KEY": api_key, "Accept-Encoding": "identity"},
+            follow_redirects=False) as response:
+            if response.is_redirect:
+                raise XmlApiError("XML_API_REDIRECT", "The device API redirected the request.")
+            if response.status_code in {401, 403}:
+                raise XmlApiError("XML_API_AUTH_FAILED", "The device API rejected the API key or its permissions.")
+            if response.status_code != 200:
+                raise XmlApiError("XML_API_HTTP_ERROR", "The device API rejected the request.")
+            chunks: list[bytes] = []
+            size = 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > max_bytes:
+                    raise XmlApiError("XML_API_RESPONSE_TOO_LARGE", "The API response exceeds the size limit.")
+                chunks.append(chunk)
+    except httpx.TimeoutException as exc:
+        raise XmlApiError("XML_API_TIMEOUT", "The device API request timed out.") from exc
+    except httpx.TransportError as exc:
+        cause: BaseException | None = exc
+        while cause is not None:
+            if isinstance(cause, ssl.SSLCertVerificationError):
+                raise XmlApiError("XML_API_TLS_FAILED", "The device TLS certificate could not be verified.") from exc
+            cause = cause.__cause__
+        raise XmlApiError("XML_API_TRANSPORT_ERROR", "The device API connection failed.") from exc
+    return b"".join(chunks)
+
+
+def _success_response(document: bytes, *, invalid_code: str, failed_code: str):
+    try:
+        root = ElementTree.fromstring(document)
+    except (ElementTree.ParseError, DefusedXmlException, ValueError) as exc:
+        raise XmlApiError(invalid_code, "The target API returned invalid operation XML.") from exc
+    if root.tag != "response" or root.get("status") != "success":
+        raise XmlApiError(failed_code, "The target API rejected the operation.")
+    result = root.find("./result")
+    if result is None:
+        raise XmlApiError(invalid_code, "The target API omitted the operation result.")
+    return root, result
+
+
+def _receipt(document: bytes, *, invalid_code: str, failed_code: str,
+    allow_job: bool = False) -> OperationReceipt:
+    _, result = _success_response(document, invalid_code=invalid_code, failed_code=failed_code)
+    job_id = (result.findtext("./job") or "").strip() or None
+    if job_id is not None and (not allow_job or not job_id.isdigit() or len(job_id) > 32):
+        raise XmlApiError(invalid_code, "The target API returned an invalid job identifier.")
+    has_message = bool("".join(result.itertext()).strip())
+    if job_id is None and not has_message:
+        raise XmlApiError(invalid_code, "The target API returned an empty operation result.")
+    return OperationReceipt(hashlib.sha256(document).hexdigest(), job_id)
+
+
+async def import_configuration(client: httpx.AsyncClient, api_key: str, *,
+    filename: str, content: bytes) -> OperationReceipt:
+    if not re.fullmatch(r"confighop-[0-9a-f-]{36}\.xml", filename):
+        raise ValueError("Import filename is invalid")
+    document = await _request_multipart(client, api_key,
+        {"type": "import", "category": "configuration"}, filename, content,
+        max_bytes=1024 * 1024)
+    return _receipt(document, invalid_code="XML_API_INVALID_IMPORT",
+        failed_code="XML_API_IMPORT_FAILED")
+
+
+async def load_configuration(client: httpx.AsyncClient, api_key: str, *,
+    filename: str) -> OperationReceipt:
+    if not re.fullmatch(r"confighop-[0-9a-f-]{36}\.xml", filename):
+        raise ValueError("Load filename is invalid")
+    document = await _request_bytes(client, api_key,
+        {"type": "op", "cmd": f"<load><config><from>{filename}</from></config></load>"},
+        max_bytes=1024 * 1024)
+    return _receipt(document, invalid_code="XML_API_INVALID_LOAD",
+        failed_code="XML_API_LOAD_FAILED")
+
+
+async def validate_full(client: httpx.AsyncClient, api_key: str) -> OperationReceipt:
+    document = await _request_bytes(client, api_key,
+        {"type": "op", "cmd": "<validate><full></full></validate>"},
+        max_bytes=1024 * 1024)
+    return _receipt(document, invalid_code="XML_API_INVALID_VALIDATION",
+        failed_code="XML_API_VALIDATION_FAILED", allow_job=True)
+
+
+async def read_job(client: httpx.AsyncClient, api_key: str, job_id: str) -> JobResult:
+    if not job_id.isdigit() or len(job_id) > 32:
+        raise ValueError("Job identifier is invalid")
+    document = await _request_bytes(client, api_key,
+        {"type": "op", "cmd": f"<show><jobs><id>{job_id}</id></jobs></show>"},
+        max_bytes=1024 * 1024)
+    _, result = _success_response(document, invalid_code="XML_API_INVALID_JOB",
+        failed_code="XML_API_JOB_FAILED")
+    job = result.find("./job")
+    if job is None or (job.findtext("id") or "").strip() != job_id:
+        raise XmlApiError("XML_API_INVALID_JOB", "The target API returned a different job.")
+    status = (job.findtext("status") or "").strip().upper()
+    outcome = (job.findtext("result") or "").strip().upper()
+    if status in {"PEND", "ACT"}:
+        state: Literal["PENDING", "SUCCEEDED", "FAILED"] = "PENDING"
+    elif status == "FIN" and outcome == "OK":
+        state = "SUCCEEDED"
+    elif status == "FIN" and outcome in {"FAIL", "WARN"}:
+        state = "FAILED"
+    else:
+        raise XmlApiError("XML_API_INVALID_JOB", "The target API returned an unrecognized job state.")
+    return JobResult(job_id, state, hashlib.sha256(document).hexdigest())
+
+
 async def export_configuration(client: httpx.AsyncClient, api_key: str, *,
     max_bytes: int = MAX_XML_BYTES) -> bytes:
     """Fetch a configuration export; the running/candidate meaning needs lab verification."""
@@ -186,6 +318,16 @@ async def read_preflight_probe(client: httpx.AsyncClient, api_key: str,
     if result is None:
         raise XmlApiError("XML_API_INVALID_PREFLIGHT", "The target API omitted preflight results.")
     return not len(result) and not (result.text or "").strip()
+
+
+async def read_change_summary(client: httpx.AsyncClient, api_key: str) -> bytes:
+    document = await _request_bytes(client, api_key,
+        {"type": "op", "cmd": _PREFLIGHT_COMMANDS["change_summary"]}, max_bytes=1024 * 1024)
+    _, result = _success_response(document, invalid_code="XML_API_INVALID_CHANGE_SUMMARY",
+        failed_code="XML_API_CHANGE_SUMMARY_FAILED")
+    if not len(result) and not (result.text or "").strip():
+        return b""
+    return ElementTree.tostring(result, encoding="utf-8")
 
 
 async def read_system_info(client: httpx.AsyncClient, api_key: str) -> DeviceIdentity:

@@ -1,4 +1,4 @@
-import type { CandidateMetadata, CompatibilityAssessment, DeploymentPackage, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload, TargetBaseline, TargetPreflight } from './types'
+import type { CandidateMetadata, Capabilities, CompatibilityAssessment, DeploymentPackage, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload, TargetBaseline, TargetPreflight, TargetReconcile, TargetStage } from './types'
 
 const LOCAL_API_HOST = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1'
 export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || `http://${LOCAL_API_HOST}:8000/api/v1`).replace(/\/$/, '')
@@ -45,6 +45,7 @@ async function xml(path: string, signal?: AbortSignal): Promise<Blob> {
 }
 
 export const api = {
+  getCapabilities: (signal?: AbortSignal) => request<Capabilities>('/capabilities', { signal }),
   createProject: (signal?: AbortSignal) => request<ProjectState>('/projects', { method: 'POST', signal }),
   getProject: (id: string, signal?: AbortSignal) => request<ProjectState>(`/projects/${id}`, { signal }),
   deleteProject: (id: string) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
@@ -72,6 +73,12 @@ export const api = {
     method: 'POST', body: JSON.stringify({ confirmed_target_hostname: confirmedTargetHostname, accepted_finding_codes: acceptedFindingCodes }), signal,
   }),
   checkTargetPreflight: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; recovery_path_confirmed: boolean }, signal?: AbortSignal) => request<TargetPreflight>(`/projects/${id}/target/preflight/check`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  stageTargetPackage: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; confirmed_target_hostname: string }, signal?: AbortSignal) => request<TargetStage>(`/projects/${id}/target/stage`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  reconcileTargetStage: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; confirmed_target_hostname: string }, signal?: AbortSignal) => request<TargetReconcile>(`/projects/${id}/target/stage/reconcile`, {
     method: 'POST', body: JSON.stringify(input), signal,
   }),
   getSource: (id: string, signal?: AbortSignal) => xml(`/projects/${id}/source`, signal),

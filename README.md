@@ -2,7 +2,7 @@
 
 ConfigHop is a local network configuration migration workbench. The Firewall path accepts PAN-OS XML, parses a real source inventory, previews manual physical interface mappings, and generates a preservation-first candidate XML through a FastAPI service. The Switch workspace remains a frontend mock.
 
-ConfigHop includes 11 documentation-verified Palo Alto hardware profiles across PA-1400, PA-3200, PA-3400, PA-5200, and PA-5400, alongside a synthetic development profile. PA-3410 and PA-5410 support candidate rendering; the nine new models support source analysis and target analysis only. Candidate validation proves modeled transformations and XML preservation within the implemented scope; it does not prove PAN-OS import or production deployment safety. There is no live firewall connection.
+ConfigHop includes 11 documentation-verified Palo Alto hardware profiles across PA-1400, PA-3200, PA-3400, PA-5200, and PA-5400, alongside a synthetic development profile. PA-3410 and PA-5410 support candidate rendering; the nine new models support source analysis and target analysis only. Candidate validation proves modeled transformations and XML preservation within the implemented scope; it does not prove PAN-OS import or production deployment safety. XML API collection and lab-only staging paths exist, but repository verification has not connected to a live firewall.
 
 ## Run locally
 
@@ -21,7 +21,9 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost. The normal server keeps project state under `backend/.confighop`; deleting a project removes its workspace. Keep the artifact key stable across restarts: losing or changing it makes encrypted target baselines unreadable. Source snapshots and generated candidates are not yet encrypted at rest.
+Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost. The normal server keeps project state under `backend/.confighop`; deleting a project removes its workspace. Keep the artifact key stable across restarts: losing or changing it makes encrypted target baselines, deployable packages, and staging backups unreadable. Source snapshots and generated source candidates are not yet encrypted at rest.
+
+Target staging is fail-closed by default through `CONFIGHOP_DEPLOYMENT_MODE=disabled`. The only enabled mutation mode currently accepted is `lab`, which supports backup, import, load, and full validation but cannot create a commit. Do not enable it or configure real device endpoints until the documented offline implementation gate has passed and a separate lab session is approved.
 
 ## Test
 

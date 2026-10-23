@@ -114,3 +114,24 @@ def test_encrypted_deployable_round_trip_and_tamper_detection(tmp_path):
     path.write_bytes(payload)
     with pytest.raises(ArtifactIntegrityError, match="authentication failed"):
         store.read_deployable(project_id, package_id, digest, max_plaintext_bytes=1024)
+
+
+@pytest.mark.parametrize("kind", ["running", "candidate"])
+def test_encrypted_stage_backup_round_trip_binds_kind_and_detects_tamper(tmp_path, kind):
+    project_id, package_id = identities()
+    digest = hashlib.sha256(PLAINTEXT).hexdigest()
+    store = EncryptedArtifactStore(tmp_path, KEY)
+
+    path = store.write_backup(project_id, package_id, kind, PLAINTEXT, digest)
+
+    assert path.name == f"{kind}.xml.aesgcm"
+    assert PLAINTEXT not in path.read_bytes()
+    assert store.read_backup(project_id, package_id, kind, digest,
+        max_plaintext_bytes=1024) == PLAINTEXT
+    other_kind = "candidate" if kind == "running" else "running"
+    other_path = store.backup_path(project_id, package_id, other_kind)
+    other_path.parent.mkdir(parents=True, exist_ok=True)
+    other_path.write_bytes(path.read_bytes())
+    with pytest.raises(ArtifactIntegrityError, match="authentication failed"):
+        store.read_backup(project_id, package_id, other_kind, digest,
+            max_plaintext_bytes=1024)

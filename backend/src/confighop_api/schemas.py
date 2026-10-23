@@ -110,6 +110,10 @@ class TargetPreflightRequest(TargetBaselineCollectRequest):
     recovery_path_confirmed: bool = False
 
 
+class TargetStageRequest(TargetBaselineCollectRequest):
+    confirmed_target_hostname: str = Field(min_length=1, max_length=128)
+
+
 class TargetPackageReviewRequest(BaseModel):
     confirmed_target_hostname: str = Field(min_length=1, max_length=128)
     accepted_finding_codes: list[str] = Field(default_factory=list, max_length=100)
@@ -123,6 +127,24 @@ class TargetPreflightView(BaseModel):
     checks: dict[str, Literal["CLEAR", "BLOCKED", "NOT_CHECKED"]]
     blockers: list[str] = Field(default_factory=list)
     deployment_allowed: bool = False
+
+
+class TargetStageView(BaseModel):
+    package_id: str
+    status: str
+    running_backup_sha256: str | None = None
+    candidate_backup_sha256: str | None = None
+    loaded_candidate_sha256: str | None = None
+    change_summary_sha256: str | None = None
+    validation_sha256: str | None = None
+    validation_job_id: str | None = None
+    ambiguous_operation: str | None = None
+    commit_created: bool = False
+    message: str
+
+
+class TargetReconcileView(TargetStageView):
+    reconciliation: Literal["CONFIRMED_LOADED", "RUNNING_UNCHANGED", "STILL_AMBIGUOUS", "DRIFTED"]
 
 
 class DeviceIdentityView(BaseModel):

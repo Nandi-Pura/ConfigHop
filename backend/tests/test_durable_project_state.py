@@ -17,10 +17,12 @@ from confighop_api.services import PROFILE_ID, ProjectStore, record_target_basel
 
 FIXTURE = Path(__file__).parent / "fixtures/paloalto/pa_complex_synthetic.xml"
 HEADERS = {"X-ConfigHop-Client": "web"}
+ARTIFACT_KEY = b"durable-state-test-key-32-bytes!"
 
 
 def app_for(root: Path):
-    return create_app(ProjectStore(root / "projects"), audit_path=root / "audit.sqlite3")
+    return create_app(ProjectStore(root / "projects", artifact_key=ARTIFACT_KEY),
+        audit_path=root / "audit.sqlite3")
 
 
 def upload(client, project_id: str, body: bytes):
@@ -290,8 +292,15 @@ def test_state_transitions_are_ordered_durable_and_preserve_frozen_package(tmp_p
         with pytest.raises(ValueError, match="evidence digest is required"):
             database.transition_package(reviewed.package_id, "BACKUP_CAPTURED",
                 expected_input_sha256=reviewed.input_sha256)
+        backup_xml = b"<config><devices><entry name='backup'/></devices></config>"
+        backup_hash = hashlib.sha256(backup_xml).hexdigest()
+        client.app.state.store.artifacts.write_backup(project_id, reviewed.package_id,
+            "running", backup_xml, backup_hash)
+        client.app.state.store.artifacts.write_backup(project_id, reviewed.package_id,
+            "candidate", backup_xml, backup_hash)
         captured = database.transition_package(reviewed.package_id, "BACKUP_CAPTURED",
-            expected_input_sha256=reviewed.input_sha256, evidence_sha256="e" * 64)
+            expected_input_sha256=reviewed.input_sha256, evidence_sha256="e" * 64,
+            running_backup_sha256=backup_hash, candidate_backup_sha256=backup_hash)
         assert captured.backup_sha256 == "e" * 64
         record_target_baseline(project, project.target_baseline.model_copy(update={
             "baseline_id": str(uuid4()), "sha256": "b" * 64}))
@@ -312,7 +321,7 @@ def test_state_transitions_are_ordered_durable_and_preserve_frozen_package(tmp_p
         assert any(event.from_state == "PREFLIGHT_PASSED" and event.to_state == "BACKUP_CAPTURED" and
             event.evidence_sha256 == "e" * 64 for event in events)
         unknown = database.transition_package(reviewed.package_id, "STATUS_UNKNOWN",
-            expected_input_sha256=reviewed.input_sha256)
+            expected_input_sha256=reviewed.input_sha256, ambiguous_operation="IMPORT")
         assert unknown.status == "STATUS_UNKNOWN"
         recovery = database.transition_package(reviewed.package_id, "RECOVERY_REQUESTED",
             expected_input_sha256=reviewed.input_sha256)

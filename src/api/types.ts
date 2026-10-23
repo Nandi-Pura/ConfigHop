@@ -90,7 +90,42 @@ export interface DeploymentPackage {
   target_findings: TargetPackageFinding[]
   review_id: string | null
   review_sha256: string | null
+  running_backup_sha256: string | null
+  candidate_backup_sha256: string | null
+  loaded_candidate_sha256: string | null
+  change_summary_sha256: string | null
+  validation_sha256: string | null
+  validation_job_id: string | null
+  ambiguous_operation: 'IMPORT' | 'LOAD' | 'VALIDATE' | null
   status: string
+}
+
+export interface TargetStage {
+  package_id: string
+  status: string
+  running_backup_sha256: string | null
+  candidate_backup_sha256: string | null
+  loaded_candidate_sha256: string | null
+  change_summary_sha256: string | null
+  validation_sha256: string | null
+  validation_job_id: string | null
+  ambiguous_operation: string | null
+  commit_created: false
+  message: string
+}
+
+export interface TargetReconcile extends TargetStage {
+  reconciliation: 'CONFIRMED_LOADED' | 'RUNNING_UNCHANGED' | 'STILL_AMBIGUOUS' | 'DRIFTED'
+}
+
+export interface Capabilities {
+  domains: {
+    firewall: {
+      panos_target_stage_validate: boolean
+      deployment_mode: 'disabled' | 'lab'
+      [key: string]: boolean | string
+    }
+  }
 }
 
 export interface TargetPreflight {

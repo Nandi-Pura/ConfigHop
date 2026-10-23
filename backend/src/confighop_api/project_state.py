@@ -156,9 +156,14 @@ class DeploymentPackage(BaseModel):
     review_id: str | None = None
     review_sha256: str | None = None
     backup_sha256: str | None = None
+    running_backup_sha256: str | None = None
+    candidate_backup_sha256: str | None = None
     import_sha256: str | None = None
     loaded_candidate_sha256: str | None = None
+    change_summary_sha256: str | None = None
     validation_sha256: str | None = None
+    validation_job_id: str | None = None
+    ambiguous_operation: Literal["IMPORT", "LOAD", "VALIDATE"] | None = None
     approval_sha256: str | None = None
     commit_job_id: str | None = None
     commit_result_sha256: str | None = None
@@ -405,7 +410,10 @@ class ProjectDatabase:
 
     def transition_package(self, package_id: str, to_state: DeploymentStatus, *,
         expected_input_sha256: str, evidence_sha256: str | None = None,
-        job_id: str | None = None) -> DeploymentPackage:
+        job_id: str | None = None, running_backup_sha256: str | None = None,
+        candidate_backup_sha256: str | None = None,
+        change_summary_sha256: str | None = None,
+        ambiguous_operation: Literal["IMPORT", "LOAD", "VALIDATE"] | None = None) -> DeploymentPackage:
         with self.connection:
             package = self.package(package_id)
             if package is None:
@@ -445,6 +453,19 @@ class ProjectDatabase:
                     character not in "0123456789abcdef" for character in evidence_sha256):
                     raise ValueError("A SHA-256 evidence digest is required")
                 setattr(package, evidence_field, evidence_sha256)
+            if to_state == "BACKUP_CAPTURED":
+                if not running_backup_sha256 or not candidate_backup_sha256:
+                    raise ValueError("Running and candidate backup hashes are required")
+                package.running_backup_sha256 = running_backup_sha256
+                package.candidate_backup_sha256 = candidate_backup_sha256
+            if to_state == "CANDIDATE_LOADED":
+                if not change_summary_sha256:
+                    raise ValueError("A change-summary digest is required")
+                package.change_summary_sha256 = change_summary_sha256
+            if to_state == "STATUS_UNKNOWN":
+                if ambiguous_operation is None:
+                    raise ValueError("The ambiguous operation is required")
+                package.ambiguous_operation = ambiguous_operation
             if to_state in {"COMMIT_RUNNING", "RECOVERY_COMMITTING"}:
                 if not job_id or len(job_id) > 128:
                     raise ValueError("A commit job ID is required")
@@ -508,6 +529,22 @@ class ProjectDatabase:
                 evidence_sha256=evidence_sha256)
             return package
 
+    def record_validation_job(self, package_id: str, job_id: str, *,
+        expected_input_sha256: str) -> DeploymentPackage:
+        if not job_id.isdigit() or len(job_id) > 32:
+            raise ValueError("A valid validation job ID is required")
+        with self.connection:
+            package = self.package(package_id)
+            if package is None or package.status != "VALIDATING" or not secrets.compare_digest(
+                package.input_sha256, expected_input_sha256):
+                raise ValueError("Validation package state changed")
+            package.validation_job_id = job_id
+            self.connection.execute("UPDATE deployment_packages SET package_json=? WHERE package_id=?",
+                (package.model_dump_json(), package_id))
+            self._event(package.project_id, package_id, "VALIDATION_JOB_RECORDED", "SUCCEEDED",
+                None, package.input_sha256)
+            return package
+
     def package(self, package_id: str) -> DeploymentPackage | None:
         row = self.connection.execute("SELECT package_json FROM deployment_packages WHERE package_id=?", (package_id,)).fetchone()
         return DeploymentPackage.model_validate_json(row[0]) if row else None
@@ -535,6 +572,16 @@ class ProjectDatabase:
                     raise ValueError("Deployable artifact integrity check failed") from exc
             else:
                 raise ValueError("Deployable artifact integrity check failed")
+        if package.running_backup_sha256 or package.candidate_backup_sha256:
+            if not package.running_backup_sha256 or not package.candidate_backup_sha256 or self.artifacts is None:
+                raise ValueError("Backup artifact metadata is incomplete")
+            try:
+                self.artifacts.read_backup(package.project_id, package.package_id, "running",
+                    package.running_backup_sha256, max_plaintext_bytes=100 * 1024 * 1024)
+                self.artifacts.read_backup(package.project_id, package.package_id, "candidate",
+                    package.candidate_backup_sha256, max_plaintext_bytes=100 * 1024 * 1024)
+            except (ArtifactIntegrityError, ArtifactKeyError) as exc:
+                raise ValueError("Backup artifact integrity check failed") from exc
 
     def events(self, project_id: str) -> list[DeploymentEvent]:
         return [DeploymentEvent.model_validate(dict(row)) for row in self.connection.execute(

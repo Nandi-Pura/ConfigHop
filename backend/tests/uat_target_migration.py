@@ -62,6 +62,13 @@ PACKAGE = {
     ],
     "review_id": None,
     "review_sha256": None,
+    "running_backup_sha256": None,
+    "candidate_backup_sha256": None,
+    "loaded_candidate_sha256": None,
+    "change_summary_sha256": None,
+    "validation_sha256": None,
+    "validation_job_id": None,
+    "ambiguous_operation": None,
     "status": "DRAFT",
 }
 
@@ -71,7 +78,9 @@ def fulfill(route: Route, body, status=200):
 
 
 def main():
-    state = {"baseline": False, "package": False, "reviewed": False, "connection_attempts": 0}
+    state = {"baseline": False, "package": False, "reviewed": False, "staged": False,
+        "ambiguous": False,
+        "connection_attempts": 0}
     request_bodies = []
 
     def api_route(route: Route):
@@ -79,6 +88,9 @@ def main():
         path = request.url.split("/api/v1", 1)[-1]
         if request.post_data:
             request_bodies.append({"path": path, "body": json.loads(request.post_data)})
+        if path == "/capabilities":
+            return fulfill(route, {"domains": {"firewall": {
+                "panos_target_stage_validate": True, "deployment_mode": "lab"}}})
         if path == "/hardware-profiles":
             return fulfill(route, [PROFILE])
         if path == "/evidence":
@@ -127,6 +139,16 @@ def main():
             body = {**PACKAGE}
             if state["reviewed"]:
                 body.update({"review_id": "review-1", "review_sha256": "e" * 64, "status": "PREFLIGHT_PASSED"})
+            if state["staged"]:
+                body.update({"review_id": "review-1", "review_sha256": "e" * 64,
+                    "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                    "loaded_candidate_sha256": "d" * 64, "change_summary_sha256": "3" * 64,
+                    "validation_sha256": "4" * 64, "validation_job_id": "42",
+                    "status": "VALIDATED"})
+            if state["ambiguous"]:
+                body.update({"review_id": "review-1", "review_sha256": "e" * 64,
+                    "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                    "ambiguous_operation": "IMPORT", "status": "STATUS_UNKNOWN"})
             return fulfill(route, body)
         if path == f"/projects/{PROJECT_ID}/target/connection/test":
             state["connection_attempts"] += 1
@@ -151,6 +173,22 @@ def main():
                     "panorama_clear": "CLEAR", "multi_vsys_clear": "CLEAR", "minimum_release": "CLEAR",
                     "capability_matrix": "CLEAR", "recovery_path": "CLEAR", "manual_review": "CLEAR"},
                 "blockers": [], "deployment_allowed": True})
+        if path == f"/projects/{PROJECT_ID}/target/stage":
+            state["staged"] = True
+            return fulfill(route, {"package_id": "package-1", "status": "VALIDATED",
+                "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                "loaded_candidate_sha256": "d" * 64, "change_summary_sha256": "3" * 64,
+                "validation_sha256": "4" * 64, "validation_job_id": "42",
+                "ambiguous_operation": None, "commit_created": False,
+                "message": "Candidate staged and validated. No commit was created."})
+        if path == f"/projects/{PROJECT_ID}/target/stage/reconcile":
+            return fulfill(route, {"package_id": "package-1", "status": "STATUS_UNKNOWN",
+                "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                "loaded_candidate_sha256": "b" * 64, "change_summary_sha256": None,
+                "validation_sha256": None, "validation_job_id": None,
+                "ambiguous_operation": "IMPORT", "commit_created": False,
+                "reconciliation": "STILL_AMBIGUOUS",
+                "message": "The import may exist, but read-only checks cannot prove it. Do not retry automatically."})
         return fulfill(route, {"error": {"code": "UNEXPECTED_UAT_ROUTE", "message": path}}, 500)
 
     with sync_playwright() as playwright:
@@ -212,6 +250,18 @@ def main():
         panel.get_by_text("All implemented offline gates are clear.", exact=False).wait_for()
         assert panel.get_by_label("XML API key").input_value() == ""
 
+        panel.get_by_label("Management IP").fill("192.0.2.20")
+        panel.get_by_label("XML API key").fill("request-only-key-3")
+        panel.get_by_role("button", name="Test Target Connection").click()
+        panel.locator(".target-identity").get_by_text("target-fw", exact=True).wait_for()
+        panel.get_by_label("Type STAGE", exact=False).fill("STAGE target-fw")
+        stage_button = panel.get_by_role("button", name="Stage and Validate Candidate")
+        assert stage_button.is_enabled()
+        stage_button.click()
+        panel.get_by_text("Candidate validated, commit not created", exact=True).wait_for()
+        panel.get_by_text("Staging complete", exact=True).wait_for()
+        assert panel.get_by_label("XML API key").input_value() == ""
+
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(100)
         overflow = panel.evaluate("element => element.scrollWidth - element.clientWidth")
@@ -221,11 +271,40 @@ def main():
         assert not console_errors, console_errors
         assert any(item["path"].endswith("/target/package/review") and item["body"]["confirmed_target_hostname"] == "target-fw" for item in request_bodies)
         assert any(item["path"].endswith("/target/preflight/check") and item["body"]["recovery_path_confirmed"] is True for item in request_bodies)
+        assert any(item["path"].endswith("/target/stage") and item["body"]["confirmed_target_hostname"] == "target-fw" for item in request_bodies)
         assert "request-only-key" not in json.dumps(PACKAGE)
+
+        state.update({"staged": False, "ambiguous": True})
+        ambiguous_page = context.new_page()
+        ambiguous_page.on("pageerror", lambda error: page_errors.append(str(error)))
+        ambiguous_page.on("console", lambda message: console_errors.append(message.text)
+            if message.type == "error" and not message.text.startswith("Failed to load resource") else None)
+        ambiguous_page.route("**/api/v1/**", api_route)
+        ambiguous_page.add_init_script("""localStorage.setItem('confighop-project', JSON.stringify({
+            project_id: 'uat-target-project', project_name: 'Target UAT', source_filename: null,
+            target_profile_id: 'paloalto-pa-5410', mappings: []
+        }))""")
+        ambiguous_page.goto("http://127.0.0.1:5174/", wait_until="networkidle")
+        ambiguous_page.get_by_label("Target vendor").select_option(label="Palo Alto Networks")
+        ambiguous_page.get_by_role("button", name="Load Project", exact=True).click()
+        ambiguous_panel = ambiguous_page.locator("section", has_text="Target Migration Review")
+        ambiguous_panel.get_by_text("Device result is unknown", exact=True).wait_for()
+        ambiguous_panel.get_by_label("Management IP").fill("192.0.2.20")
+        ambiguous_panel.get_by_label("XML API key").fill("request-only-key-4")
+        ambiguous_panel.get_by_role("button", name="Test Target Connection").click()
+        ambiguous_panel.locator(".target-identity").get_by_text("target-fw", exact=True).wait_for()
+        ambiguous_panel.get_by_role("button", name="Run Read-only Reconciliation").click()
+        ambiguous_panel.get_by_text("Still Ambiguous", exact=True).wait_for()
+        assert ambiguous_panel.get_by_text("Do not retry automatically.", exact=False).is_visible()
+        assert ambiguous_panel.get_by_label("XML API key").input_value() == ""
+        assert sum(item["path"].endswith("/target/stage") for item in request_bodies) == 1
+        assert sum(item["path"].endswith("/target/stage/reconcile") for item in request_bodies) == 1
+        ambiguous_page.close()
         print(json.dumps({"target_ui_flow": "passed", "empty_loading_error_success": True,
             "keyboard_focus": True, "mobile_overflow_px": overflow, "page_errors": page_errors,
             "console_errors": console_errors, "expected_http_failures": expected_http_failures,
-            "api_requests": len(request_bodies)}))
+            "stage_validate": True, "ambiguous_reconcile": True, "blind_retry": False,
+            "commit_created": False, "api_requests": len(request_bodies)}))
         context.close()
         browser.close()
 

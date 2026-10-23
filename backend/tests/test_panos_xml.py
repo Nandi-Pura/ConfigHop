@@ -5,8 +5,9 @@ import httpx
 import pytest
 
 from confighop_api.panos_xml import (
-    XmlApiError, create_source_client, export_configuration, read_running_configuration,
-    read_system_info,
+    XmlApiError, create_source_client, export_configuration, import_configuration,
+    load_configuration, read_job, read_running_configuration, read_system_info,
+    validate_full,
 )
 
 
@@ -247,3 +248,80 @@ def test_system_info_rejects_bad_response_without_exposing_body(document, code):
         asyncio.run(run())
     assert error.value.code == code
     assert "secret" not in str(error.value)
+
+
+def test_import_uses_multipart_header_key_and_generated_filename():
+    seen: list[httpx.Request] = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=(
+            b'<response status="success" code="19"><result><msg><line>'
+            b'Configuration imported</line></msg></result></response>'))
+
+    async def run():
+        async with httpx.AsyncClient(base_url="https://target.example.test/",
+            transport=httpx.MockTransport(responder)) as client:
+            return await import_configuration(client, "test-secret",
+                filename="confighop-12345678-1234-1234-1234-123456789abc.xml",
+                content=b"<config><devices><entry/></devices></config>")
+
+    receipt = asyncio.run(run())
+    request = seen[0]
+    assert receipt.job_id is None
+    assert request.headers["X-PAN-KEY"] == "test-secret"
+    assert "multipart/form-data" in request.headers["content-type"]
+    assert b'name="type"' in request.content and b"import" in request.content
+    assert b'filename="confighop-12345678-1234-1234-1234-123456789abc.xml"' in request.content
+    assert "test-secret" not in str(request.url)
+
+
+def test_load_validate_and_job_poll_use_expected_operational_commands():
+    responses = iter([
+        b'<response status="success"><result><msg><line>Config loaded</line></msg></result></response>',
+        b'<response status="success"><result><job>42</job></result></response>',
+        b'<response status="success"><result><job><id>42</id><status>FIN</status>'
+        b'<result>OK</result></job></result></response>',
+    ])
+    commands: list[str] = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        commands.append(dict(httpx.QueryParams(request.content.decode()))["cmd"])
+        return httpx.Response(200, content=next(responses))
+
+    async def run():
+        async with httpx.AsyncClient(base_url="https://target.example.test/",
+            transport=httpx.MockTransport(responder)) as client:
+            loaded = await load_configuration(client, "secret",
+                filename="confighop-12345678-1234-1234-1234-123456789abc.xml")
+            validation = await validate_full(client, "secret")
+            job = await read_job(client, "secret", "42")
+            return loaded, validation, job
+
+    loaded, validation, job = asyncio.run(run())
+    assert loaded.job_id is None
+    assert validation.job_id == "42"
+    assert job.state == "SUCCEEDED"
+    assert commands == [
+        "<load><config><from>confighop-12345678-1234-1234-1234-123456789abc.xml</from></config></load>",
+        "<validate><full></full></validate>",
+        "<show><jobs><id>42</id></jobs></show>",
+    ]
+
+
+@pytest.mark.parametrize("document,code", [
+    (b'<response status="error"><msg>private</msg></response>', "XML_API_VALIDATION_FAILED"),
+    (b'<response status="success"><result/></response>', "XML_API_INVALID_VALIDATION"),
+    (b'<response status="success"><result><job>not-a-job</job></result></response>',
+        "XML_API_INVALID_VALIDATION"),
+])
+def test_validate_full_rejects_failed_or_ambiguous_response(document, code):
+    async def run():
+        async with httpx.AsyncClient(base_url="https://target.example.test/",
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=document))) as client:
+            await validate_full(client, "secret")
+
+    with pytest.raises(XmlApiError) as error:
+        asyncio.run(run())
+    assert error.value.code == code
+    assert "private" not in str(error.value)

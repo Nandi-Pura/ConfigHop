@@ -31,14 +31,16 @@ from .schemas import (
     CandidateMetadata, DependencySummary, InventorySummary, InventoryView, PhysicalInterfaceView,
     DeviceIdentityView, PlatformView, ProfileDetail, ProfileSummary, ProjectView,
     SourceConnectionTestView, SourceProvenance, SourceView, TargetPreflightView,
+    TargetReconcileView, TargetStageView,
 )
 from .artifacts import (
     ARTIFACT_FORMAT, ArtifactIntegrityError, ArtifactKeyError, EncryptedArtifactStore,
 )
 from .panos_xml import (
     XmlApiError, create_source_client, create_target_client, export_configuration,
-    read_candidate_configuration, read_preflight_probe, read_running_configuration,
-    read_system_info,
+    import_configuration, load_configuration, read_candidate_configuration,
+    read_change_summary, read_job, read_preflight_probe, read_running_configuration,
+    read_system_info, validate_full,
 )
 from .project_state import (
     DeploymentPackage, DeviceIdentity, ProjectDatabase, SourceSnapshot, TargetBaseline,
@@ -857,6 +859,257 @@ async def check_target_preflight(store: ProjectStore, project: ProjectSession, *
         return await check_target_preflight_from_client(store, project, client, api_key,
             expected_serial=expected_serial, expected_model=expected_model,
             recovery_path_confirmed=recovery_path_confirmed)
+
+
+def _evidence_digest(**values: str) -> str:
+    payload = "\n".join(f"{key}={values[key]}" for key in sorted(values))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _stage_view(package: DeploymentPackage, message: str) -> TargetStageView:
+    return TargetStageView(package_id=package.package_id, status=package.status,
+        running_backup_sha256=package.running_backup_sha256,
+        candidate_backup_sha256=package.candidate_backup_sha256,
+        loaded_candidate_sha256=package.loaded_candidate_sha256,
+        change_summary_sha256=package.change_summary_sha256,
+        validation_sha256=package.validation_sha256,
+        validation_job_id=package.validation_job_id,
+        ambiguous_operation=package.ambiguous_operation,
+        message=message)
+
+
+def _transition_stage_error(store: ProjectStore, package: DeploymentPackage,
+    operation: str, exc: XmlApiError, *, force_ambiguous: bool = False) -> None:
+    ambiguous = force_ambiguous or exc.code in {
+        "XML_API_TIMEOUT", "XML_API_TRANSPORT_ERROR", "XML_API_HTTP_ERROR",
+        "XML_API_REDIRECT", "XML_API_INVALID_IMPORT", "XML_API_INVALID_LOAD",
+        "XML_API_INVALID_VALIDATION", "XML_API_INVALID_JOB", "XML_API_JOB_FAILED",
+    }
+    try:
+        store.database.transition_package(package.package_id,
+            "STATUS_UNKNOWN" if ambiguous else "FAILED_SAFE",
+            expected_input_sha256=package.input_sha256,
+            ambiguous_operation=operation if ambiguous else None)
+    except ValueError:
+        pass
+
+
+async def stage_target_package_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str,
+    expected_model: str, confirmed_target_hostname: str,
+    poll_interval_seconds: float = 2.0, max_poll_attempts: int = 60) -> TargetStageView:
+    async with project.lock:
+        package = store.database.package(project.active_package_id) if project.active_package_id else None
+        baseline = project.target_baseline
+        if package is None or baseline is None:
+            raise ServiceError("TARGET_PACKAGE_NOT_AVAILABLE", "Build and review a target package first.", 409)
+        if package.status != "PREFLIGHT_PASSED":
+            raise ServiceError("TARGET_STAGE_GATE_BLOCKED",
+                "The active package must pass the final preflight before staging.", 409)
+        if (expected_serial, expected_model, confirmed_target_hostname) != (
+            baseline.serial, baseline.model, baseline.hostname):
+            raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+                "Confirmed target identity differs from the collected baseline.", 409)
+        try:
+            store.database.verify_package_artifacts(package)
+            deployable = store.artifacts.read_deployable(project.project_id, package.package_id,
+                package.deployable_candidate_sha256 or "", max_plaintext_bytes=store.max_source_bytes)
+        except (ValueError, ArtifactIntegrityError, ArtifactKeyError):
+            raise ServiceError("PACKAGE_INTEGRITY_FAILED",
+                "Deployment package artifact integrity check failed.", 409) from None
+
+        try:
+            identity = await read_system_info(client, api_key)
+            running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if (identity.serial, identity.model, identity.hostname, identity.panos_version) != (
+            baseline.serial, baseline.model, baseline.hostname, baseline.panos_version):
+            raise ServiceError("TARGET_IDENTITY_DRIFT", "Target identity changed after preflight.", 409)
+        running_sha256 = hashlib.sha256(running).hexdigest()
+        candidate_sha256 = hashlib.sha256(candidate).hexdigest()
+        if running_sha256 != baseline.sha256 or candidate != running:
+            raise ServiceError("TARGET_STATE_DRIFT",
+                "Running or candidate configuration changed after preflight.", 409)
+
+        try:
+            store.artifacts.write_backup(project.project_id, package.package_id, "running",
+                running, running_sha256)
+            store.artifacts.write_backup(project.project_id, package.package_id, "candidate",
+                candidate, candidate_sha256)
+            backup_digest = _evidence_digest(running=running_sha256, candidate=candidate_sha256)
+            package = store.database.transition_package(package.package_id, "BACKUP_CAPTURED",
+                expected_input_sha256=package.input_sha256, evidence_sha256=backup_digest,
+                running_backup_sha256=running_sha256,
+                candidate_backup_sha256=candidate_sha256)
+        except (ArtifactIntegrityError, ArtifactKeyError, ValueError) as exc:
+            store.artifacts.delete_backups(project.project_id, package.package_id)
+            raise ServiceError("TARGET_BACKUP_FAILED",
+                "Encrypted running and candidate backups could not be captured.", 409) from exc
+
+        filename = f"confighop-{package.package_id}.xml"
+        try:
+            imported = await import_configuration(client, api_key, filename=filename, content=deployable)
+            package = store.database.transition_package(package.package_id, "IMPORTED",
+                expected_input_sha256=package.input_sha256,
+                evidence_sha256=imported.response_sha256)
+        except asyncio.CancelledError:
+            _transition_stage_error(store, package, "IMPORT",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "The staging request was interrupted."))
+            raise
+        except XmlApiError as exc:
+            _transition_stage_error(store, package, "IMPORT", exc)
+            raise xml_api_service_error(exc) from None
+
+        try:
+            await load_configuration(client, api_key, filename=filename)
+        except asyncio.CancelledError:
+            _transition_stage_error(store, package, "LOAD",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "The staging request was interrupted."))
+            raise
+        except XmlApiError as exc:
+            _transition_stage_error(store, package, "LOAD", exc)
+            raise xml_api_service_error(exc) from None
+        try:
+            loaded = await read_candidate_configuration(client, api_key,
+                max_bytes=store.max_source_bytes)
+            change_summary = await read_change_summary(client, api_key)
+        except asyncio.CancelledError:
+            _transition_stage_error(store, package, "LOAD",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "The staging request was interrupted."),
+                force_ambiguous=True)
+            raise
+        except XmlApiError as exc:
+            _transition_stage_error(store, package, "LOAD", exc, force_ambiguous=True)
+            raise xml_api_service_error(exc) from None
+        loaded_sha256 = hashlib.sha256(loaded).hexdigest()
+        if loaded != deployable or not change_summary:
+            try:
+                store.database.transition_package(package.package_id, "FAILED_SAFE",
+                    expected_input_sha256=package.input_sha256)
+            except ValueError:
+                pass
+            raise ServiceError("TARGET_LOADED_CANDIDATE_MISMATCH",
+                "Loaded candidate or device change summary does not match the reviewed package.", 409)
+        change_summary_sha256 = hashlib.sha256(change_summary).hexdigest()
+        try:
+            package = store.database.transition_package(package.package_id, "CANDIDATE_LOADED",
+                expected_input_sha256=package.input_sha256, evidence_sha256=loaded_sha256,
+                change_summary_sha256=change_summary_sha256)
+            package = store.database.transition_package(package.package_id, "VALIDATING",
+                expected_input_sha256=package.input_sha256)
+        except ValueError as exc:
+            raise ServiceError("TARGET_STAGE_STATE_CHANGED",
+                "Package state changed while staging.", 409) from exc
+
+        try:
+            validation = await validate_full(client, api_key)
+            validation_sha256 = validation.response_sha256
+            if validation.job_id:
+                package = store.database.record_validation_job(package.package_id,
+                    validation.job_id, expected_input_sha256=package.input_sha256)
+                for _ in range(max_poll_attempts):
+                    job = await read_job(client, api_key, validation.job_id)
+                    validation_sha256 = job.response_sha256
+                    if job.state == "SUCCEEDED":
+                        break
+                    if job.state == "FAILED":
+                        raise XmlApiError("XML_API_VALIDATION_FAILED",
+                            "The target rejected the staged candidate during validation.")
+                    await asyncio.sleep(poll_interval_seconds)
+                else:
+                    raise XmlApiError("XML_API_TIMEOUT", "Validation job did not finish before the polling limit.")
+            package = store.database.transition_package(package.package_id, "VALIDATED",
+                expected_input_sha256=package.input_sha256,
+                evidence_sha256=validation_sha256)
+        except asyncio.CancelledError:
+            _transition_stage_error(store, package, "VALIDATE",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "The staging request was interrupted."))
+            raise
+        except XmlApiError as exc:
+            _transition_stage_error(store, package, "VALIDATE", exc)
+            raise xml_api_service_error(exc) from None
+        return _stage_view(package,
+            "Candidate staged and validated. No commit was created; manual commit approval is still required.")
+
+
+async def stage_target_package(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, confirmed_target_hostname: str,
+    allowed_endpoints: set[tuple[str, int]]) -> TargetStageView:
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await stage_target_package_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model,
+            confirmed_target_hostname=confirmed_target_hostname)
+
+
+async def reconcile_target_stage_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str,
+    expected_model: str) -> TargetReconcileView:
+    async with project.lock:
+        package = store.database.package(project.active_package_id) if project.active_package_id else None
+        baseline = project.target_baseline
+        if package is None or baseline is None or package.status != "STATUS_UNKNOWN":
+            raise ServiceError("TARGET_RECONCILIATION_NOT_REQUIRED",
+                "Read-only reconciliation is available only for an ambiguous staging result.", 409)
+        if (expected_serial, expected_model) != (baseline.serial, baseline.model):
+            raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+                "Confirmed target identity differs from the collected baseline.", 409)
+        try:
+            store.database.verify_package_artifacts(package)
+            deployable = store.artifacts.read_deployable(project.project_id, package.package_id,
+                package.deployable_candidate_sha256 or "", max_plaintext_bytes=store.max_source_bytes)
+            identity = await read_system_info(client, api_key)
+            running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            change_summary = await read_change_summary(client, api_key)
+        except (ValueError, ArtifactIntegrityError, ArtifactKeyError):
+            raise ServiceError("PACKAGE_INTEGRITY_FAILED",
+                "Deployment package artifact integrity check failed.", 409) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        observed_sha256 = hashlib.sha256(candidate).hexdigest()
+        running_sha256 = hashlib.sha256(running).hexdigest()
+        if (identity.serial, identity.model, identity.hostname, identity.panos_version) != (
+            baseline.serial, baseline.model, baseline.hostname, baseline.panos_version
+        ) or running_sha256 != baseline.sha256:
+            reconciliation = "DRIFTED"
+            message = "Target identity or running configuration changed. Stop and investigate manually."
+        elif candidate == deployable and change_summary:
+            reconciliation = "CONFIRMED_LOADED"
+            message = "Read-only evidence confirms the reviewed candidate is loaded. No retry or commit was performed."
+        elif candidate == running:
+            reconciliation = ("STILL_AMBIGUOUS" if package.ambiguous_operation == "IMPORT"
+                else "RUNNING_UNCHANGED")
+            message = ("The candidate remains unchanged, but import persistence cannot be proven read-only. Do not retry automatically."
+                if reconciliation == "STILL_AMBIGUOUS" else
+                "The candidate still matches running configuration. No commit was performed.")
+        else:
+            reconciliation = "DRIFTED"
+            message = "Candidate state differs from both backup and reviewed package. Stop and investigate manually."
+        view = _stage_view(package, message)
+        values = view.model_dump()
+        values["loaded_candidate_sha256"] = observed_sha256
+        values["change_summary_sha256"] = (hashlib.sha256(change_summary).hexdigest()
+            if change_summary else None)
+        return TargetReconcileView(**values, reconciliation=reconciliation)
+
+
+async def reconcile_target_stage(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, allowed_endpoints: set[tuple[str, int]]) -> TargetReconcileView:
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await reconcile_target_stage_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model)
 
 
 def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:

@@ -18,7 +18,7 @@ from .schemas import (
     PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest,
     SourceCollectRequest, SourceConnectionRequest, SourceConnectionTestView, SourceProvenance, SourceView,
     TargetBaselineCollectRequest, TargetPackageReviewRequest, TargetPreflightRequest,
-    TargetPreflightView,
+    TargetPreflightView, TargetReconcileView, TargetStageRequest, TargetStageView,
 )
 from .services import (
     PROFILE_ID, ProjectStore, ServiceError, build_target_deployment_package,
@@ -26,7 +26,7 @@ from .services import (
     generate_candidate, inventory_view,
     profile_detail, profile_summary, project_deployment_plan, project_view, require_inventory, require_live, select_profile,
     review_target_deployment_package, select_source_profile, assess_project, test_source_connection,
-    update_preview, upload_source,
+    update_preview, upload_source, stage_target_package, reconcile_target_stage,
 )
 from .panos_xml import XmlApiError, normalize_source_endpoint
 from .access_audit import AuditStore, ProjectAccess, SESSION_COOKIE, SESSION_SECONDS
@@ -77,7 +77,7 @@ def _source_endpoints(value: str) -> set[tuple[str, int]]:
 def create_app(store: ProjectStore | None = None, *,
     allowed_source_endpoints: set[tuple[str, int]] | None = None,
     allowed_target_endpoints: set[tuple[str, int]] | None = None,
-    audit_path: Path | None = None) -> FastAPI:
+    audit_path: Path | None = None, deployment_mode: str | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = store if store is not None else ProjectStore(
@@ -87,6 +87,9 @@ def create_app(store: ProjectStore | None = None, *,
             else _source_endpoints(os.getenv("CONFIGHOP_SOURCE_ENDPOINTS", "")))
         app.state.allowed_target_endpoints = (allowed_target_endpoints if allowed_target_endpoints is not None
             else _allowed_endpoints(os.getenv("CONFIGHOP_TARGET_ENDPOINTS", ""), "CONFIGHOP_TARGET_ENDPOINTS"))
+        app.state.deployment_mode = deployment_mode or os.getenv("CONFIGHOP_DEPLOYMENT_MODE", "disabled")
+        if app.state.deployment_mode not in {"disabled", "lab"}:
+            raise ValueError("CONFIGHOP_DEPLOYMENT_MODE must be disabled or lab.")
         app.state.access = ProjectAccess(app.state.store.database)
         app.state.audit = AuditStore(audit_path or Path(os.getenv("CONFIGHOP_AUDIT_DB",
             str(store.data_dir / "audit.sqlite3") if store else ".confighop/audit.sqlite3")))
@@ -146,7 +149,9 @@ def create_app(store: ProjectStore | None = None, *,
             ("POST", "target/baseline/collect"): "TARGET_BASELINE_COLLECT",
             ("POST", "target/package/build"): "TARGET_PACKAGE_BUILD",
             ("POST", "target/package/review"): "TARGET_PACKAGE_REVIEW",
-            ("POST", "target/preflight/check"): "TARGET_PREFLIGHT_CHECK"}.get((request.method, suffix))
+            ("POST", "target/preflight/check"): "TARGET_PREFLIGHT_CHECK",
+            ("POST", "target/stage"): "TARGET_STAGE",
+            ("POST", "target/stage/reconcile"): "TARGET_STAGE_RECONCILE"}.get((request.method, suffix))
         audit = request.app.state.audit
         digest = project.source_provenance.sha256 if project.source_provenance else None
         if not request.app.state.access.allows(project_id, token):
@@ -210,7 +215,10 @@ def create_app(store: ProjectStore | None = None, *,
             "panos_xml_api_collect": bool(request.app.state.allowed_source_endpoints),
             "panos_target_baseline_collect": bool(request.app.state.allowed_target_endpoints),
             "panos_target_package_builder": request.app.state.store.artifacts.available,
-            "panos_target_read_only_preflight": bool(request.app.state.allowed_target_endpoints)},
+            "panos_target_read_only_preflight": bool(request.app.state.allowed_target_endpoints),
+            "panos_target_stage_validate": (request.app.state.deployment_mode == "lab" and
+                bool(request.app.state.allowed_target_endpoints)),
+            "deployment_mode": request.app.state.deployment_mode},
             "switch": {"backend_enabled": False}},
             "verified_hardware_profiles": [p.id for p in profiles if p.profile_status == "verified"],
             "synthetic_hardware_profiles": [p.id for p in profiles if p.profile_status == "synthetic"],
@@ -330,6 +338,29 @@ def create_app(store: ProjectStore | None = None, *,
             ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
             expected_model=body.expected_model,
             recovery_path_confirmed=body.recovery_path_confirmed,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
+
+    @app.post("/api/v1/projects/{project_id}/target/stage", response_model=TargetStageView)
+    async def post_stage_target(project_id: str, body: TargetStageRequest, request: Request):
+        if request.app.state.deployment_mode != "lab":
+            raise ServiceError("LIVE_DEPLOYMENT_DISABLED",
+                "Target staging is disabled. Set CONFIGHOP_DEPLOYMENT_MODE=lab only for an approved lab.", 403)
+        return await stage_target_package(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
+            expected_model=body.expected_model,
+            confirmed_target_hostname=body.confirmed_target_hostname,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
+
+    @app.post("/api/v1/projects/{project_id}/target/stage/reconcile", response_model=TargetReconcileView)
+    async def post_reconcile_target_stage(project_id: str, body: TargetStageRequest, request: Request):
+        if request.app.state.deployment_mode != "lab":
+            raise ServiceError("LIVE_DEPLOYMENT_DISABLED",
+                "Target reconciliation is disabled outside approved lab mode.", 403)
+        return await reconcile_target_stage(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
+            expected_model=body.expected_model,
             allowed_endpoints=request.app.state.allowed_target_endpoints)
 
     async def xml_stream(project, path: Path):
