@@ -76,6 +76,18 @@ test('same-vendor evidence dialog keeps keyboard focus and collapsed actions nam
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
   t.after(() => page.close())
   await page.goto(url)
+  const headerGeometry = async () => page.evaluate(() => {
+    const header = document.querySelector('.app-header')?.getBoundingClientRect()
+    const button = [...document.querySelectorAll('.app-header button')].find(item => item.textContent?.includes('Cross-vendor Firewall'))?.getBoundingClientRect()
+    const title = document.querySelector('.firewall-workspace h1')?.getBoundingClientRect()
+    if (!header || !button || !title) return null
+    return { header: { top: header.top, bottom: header.bottom }, button: { top: button.top, bottom: button.bottom, width: button.width, height: button.height }, title: { top: title.top, width: title.width, height: title.height }, overlap: Math.max(0, Math.min(button.right, title.right) - Math.max(button.left, title.left)) * Math.max(0, Math.min(button.bottom, title.bottom) - Math.max(button.top, title.top)), overflow: document.documentElement.scrollWidth > innerWidth }
+  })
+  const mobile = await headerGeometry()
+  assert.ok(mobile?.button.width && mobile.button.height && mobile.title.width && mobile.title.height)
+  assert.equal(mobile.overlap, 0, `Header button overlaps title: ${JSON.stringify(mobile)}`)
+  assert.ok(mobile.button.top >= mobile.header.top && mobile.button.bottom <= mobile.header.bottom)
+  assert.equal(mobile.overflow, false)
   await page.getByRole('button', { name: 'Collapse sidebar' }).click()
   assert.equal(await page.getByRole('button', { name: 'New Project' }).count(), 1)
   assert.equal(await page.getByRole('button', { name: 'Save Project' }).count(), 1)
@@ -93,6 +105,7 @@ test('same-vendor evidence dialog keeps keyboard focus and collapsed actions nam
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
   await page.setViewportSize({ width: 768, height: 900 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  assert.equal((await headerGeometry())?.overlap, 0)
 })
 
 test('supported Firewall preview refreshes automatically and invalidates the old export', { timeout: 30000 }, async t => {
