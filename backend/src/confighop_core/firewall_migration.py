@@ -51,11 +51,40 @@ def validate_firewall(ir: FirewallIR, target: Vendor, mappings: FirewallMappings
         if set(mapping) - source_names:
             findings.append(_finding('UNKNOWN_MAPPING', f'{label} mapping refers to unknown source identities.'))
         assigned = [_name(item.name, mapping) for item in source]
-        for name, count in Counter(assigned).items():
-            if count > 1:
-                findings.append(_finding('NAME_COLLISION', f'{label} target name is repeated.', name))
+        collisions = {name for name, count in Counter(value.strip().casefold() for value in assigned).items() if count > 1}
+        for item in source:
+            if _name(item.name, mapping).strip().casefold() in collisions:
+                findings.append(_finding('NAME_COLLISION', f'{label} target name is repeated: {_name(item.name, mapping)}.', item.name))
+        if label in {'interface', 'zone', 'address', 'service'} or (label == 'NAT' and target == 'fortios'):
+            reserved = {'any'} if target == 'panos' else ({'any'} if label in {'interface', 'zone'} else {'all'})
+            if target == 'panos' and label == 'service':
+                reserved.add('application-default')
+            for item in source:
+                name = _name(item.name, mapping)
+                if name.strip().casefold() in reserved or item.name.strip().casefold() in {'any', 'all'}:
+                    references = [resource.name for resource in [*ir.policies, *ir.nat, *ir.address_groups, *ir.service_groups, *ir.zones]
+                        if item.name in resource.dependencies and resource is not item]
+                    related = f' References: {", ".join(references[:5])}.' if references else ''
+                    findings.append(_finding('RESERVED_TARGET_IDENTITY',
+                        f'{label} {item.name} resolves ambiguously to {name}; dependent references may broaden.{related}', item.name))
+        for name in assigned:
             if not (_INTERFACE_NAME if label == 'interface' else _NAME).fullmatch(name):
                 findings.append(_finding('INVALID_NAME', f'{label} target name is outside the conservative portable subset.', name))
+    if target == 'fortios':
+        addresses_by_target: dict[str, list[tuple[str, str]]] = {}
+        for kind, items in [('address', ir.addresses), ('address group', ir.address_groups)]:
+            for item in items:
+                name = _name(item.name, mappings.addresses)
+                addresses_by_target.setdefault(name.strip().casefold(), []).append((kind, item.name))
+        for nat in ir.nat:
+            if nat.kind != 'dnat':
+                continue
+            name = _name(nat.name, mappings.nat)
+            for kind, source in addresses_by_target.get(name.strip().casefold(), []):
+                policy = f'; policy {nat.related_policy} destination' if nat.related_policy else ''
+                findings.append(_finding('FORTIOS_VIP_ADDRESS_NAME_COLLISION',
+                    f'FortiOS VIP {nat.name} and {kind} {source} resolve to target name {name}{policy}; '
+                    'choose distinct target identities.', nat.name))
     interface_names = {item.name for item in ir.interfaces}
     zone_names = {item.name for item in ir.zones}
     address_names = {item.name for item in ir.addresses + ir.address_groups}
@@ -128,6 +157,10 @@ def validate_firewall(ir: FirewallIR, target: Vendor, mappings: FirewallMappings
         if policy.nat and not any(n.related_policy == policy.name for n in ir.nat):
             findings.append(_finding('NAT_DEPENDENCY', 'Policy SNAT has no safe translated NAT rule.', policy.name))
     for nat in ir.nat:
+        if (target == 'fortios' and nat.kind == 'dnat' and nat.translated_port is not None
+                and not any(f.code == 'UNSUPPORTED_DNAT_TRANSLATED_PORT' and f.entity == nat.name for f in findings)):
+            findings.append(_finding('UNSUPPORTED_DNAT_TRANSLATED_PORT',
+                f'DNAT {nat.name} translates destination port to {nat.translated_port}; FortiOS port forwarding is not verified.', nat.name))
         if nat.kind not in {'dipp', 'dnat'}:
             findings.append(_finding('NAT_KIND', 'NAT kind is unsupported.', nat.name))
         if not nat.translated_address:
@@ -176,6 +209,9 @@ def validate_firewall(ir: FirewallIR, target: Vendor, mappings: FirewallMappings
                 findings.append(_finding('MISSING_REFERENCE', 'NAT zone is unresolved.', nat.name))
         findings.append(_finding('NAT_REVIEW', 'Verify packet-flow, pre/post-NAT zone lookup and policy order on target hardware.', nat.name, 'REVIEW_REQUIRED'))
     for route in ir.routes:
+        if target == 'fortios' and route.router != 'default':
+            findings.append(_finding('UNSUPPORTED_ROUTING_CONTEXT',
+                f'Route {route.name} belongs to virtual router {route.router}; no routing-context mapping is verified.', route.name))
         if route.interface and route.interface not in interface_names:
             findings.append(_finding('MISSING_INTERFACE', 'Static route interface is missing.', route.name))
         elif route.interface and route.interface not in mappings.interfaces:

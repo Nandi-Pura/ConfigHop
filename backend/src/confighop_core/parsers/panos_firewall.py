@@ -44,6 +44,32 @@ def parse_panos_firewall(source: str, version: str) -> FirewallIR:
                     if child.tag not in {'security', 'nat'}:
                         ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_SECTION', message=f'Unsupported PAN-OS rulebase section {child.tag}.', entity=vsys.get('name', '')))
     ir.source_scope = inventory.vsys_names[0] if inventory.vsys_names else 'vsys1'
+    routers = inventory.virtual_routers
+    if len(routers) > 1 or (routers and routers[0].name != 'default'):
+        for router in routers:
+            ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_ROUTING_CONTEXT',
+                message=f'Virtual router {router.name} cannot be mapped to one FortiOS routing table; review its interfaces and routes.',
+                entity=router.name))
+        for route in inventory.static_routes:
+            ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_ROUTING_CONTEXT',
+                message=f'Route {route.name} belongs to virtual router {route.virtual_router}; routing-table flattening is unsupported.',
+                entity=route.name))
+    for obj in [*inventory.physical_interfaces, *inventory.aggregate_interfaces, *inventory.subinterfaces]:
+        if len(set(obj.ip_addresses)) > 1:
+            ir.findings.append(Finding(severity='BLOCKED', code='MULTIPLE_INTERFACE_ADDRESSES',
+                message=f'Interface {obj.name} has multiple distinct addresses; secondary addressing is not verified for FortiOS.', entity=obj.name))
+    for obj in [*inventory.vlan_interfaces, *inventory.loopback_interfaces]:
+        ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_INTERFACE_KIND',
+            message=f'Interface {obj.name} is not represented by the bounded FortiOS adapter.', entity=obj.name))
+    aggregate_entries = root.findall('./devices/entry/network/interface/aggregate-ethernet/entry')
+    for entry in root.findall('./devices/entry/network/interface/ethernet/entry') + aggregate_entries:
+        if entry in aggregate_entries and entry.find('./layer3/units/entry') is not None:
+            ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_INTERFACE_KIND',
+                message=f'Aggregate {entry.get("name", "")} has subinterfaces omitted by the bounded adapter.', entity=entry.get('name', '')))
+        for node in [entry, *entry.findall('./layer3/units/entry')]:
+            if node.find('./layer3/dhcp-client') is not None or node.find('./layer3/ipv6') is not None or node.find('ipv6') is not None or node.find('dhcp-client') is not None:
+                ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_INTERFACE_ADDRESSING',
+                    message='Dynamic or IPv6 interface addressing has no verified FortiOS translation.', entity=node.get('name', '')))
     for obj in inventory.address_objects:
         ir.addresses.append(Address(name=obj.name, scope=obj.scope.name or obj.scope.type, kind=obj.kind, value=obj.value or ''))
     for obj in inventory.service_objects:
@@ -130,6 +156,9 @@ def parse_panos_firewall(source: str, version: str) -> FirewallIR:
             elif dnat is not None and _text(dnat, 'translated-address') and entry.find('source-translation') is None:
                 ir.nat.append(Nat(kind='dnat', translated_address=_text(dnat, 'translated-address'),
                     translated_port=_text(dnat, 'translated-port') or None, **common))
+                if dnat.find('translated-port') is not None:
+                    ir.findings.append(Finding(severity='BLOCKED', code='UNSUPPORTED_DNAT_TRANSLATED_PORT',
+                        message=f'DNAT {name} specifies a translated destination port; FortiOS port forwarding is not verified.', entity=name))
             else:
                 ir.findings.append(Finding(severity='BLOCKED', code='PANOS_NAT', message='NAT form requires manual migration.', entity=name))
     for warning in inventory.warnings:
