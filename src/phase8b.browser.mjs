@@ -72,6 +72,42 @@ test('Firewall UI preserves backend controls and current-candidate export gate',
   assert.deepEqual(errors, [])
 })
 
+test('same-vendor evidence dialog keeps keyboard focus and collapsed actions named', { timeout: 60000 }, async t => {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  t.after(() => page.close())
+  await page.goto(url)
+  const headerGeometry = async () => page.evaluate(() => {
+    const header = document.querySelector('.app-header')?.getBoundingClientRect()
+    const button = [...document.querySelectorAll('.app-header button')].find(item => item.textContent?.includes('Cross-vendor Firewall'))?.getBoundingClientRect()
+    const title = document.querySelector('.firewall-workspace h1')?.getBoundingClientRect()
+    if (!header || !button || !title) return null
+    return { header: { top: header.top, bottom: header.bottom }, button: { top: button.top, bottom: button.bottom, width: button.width, height: button.height }, title: { top: title.top, width: title.width, height: title.height }, overlap: Math.max(0, Math.min(button.right, title.right) - Math.max(button.left, title.left)) * Math.max(0, Math.min(button.bottom, title.bottom) - Math.max(button.top, title.top)), overflow: document.documentElement.scrollWidth > innerWidth }
+  })
+  const mobile = await headerGeometry()
+  assert.ok(mobile?.button.width && mobile.button.height && mobile.title.width && mobile.title.height)
+  assert.equal(mobile.overlap, 0, `Header button overlaps title: ${JSON.stringify(mobile)}`)
+  assert.ok(mobile.button.top >= mobile.header.top && mobile.button.bottom <= mobile.header.bottom)
+  assert.equal(mobile.overflow, false)
+  await page.getByRole('button', { name: 'Collapse sidebar' }).click()
+  assert.equal(await page.getByRole('button', { name: 'New Project' }).count(), 1)
+  assert.equal(await page.getByRole('button', { name: 'Save Project' }).count(), 1)
+  await page.getByText('Hardware compatibility · select exact profile').first().click()
+  await page.getByLabel('Source Platform hardware profile').selectOption('paloalto-pa-3410')
+  const opener = page.getByRole('button', { name: 'View Evidence' }).first()
+  await opener.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Official hardware evidence' })
+  await dialog.waitFor()
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), 'Close')
+  await page.keyboard.press('Escape')
+  assert.equal(await dialog.count(), 0)
+  assert.equal(await opener.evaluate(node => document.activeElement === node), true)
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  await page.setViewportSize({ width: 768, height: 900 })
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  assert.equal((await headerGeometry())?.overlap, 0)
+})
+
 test('supported Firewall preview refreshes automatically and invalidates the old export', { timeout: 30000 }, async t => {
   const page = await browser.newPage({ viewport: { width: 1680, height: 980 } })
   t.after(() => page.close())
