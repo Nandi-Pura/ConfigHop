@@ -28,7 +28,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost. Project files live only in a temporary server workspace and disappear when the server stops or a project is deleted.
+Open `http://localhost:5173`. The frontend defaults to `http://127.0.0.1:8000/api/v1`; override it with `VITE_CONFIGHOP_API_URL` if needed. This unauthenticated MVP must be bound to localhost with one backend worker. Same-vendor PAN-OS projects use [finite temporary-storage and idle-expiry limits](docs/phase11b-projectstore-capacity.md). Project files are removed on deletion or clean server shutdown; an abrupt crash can leave temporary files requiring manual review.
 
 ## Test
 

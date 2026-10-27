@@ -1,5 +1,6 @@
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -39,9 +40,23 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = store or ProjectStore()
+        if store is None:
+            try:
+                app.state.store.acquire_process_lock()
+            except RuntimeError:
+                app.state.store.close()
+                raise
+        async def expire_idle() -> None:
+            while True:
+                await asyncio.sleep(60)
+                await app.state.store.reap_expired()
+        expiry_task = asyncio.create_task(expire_idle())
         try:
             yield
         finally:
+            expiry_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await expiry_task
             app.state.store.close()
 
     app = FastAPI(title="ConfigHop Local API", version="0.7.0",
@@ -132,6 +147,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
             with path.open("rb") as stream:
                 while chunk := stream.read(1024 * 1024):
                     yield chunk
+            project.touch()
 
     @app.get("/api/v1/projects/{project_id}/source")
     async def get_source(project_id: str, request: Request):
@@ -217,9 +233,11 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.post("/api/v1/projects/{project_id}/candidate", response_model=CandidateMetadata)
     async def post_candidate(project_id: str, body: CandidateRequest, request: Request):
-        project = current_store(request).get(project_id)
-        async with project.lock:
-            return await generate_candidate(project, body.mappings, body.allow_review)
+        store = current_store(request)
+        async with store.lock:
+            project = store.get(project_id)
+            async with project.lock:
+                return await generate_candidate(project, body.mappings, body.allow_review, store)
 
     @app.get("/api/v1/projects/{project_id}/candidate", response_model=CandidateMetadata)
     async def get_candidate(project_id: str, request: Request):

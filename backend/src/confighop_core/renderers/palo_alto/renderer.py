@@ -1,6 +1,7 @@
 import os
 import tempfile
 from copy import deepcopy
+from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -31,6 +32,10 @@ class RenderFailure(Exception):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+class CandidateLimitExceeded(Exception):
+    pass
 
 
 def _safe_tree(data: bytes) -> ET.Element:
@@ -66,6 +71,8 @@ def render_panos_candidate(
     target_profile: HardwareProfile, output_path: str | Path, *, allow_review: bool = False,
     force: bool = False, source_profile_id: str | None = None,
     source_panos_train: str | None = None, target_panos_train: str | None = None,
+    validation_dir: str | Path | None = None, max_output_bytes: int | None = None,
+    reserve_output: Callable[[int], None] | None = None,
 ) -> CandidateRenderResult:
     source = Path(source_path)
     output = Path(output_path)
@@ -183,9 +190,13 @@ def render_panos_candidate(
             elif (node.get("name") if field == "name" else (node.text or "").strip()) != op.target_value:
                 raise RenderFailure("OPERATION_POSTCONDITION_FAILED")
         candidate_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+        if max_output_bytes is not None and len(candidate_bytes) > max_output_bytes:
+            raise CandidateLimitExceeded
+        if reserve_output is not None:
+            reserve_output(len(candidate_bytes))
         candidate_sha = sha256(candidate_bytes).hexdigest()
         try:
-            with tempfile.TemporaryDirectory() as directory:
+            with tempfile.TemporaryDirectory(dir=validation_dir) as directory:
                 candidate_path = Path(directory) / "candidate.xml"
                 candidate_path.write_bytes(candidate_bytes)
                 candidate_inventory = parse_palo_alto_xml(candidate_path)
@@ -225,4 +236,6 @@ def render_panos_candidate(
     except RenderFailure as exc:
         return _blocked(plan, exc.code)
     except (OSError, ValueError):
+        if validation_dir is not None:
+            raise
         return _blocked(plan, "OPERATION_PRECONDITION_FAILED")

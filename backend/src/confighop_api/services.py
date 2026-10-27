@@ -1,9 +1,13 @@
 import asyncio
+import hashlib
+from collections import deque
 import ntpath
 import os
 import re
 import shutil
 import tempfile
+from time import monotonic
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
@@ -23,6 +27,7 @@ from confighop_core.models.inventory import PaloAltoInventory
 from confighop_core.models.mapping import InterfaceMapping, MigrationPreview, PreviewStatus
 from confighop_core.models.transformation import CandidateRenderResult
 from confighop_core.parsers.palo_alto.parser import MAX_XML_BYTES
+from confighop_core.renderers.palo_alto.renderer import CandidateLimitExceeded
 
 from .schemas import (
     CandidateMetadata, DependencySummary, InventorySummary, InventoryView, PhysicalInterfaceView,
@@ -57,6 +62,11 @@ class ProjectSession:
     mappings: list[InterfaceMapping] = field(default_factory=list)
     preview: MigrationPreview | None = None
     candidate: CandidateRenderResult | None = None
+    touched: float = 0.0
+    clock: Callable[[], float] = monotonic
+    expired: bool = False
+    cleanup_debt: bool = False
+    cleanup_debt_bytes: int = 0
 
     @property
     def source_path(self) -> Path:
@@ -71,41 +81,167 @@ class ProjectSession:
         self.mappings = []
         self.preview = None
         self.candidate = None
-        self.candidate_path.unlink(missing_ok=True)
+        try:
+            self.candidate_path.unlink(missing_ok=True)
+        except OSError:
+            self.cleanup_debt = True  # The file remains counted; candidate metadata is already invalidated.
+
+    def touch(self) -> None:
+        self.touched = self.clock()
 
 
 class ProjectStore:
-    def __init__(self):
+    def __init__(self, *, clock: Callable[[], float] = monotonic,
+                 max_projects: int = 2, aggregate_bytes: int = 640 * 1024 * 1024,
+                 project_bytes: int = 320 * 1024 * 1024,
+                 max_candidate_bytes: int = 100 * 1024 * 1024,
+                 idle_seconds: int = 24 * 60 * 60,
+                 free_floor_bytes: int = 1024 * 1024 * 1024):
         self.root = tempfile.TemporaryDirectory(prefix="confighop-")
         self.projects: dict[str, ProjectSession] = {}
-        self.lock = asyncio.Lock()
+        self.expired_ids: deque[str] = deque(maxlen=1024)
+        self.lock = asyncio.Lock()  # Acquire before a project lock for file-adding operations.
+        self.clock = clock
+        self.max_projects = max_projects
+        self.aggregate_bytes = aggregate_bytes
+        self.project_bytes = project_bytes
+        self.max_candidate_bytes = max_candidate_bytes
+        self.idle_seconds = idle_seconds
+        self.free_floor_bytes = free_floor_bytes
+        self.reservations: dict[str, int] = {}
         self.max_source_bytes = MAX_XML_BYTES
+        self._process_file = None
+
+    def acquire_process_lock(self) -> None:
+        if self._process_file is not None:
+            return
+        key = hashlib.sha256(str(Path(__file__).resolve().parents[3]).encode()).hexdigest()[:16]
+        lock_path = Path(tempfile.gettempdir()) / f"confighop-worker-{key}.lock"
+        lock_file = lock_path.open("a+b")
+        try:
+            lock_file.seek(0)
+            lock_file.write(b"\0")
+            lock_file.flush()
+            lock_file.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            lock_file.close()
+            raise RuntimeError("Only one ConfigHop backend worker may run for this checkout.") from exc
+        self._process_file = lock_file
+
+    @staticmethod
+    def _bytes(path: Path) -> int:
+        return sum(file.stat().st_size for file in path.rglob("*") if file.is_file()) if path.exists() else 0
+
+    def reserve(self, project: ProjectSession, additional: int, base_total: int, base_project: int,
+                disk_needed: int) -> None:
+        try:
+            if base_project + additional > self.project_bytes:
+                raise ServiceError("PROJECT_CAPACITY_EXCEEDED", "This project has reached its temporary storage limit.", 507)
+            if base_total + additional > self.aggregate_bytes:
+                raise ServiceError("STORE_CAPACITY_EXCEEDED", "Temporary storage is full. Delete an unused project.", 507)
+            if shutil.disk_usage(self.root.name).free - disk_needed < self.free_floor_bytes:
+                raise ServiceError("TEMP_STORAGE_UNAVAILABLE", "Not enough free temporary disk space.", 507)
+        except OSError as exc:
+            raise ServiceError("QUOTA_RESERVATION_UNAVAILABLE", "Temporary storage could not be checked.", 503) from exc
+        self.reservations[project.project_id] = additional
+
+    def usage(self) -> tuple[int, dict[str, int]]:
+        try:
+            total = self._bytes(Path(self.root.name))
+            by_project = {key: self._bytes(p.workspace) for key, p in self.projects.items()}
+            for key, project in self.projects.items():
+                debt = max(0, project.cleanup_debt_bytes - by_project[key])
+                total += debt
+                by_project[key] += debt
+            return total, by_project
+        except OSError as exc:
+            raise ServiceError("QUOTA_RESERVATION_UNAVAILABLE", "Temporary storage could not be checked.", 503) from exc
+
+    async def reap_expired(self) -> None:
+        async with self.lock:
+            for project in list(self.projects.values()):
+                if project.deleted or project.lock.locked() or self.clock() - project.touched < self.idle_seconds:
+                    continue
+                async with project.lock:
+                    if self.clock() - project.touched < self.idle_seconds:
+                        continue
+                    project.expired = True
+                    project.deleted = True
+                    self.expired_ids.append(project.project_id)
+                    try:
+                        project.cleanup_debt_bytes = self._bytes(project.workspace)
+                        shutil.rmtree(project.workspace)
+                    except OSError:
+                        project.cleanup_debt = True
+                        continue  # Files remain under the store root and still count toward its budget.
+                    self.projects.pop(project.project_id, None)
 
     async def create(self) -> ProjectSession:
+        await self.reap_expired()
         async with self.lock:
+            if sum(not p.deleted for p in self.projects.values()) >= self.max_projects:
+                raise ServiceError("PROJECT_LIMIT_REACHED", "Close a project before creating another.", 429)
             project_id = str(uuid4())
             workspace = Path(self.root.name) / project_id
-            workspace.mkdir(mode=0o700)
-            project = ProjectSession(project_id, workspace)
+            try:
+                workspace.mkdir(mode=0o700)
+            except OSError as exc:
+                raise ServiceError("TEMP_STORAGE_UNAVAILABLE", "Temporary storage could not create this project.", 507) from exc
+            project = ProjectSession(project_id, workspace, touched=self.clock(), clock=self.clock)
             self.projects[project_id] = project
             return project
 
     def get(self, project_id: str) -> ProjectSession:
         project = self.projects.get(project_id)
-        if project is None or project.deleted:
+        if project is None:
+            if project_id in self.expired_ids:
+                raise ServiceError("PROJECT_EXPIRED", "Project session expired. Upload the source again.", 404)
             raise ServiceError("PROJECT_NOT_FOUND", "Project session was not found.", 404)
+        if project.expired:
+            raise ServiceError("PROJECT_EXPIRED", "Project session expired. Upload the source again.", 404)
+        if project.deleted:
+            raise ServiceError("PROJECT_NOT_FOUND", "Project session was not found.", 404)
+        if not project.lock.locked() and self.clock() - project.touched >= self.idle_seconds:
+            project.expired = True
+            raise ServiceError("PROJECT_EXPIRED", "Project session expired. Upload the source again.", 404)
+        project.touch()
         return project
 
     async def delete(self, project_id: str) -> None:
-        project = self.get(project_id)
-        async with project.lock:
-            project.deleted = True
-            async with self.lock:
+        async with self.lock:
+            project = self.projects.get(project_id)
+            if project is None or project.deleted:
+                raise ServiceError("PROJECT_NOT_FOUND", "Project session was not found.", 404)
+            async with project.lock:
+                project.deleted = True
+                try:
+                    project.cleanup_debt_bytes = self._bytes(project.workspace)
+                    shutil.rmtree(project.workspace)
+                except OSError as exc:
+                    project.cleanup_debt = True
+                    raise ServiceError("TEMP_STORAGE_UNAVAILABLE", "Project files could not be removed; storage remains reserved.", 507) from exc
                 self.projects.pop(project_id, None)
-            shutil.rmtree(project.workspace)
 
     def close(self) -> None:
-        self.root.cleanup()
+        try:
+            self.root.cleanup()
+        finally:
+            if self._process_file is not None:
+                if os.name == "nt":
+                    import msvcrt
+                    self._process_file.seek(0)
+                    msvcrt.locking(self._process_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self._process_file.fileno(), fcntl.LOCK_UN)
+                self._process_file.close()
+                self._process_file = None
 
 
 def sanitize_filename(value: str | None) -> str:
@@ -198,9 +334,8 @@ def profile_detail(profile_id: str) -> ProfileDetail:
 
 
 async def upload_source(store: ProjectStore, project: ProjectSession, request: Request, filename: str | None) -> SourceView:
-    async with project.lock:
-        if project.deleted:
-            raise ServiceError("PROJECT_NOT_FOUND", "Project session was not found.", 404)
+    async with store.lock, project.lock:
+        require_live(project)
         length = request.headers.get("content-length")
         if length:
             try:
@@ -210,14 +345,17 @@ async def upload_source(store: ProjectStore, project: ProjectSession, request: R
                 raise ServiceError("INVALID_REQUEST", "Invalid content length.", 400) from exc
         temporary = project.workspace / f"upload-{uuid4().hex}.tmp"
         size = 0
+        base_total, by_project = store.usage()
         try:
             with temporary.open("xb") as stream:
                 os.chmod(temporary, 0o600)
                 async for chunk in request.stream():
-                    size += len(chunk)
-                    if size > store.max_source_bytes:
+                    next_size = size + len(chunk)
+                    if next_size > store.max_source_bytes:
                         raise ServiceError("SOURCE_TOO_LARGE", "Source exceeds the upload limit.", 413)
+                    store.reserve(project, next_size, base_total, by_project[project.project_id], len(chunk))
                     stream.write(chunk)
+                    size = next_size
             try:
                 inventory = await asyncio.to_thread(parse_palo_alto_xml, temporary)
             except ConfigParseError as exc:
@@ -230,8 +368,15 @@ async def upload_source(store: ProjectStore, project: ProjectSession, request: R
             return SourceView(project_id=project.project_id, filename=project.source_filename, size_bytes=size,
                 platform=PlatformView.model_validate(inventory.platform.model_dump()),
                 inventory_summary=inventory_summary(inventory))
+        except OSError as exc:
+            raise ServiceError("TEMP_STORAGE_UNAVAILABLE", "Temporary storage could not accept this source; the previous source is retained.", 507) from exc
         finally:
-            temporary.unlink(missing_ok=True)
+            store.reservations.pop(project.project_id, None)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                project.cleanup_debt = True
+            project.touch()
 
 
 def require_inventory(project: ProjectSession) -> PaloAltoInventory:
@@ -282,6 +427,7 @@ def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) ->
     project.mappings = mappings
     project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
         project.profile_id, project.target_panos_train, mappings)
+    project.touch()
     return project.compatibility
 
 
@@ -294,6 +440,7 @@ async def update_preview(project: ProjectSession, mappings: list[InterfaceMappin
         project.compatibility = assess(inventory, project.source_profile_id, project.source_panos_train,
             project.profile_id, project.target_panos_train, mappings)
     project.preview = await asyncio.to_thread(preview_interface_mappings, inventory, mappings, profile)
+    project.touch()
     return project.preview
 
 
@@ -347,7 +494,8 @@ def project_deployment_plan(project: ProjectSession) -> DeploymentPlan | None:
         project.candidate)
 
 
-async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMapping], allow_review: bool) -> CandidateMetadata:
+async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMapping], allow_review: bool,
+                             store: ProjectStore | None = None) -> CandidateMetadata:
     inventory = require_inventory(project)
     profile = require_profile(project)
     project.invalidate()
@@ -361,10 +509,35 @@ async def generate_candidate(project: ProjectSession, mappings: list[InterfaceMa
         return candidate_metadata(project) if project.compatibility.status.value == "BLOCKED" else blocked_review_metadata(project)
     if project.preview.status == PreviewStatus.BLOCKED or project.preview.status == PreviewStatus.REVIEW_REQUIRED and not allow_review:
         return blocked_review_metadata(project)
-    project.candidate = await asyncio.to_thread(render_panos_candidate, project.source_path, inventory,
-        project.preview, profile, project.candidate_path, allow_review=allow_review,
-        source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
-        target_panos_train=project.target_panos_train)
+    base_total, by_project = store.usage() if store else (0, {})
+    def reserve_output(size: int) -> None:
+        if store:
+            store.reserve(project, size, base_total, by_project[project.project_id], size)
+    try:
+        render = asyncio.create_task(asyncio.to_thread(render_panos_candidate, project.source_path, inventory,
+            project.preview, profile, project.candidate_path, allow_review=allow_review,
+            source_profile_id=project.source_profile_id, source_panos_train=project.source_panos_train,
+            target_panos_train=project.target_panos_train,
+            validation_dir=project.workspace if store else None,
+            max_output_bytes=store.max_candidate_bytes if store else None,
+            reserve_output=reserve_output if store else None))
+        try:
+            project.candidate = await asyncio.shield(render)
+        except asyncio.CancelledError:
+            try:
+                await render  # Keep the reservation and project lock until the worker stops writing.
+            finally:
+                project.candidate_path.unlink(missing_ok=True)
+            raise
+    except CandidateLimitExceeded as exc:
+        raise ServiceError("CANDIDATE_CAPACITY_EXCEEDED", "Candidate exceeds the 100 MiB output limit.", 507) from exc
+    except OSError as exc:
+        project.cleanup_debt = True
+        raise ServiceError("TEMP_STORAGE_UNAVAILABLE", "Temporary storage could not accept the candidate.", 507) from exc
+    finally:
+        if store:
+            store.reservations.pop(project.project_id, None)
+            project.touch()
     return candidate_metadata(project)
 
 
