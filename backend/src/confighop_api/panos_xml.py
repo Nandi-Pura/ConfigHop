@@ -225,6 +225,17 @@ async def validate_full(client: httpx.AsyncClient, api_key: str) -> OperationRec
         failed_code="XML_API_VALIDATION_FAILED", allow_job=True)
 
 
+async def commit_configuration(client: httpx.AsyncClient, api_key: str) -> OperationReceipt:
+    document = await _request_bytes(client, api_key,
+        {"type": "commit", "cmd": "<commit></commit>"}, max_bytes=1024 * 1024)
+    receipt = _receipt(document, invalid_code="XML_API_INVALID_COMMIT",
+        failed_code="XML_API_COMMIT_FAILED", allow_job=True)
+    if receipt.job_id is None:
+        raise XmlApiError("XML_API_COMMIT_NOT_QUEUED",
+            "The target did not enqueue the expected commit job.")
+    return receipt
+
+
 async def read_job(client: httpx.AsyncClient, api_key: str, job_id: str) -> JobResult:
     if not job_id.isdigit() or len(job_id) > 32:
         raise ValueError("Job identifier is invalid")

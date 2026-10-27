@@ -2,7 +2,7 @@ import hashlib
 import json
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -163,8 +163,15 @@ class DeploymentPackage(BaseModel):
     change_summary_sha256: str | None = None
     validation_sha256: str | None = None
     validation_job_id: str | None = None
-    ambiguous_operation: Literal["IMPORT", "LOAD", "VALIDATE"] | None = None
+    ambiguous_operation: Literal[
+        "IMPORT", "LOAD", "VALIDATE", "COMMIT", "RECOVERY_LOAD",
+        "RECOVERY_VALIDATE", "RECOVERY_COMMIT",
+    ] | None = None
     approval_sha256: str | None = None
+    approval_token_sha256: str | None = None
+    approval_actor_sha256: str | None = None
+    approval_expires_at_utc: datetime | None = None
+    approval_used_at_utc: datetime | None = None
     commit_job_id: str | None = None
     commit_result_sha256: str | None = None
     post_verification_sha256: str | None = None
@@ -413,7 +420,10 @@ class ProjectDatabase:
         job_id: str | None = None, running_backup_sha256: str | None = None,
         candidate_backup_sha256: str | None = None,
         change_summary_sha256: str | None = None,
-        ambiguous_operation: Literal["IMPORT", "LOAD", "VALIDATE"] | None = None) -> DeploymentPackage:
+        ambiguous_operation: Literal[
+            "IMPORT", "LOAD", "VALIDATE", "COMMIT", "RECOVERY_LOAD",
+            "RECOVERY_VALIDATE", "RECOVERY_COMMIT",
+        ] | None = None) -> DeploymentPackage:
         with self.connection:
             package = self.package(package_id)
             if package is None:
@@ -426,6 +436,8 @@ class ProjectDatabase:
                 allowed.add(_NEXT_STATE[old_status])
             if old_status in _RECOVERABLE:
                 allowed.add("RECOVERY_REQUESTED")
+            if old_status == "RECOVERY_VALIDATING":
+                allowed.add("RECOVERED")
             if to_state not in allowed:
                 raise ValueError("Invalid deployment state transition")
             project_row = self.connection.execute("SELECT state_json FROM projects WHERE project_id=?",
@@ -527,6 +539,87 @@ class ProjectDatabase:
             self._event(package.project_id, package_id, "DEPLOYMENT_STATE_CHANGED", "SUCCEEDED",
                 None, package.input_sha256, from_state=old_status, to_state=to_state,
                 evidence_sha256=evidence_sha256)
+            return package
+
+    def issue_commit_approval(self, package_id: str, *, expected_input_sha256: str,
+        actor_sha256: str, ttl_seconds: int = 600) -> tuple[DeploymentPackage, str]:
+        if ttl_seconds < 1 or ttl_seconds > 3600:
+            raise ValueError("Approval TTL is invalid")
+        token = secrets.token_urlsafe(32)
+        token_sha256 = hashlib.sha256(token.encode()).hexdigest()
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        with self.connection:
+            package = self.package(package_id)
+            project_row = self.connection.execute(
+                "SELECT state_json FROM projects WHERE project_id=?",
+                (package.project_id,)).fetchone() if package else None
+            if package is None or package.status not in {"VALIDATED", "AWAITING_COMMIT_APPROVAL"}:
+                raise ValueError("Package is not ready for commit approval")
+            if project_row is None or json.loads(project_row[0]).get("active_package_id") != package_id:
+                raise ValueError("Package is no longer active")
+            if not secrets.compare_digest(package.input_sha256, expected_input_sha256):
+                raise ValueError("Deployment package input fingerprint changed")
+            self.verify_package_artifacts(package)
+            old_status = package.status
+            package.status = "AWAITING_COMMIT_APPROVAL"
+            package.approval_token_sha256 = token_sha256
+            package.approval_actor_sha256 = actor_sha256
+            package.approval_expires_at_utc = expires_at
+            package.approval_used_at_utc = None
+            self.connection.execute("UPDATE deployment_packages SET package_json=? WHERE package_id=?",
+                (package.model_dump_json(), package_id))
+            self._event(package.project_id, package_id, "COMMIT_APPROVAL_ISSUED", "SUCCEEDED",
+                None, package.input_sha256, from_state=old_status,
+                to_state="AWAITING_COMMIT_APPROVAL")
+            return package, token
+
+    def consume_commit_approval(self, package_id: str, token: str, *,
+        expected_input_sha256: str, actor_sha256: str) -> DeploymentPackage:
+        token_sha256 = hashlib.sha256(token.encode()).hexdigest()
+        now = datetime.now(timezone.utc)
+        with self.connection:
+            package = self.package(package_id)
+            project_row = self.connection.execute(
+                "SELECT state_json FROM projects WHERE project_id=?",
+                (package.project_id,)).fetchone() if package else None
+            if package is None or package.status != "AWAITING_COMMIT_APPROVAL":
+                raise ValueError("Package is not awaiting commit approval")
+            if project_row is None or json.loads(project_row[0]).get("active_package_id") != package_id:
+                raise ValueError("Package is no longer active")
+            if not secrets.compare_digest(package.input_sha256, expected_input_sha256):
+                raise ValueError("Deployment package input fingerprint changed")
+            if package.approval_used_at_utc is not None:
+                raise ValueError("Commit approval was already used")
+            if package.approval_expires_at_utc is None or package.approval_expires_at_utc <= now:
+                raise ValueError("Commit approval expired")
+            if not package.approval_token_sha256 or not secrets.compare_digest(
+                package.approval_token_sha256, token_sha256):
+                raise ValueError("Commit approval token is invalid")
+            if not package.approval_actor_sha256 or not secrets.compare_digest(
+                package.approval_actor_sha256, actor_sha256):
+                raise ValueError("Commit approval belongs to a different browser session")
+            self.verify_package_artifacts(package)
+            approval_payload = {
+                "package_id": package.package_id,
+                "input_sha256": package.input_sha256,
+                "target_serial": package.target_serial,
+                "target_baseline_sha256": package.target_baseline_sha256,
+                "deployable_candidate_sha256": package.deployable_candidate_sha256,
+                "change_summary_sha256": package.change_summary_sha256,
+                "validation_sha256": package.validation_sha256,
+                "actor_sha256": actor_sha256,
+                "expires_at_utc": package.approval_expires_at_utc.isoformat(),
+            }
+            approval_sha256 = hashlib.sha256(json.dumps(approval_payload,
+                sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            package.approval_used_at_utc = now
+            package.approval_sha256 = approval_sha256
+            package.status = "COMMIT_QUEUED"
+            self.connection.execute("UPDATE deployment_packages SET package_json=? WHERE package_id=?",
+                (package.model_dump_json(), package_id))
+            self._event(package.project_id, package_id, "COMMIT_APPROVAL_CONSUMED", "SUCCEEDED",
+                None, package.input_sha256, from_state="AWAITING_COMMIT_APPROVAL",
+                to_state="COMMIT_QUEUED", evidence_sha256=approval_sha256)
             return package
 
     def record_validation_job(self, package_id: str, job_id: str, *,

@@ -1,4 +1,5 @@
 import hashlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs
 from xml.etree import ElementTree
@@ -209,6 +210,145 @@ def reconcile_client(*, running: bytes, candidate: bytes,
         return httpx.Response(200, content=next(documents))
 
     return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
+def config_response(config: bytes) -> bytes:
+    return b'<response status="success"><result>' + config + b'</result></response>'
+
+
+def config_document(value: bytes) -> bytes:
+    root = ElementTree.fromstring(value)
+    config = root.find("./result/config") if root.tag == "response" else root
+    return ElementTree.tostring(config, encoding="utf-8")
+
+
+def commit_client(*, baseline: bytes, deployable: bytes, job_failed: bool = False,
+    commit_timeout: bool = False) -> httpx.AsyncClient:
+    baseline = config_document(baseline)
+    count = 0
+    changed = (b'<response status="success"><result><change-summary>'
+        b'<entry name="vsys1"/></change-summary></result></response>')
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal count
+        count += 1
+        if count == 1:
+            return httpx.Response(200, content=system_info("target-serial"))
+        if count == 2:
+            return httpx.Response(200, content=config_response(baseline))
+        if count == 3:
+            return httpx.Response(200, content=config_response(deployable))
+        if count == 4:
+            return httpx.Response(200, content=changed)
+        if count == 5:
+            if commit_timeout:
+                raise httpx.ReadTimeout("private timeout", request=request)
+            form = parse_qs(request.content.decode())
+            assert form == {"type": ["commit"], "cmd": ["<commit></commit>"]}
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><job>84</job></result></response>'))
+        if count == 6:
+            outcome = b"FAIL" if job_failed else b"OK"
+            return httpx.Response(200, content=(b'<response status="success"><result><job>'
+                b'<id>84</id><status>FIN</status><result>' + outcome +
+                b'</result></job></result></response>'))
+        if count == 7:
+            return httpx.Response(200, content=system_info("target-serial"))
+        if count in {8, 9}:
+            return httpx.Response(200, content=config_response(deployable))
+        return httpx.Response(200, content=probe_result())
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
+def recovery_client(*, backup: bytes, deployed: bytes) -> httpx.AsyncClient:
+    backup = config_document(backup)
+    count = 0
+    changed = (b'<response status="success"><result><change-summary>'
+        b'<entry name="vsys1"/></change-summary></result></response>')
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal count
+        count += 1
+        if count in {1, 16}:
+            return httpx.Response(200, content=system_info("target-serial"))
+        if count == 2:
+            assert "multipart/form-data" in request.headers["content-type"]
+            assert backup in request.content
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><msg>Imported</msg></result></response>'))
+        form = parse_qs(request.content.decode())
+        if count == 3:
+            assert form["cmd"][0].startswith("<load><config><from>confighop-")
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><msg>Loaded</msg></result></response>'))
+        if count == 4:
+            return httpx.Response(200, content=config_response(backup))
+        if count == 5:
+            return httpx.Response(200, content=changed)
+        if count == 6:
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><job>77</job></result></response>'))
+        if count == 7:
+            return httpx.Response(200, content=(b'<response status="success"><result><job>'
+                b'<id>77</id><status>FIN</status><result>OK</result></job></result></response>'))
+        if count == 8:
+            return httpx.Response(200, content=config_response(deployed))
+        if count == 9:
+            return httpx.Response(200, content=config_response(backup))
+        if count == 10:
+            return httpx.Response(200, content=changed)
+        if count == 11:
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><job>88</job></result></response>'))
+        if count == 12:
+            return httpx.Response(200, content=(b'<response status="success"><result><job>'
+                b'<id>88</id><status>FIN</status><result>OK</result></job></result></response>'))
+        if count in {13, 14}:
+            return httpx.Response(200, content=config_response(backup))
+        return httpx.Response(200, content=probe_result())
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
+def recovery_no_commit_client(*, backup: bytes) -> httpx.AsyncClient:
+    backup = config_document(backup)
+    count = 0
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        nonlocal count
+        count += 1
+        if count in {1, 11}:
+            return httpx.Response(200, content=system_info("target-serial"))
+        if count == 2:
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><msg>Imported</msg></result></response>'))
+        if count == 3:
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><msg>Loaded</msg></result></response>'))
+        if count in {4, 8, 9}:
+            return httpx.Response(200, content=config_response(backup))
+        if count in {5, 10}:
+            return httpx.Response(200, content=probe_result())
+        if count == 6:
+            return httpx.Response(200, content=(
+                b'<response status="success"><result><job>77</job></result></response>'))
+        return httpx.Response(200, content=(b'<response status="success"><result><job>'
+            b'<id>77</id><status>FIN</status><result>OK</result></job></result></response>'))
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(respond), base_url="https://10.0.0.20")
+
+
+def prepare_validated_package(client: TestClient, store: ProjectStore, project_id: str,
+    base: str, target_clients: list[httpx.AsyncClient], target_config: bytes) -> tuple[dict, bytes]:
+    built = prepare_passed_target_package(client, base)
+    deployable = store.artifacts.read_deployable(project_id, built["package_id"],
+        built["deployable_candidate_sha256"], max_plaintext_bytes=store.max_source_bytes)
+    target_clients.append(stage_client(deployable, baseline=target_config))
+    staged = client.post(base + "/target/stage", json={**target_body(),
+        "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+    assert staged.status_code == 200 and staged.json()["status"] == "VALIDATED"
+    return built, deployable
 
 
 def test_collect_target_baseline_binds_read_only_hash_and_audit(monkeypatch, tmp_path):
@@ -630,3 +770,159 @@ def test_import_timeout_enters_status_unknown_without_retry(monkeypatch, tmp_pat
         assert reconciled.json()["reconciliation"] == "STILL_AMBIGUOUS"
         assert reconciled.json()["commit_created"] is False
         assert client.get(base + "/deployment-package").json()["status"] == "STATUS_UNKNOWN"
+        internal = store.database.package(built["package_id"])
+        internal.ambiguous_operation = "RECOVERY_LOAD"
+        with store.database.connection:
+            store.database.connection.execute(
+                "UPDATE deployment_packages SET package_json=? WHERE package_id=?",
+                (internal.model_dump_json(), internal.package_id))
+        blocked_retry = client.post(base + "/target/recovery", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial",
+            "recovery_confirmation": "RECOVER fw-target-serial"}, headers=HEADERS)
+        assert blocked_retry.status_code == 409
+        assert blocked_retry.json()["error"]["code"] == "RECOVERY_RESULT_UNKNOWN"
+
+
+def test_one_time_approval_commit_polls_terminal_job_and_verifies_running(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: single_vsys_source_client())
+    target_config = package_target_config()
+    target_clients = [target_client(first=target_config, second=target_config),
+        preflight_client(running=target_config, candidate=target_config)]
+    monkeypatch.setattr("confighop_api.services.create_target_client",
+        lambda *args, **kwargs: target_clients.pop(0))
+    store = target_store(tmp_path / "projects")
+    with TestClient(create_app(store, allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3",
+        deployment_mode="lab")) as client:
+        project_id, base = prepare_project(client)
+        _, deployable = prepare_validated_package(client, store, project_id, base,
+            target_clients, target_config)
+        approval = client.post(base + "/target/commit/approval", json={
+            "expected_serial": "target-serial", "expected_model": "PA-5410",
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+        assert approval.status_code == 200, approval.text
+        old_token = approval.json()["approval_token"]
+        reissued = client.post(base + "/target/commit/approval", json={
+            "expected_serial": "target-serial", "expected_model": "PA-5410",
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+        token = reissued.json()["approval_token"]
+        assert token != old_token
+        stored = store.database.package(approval.json()["package_id"])
+        with pytest.raises(ValueError, match="token is invalid"):
+            store.database.consume_commit_approval(stored.package_id, old_token,
+                expected_input_sha256=stored.input_sha256,
+                actor_sha256=stored.approval_actor_sha256)
+        assert token not in str(client.get(base + "/deployment-events").json())
+        target_clients.append(commit_client(baseline=target_config, deployable=deployable))
+        committed = client.post(base + "/target/commit", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial", "approval_token": token},
+            headers=HEADERS)
+        assert committed.status_code == 200, committed.text
+        assert committed.json()["status"] == "SUCCEEDED"
+        assert committed.json()["commit_job_id"] == "84"
+        package = client.get(base + "/deployment-package").json()
+        assert "approval_token_sha256" not in package
+        assert "approval_actor_sha256" not in package
+        assert package["approval_used_at_utc"] is not None
+        assert package["commit_result_sha256"] and package["post_verification_sha256"]
+        replay = client.post(base + "/target/commit", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial", "approval_token": token},
+            headers=HEADERS)
+        assert replay.status_code == 409
+        audit = client.get(base + "/audit").json()["events"]
+        assert token not in str(audit)
+
+
+def test_commit_job_failure_after_enqueue_never_reports_success(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: single_vsys_source_client())
+    target_config = package_target_config()
+    target_clients = [target_client(first=target_config, second=target_config),
+        preflight_client(running=target_config, candidate=target_config)]
+    monkeypatch.setattr("confighop_api.services.create_target_client",
+        lambda *args, **kwargs: target_clients.pop(0))
+    store = target_store(tmp_path / "projects")
+    with TestClient(create_app(store, allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3",
+        deployment_mode="lab")) as client:
+        project_id, base = prepare_project(client)
+        _, deployable = prepare_validated_package(client, store, project_id, base,
+            target_clients, target_config)
+        approval = client.post(base + "/target/commit/approval", json={
+            "expected_serial": "target-serial", "expected_model": "PA-5410",
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS).json()
+        package = store.database.package(approval["package_id"])
+        package.approval_expires_at_utc = datetime.now(timezone.utc) - timedelta(seconds=1)
+        with store.database.connection:
+            store.database.connection.execute(
+                "UPDATE deployment_packages SET package_json=? WHERE package_id=?",
+                (package.model_dump_json(), package.package_id))
+        with pytest.raises(ValueError, match="expired"):
+            store.database.consume_commit_approval(package.package_id, approval["approval_token"],
+                expected_input_sha256=package.input_sha256,
+                actor_sha256=package.approval_actor_sha256)
+        token = client.post(base + "/target/commit/approval", json={
+            "expected_serial": "target-serial", "expected_model": "PA-5410",
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS).json()["approval_token"]
+        target_clients.append(commit_client(baseline=target_config, deployable=deployable,
+            job_failed=True))
+        response = client.post(base + "/target/commit", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial", "approval_token": token},
+            headers=HEADERS)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "XML_API_COMMIT_JOB_FAILED"
+        package = client.get(base + "/deployment-package").json()
+        assert package["status"] == "FAILED_NEEDS_OPERATOR"
+        assert package["commit_job_id"] == "84"
+        assert package["post_verification_sha256"] is None
+        target_clients.append(recovery_no_commit_client(backup=target_config))
+        recovered = client.post(base + "/target/recovery", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial",
+            "recovery_confirmation": "RECOVER fw-target-serial"}, headers=HEADERS)
+        assert recovered.status_code == 200, recovered.text
+        assert recovered.json()["status"] == "RECOVERED"
+        assert recovered.json()["recovery_commit_job_id"] is None
+
+
+def test_lost_commit_connection_is_reconciled_read_only_then_recovered(monkeypatch, tmp_path):
+    monkeypatch.setattr("confighop_api.services.create_source_client", lambda *args, **kwargs: single_vsys_source_client())
+    target_config = package_target_config()
+    target_clients = [target_client(first=target_config, second=target_config),
+        preflight_client(running=target_config, candidate=target_config)]
+    monkeypatch.setattr("confighop_api.services.create_target_client",
+        lambda *args, **kwargs: target_clients.pop(0))
+    store = target_store(tmp_path / "projects")
+    with TestClient(create_app(store, allowed_source_endpoints={SOURCE},
+        allowed_target_endpoints={TARGET}, audit_path=tmp_path / "audit.sqlite3",
+        deployment_mode="lab")) as client:
+        project_id, base = prepare_project(client)
+        _, deployable = prepare_validated_package(client, store, project_id, base,
+            target_clients, target_config)
+        token = client.post(base + "/target/commit/approval", json={
+            "expected_serial": "target-serial", "expected_model": "PA-5410",
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS).json()["approval_token"]
+        target_clients.append(commit_client(baseline=target_config, deployable=deployable,
+            commit_timeout=True))
+        response = client.post(base + "/target/commit", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial", "approval_token": token},
+            headers=HEADERS)
+        assert response.status_code == 504
+        package = client.get(base + "/deployment-package").json()
+        assert package["status"] == "STATUS_UNKNOWN"
+        assert package["ambiguous_operation"] == "COMMIT"
+
+        target_clients.append(reconcile_client(running=target_config, candidate=target_config))
+        reconciled = client.post(base + "/target/commit/reconcile", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial"}, headers=HEADERS)
+        assert reconciled.status_code == 200, reconciled.text
+        assert reconciled.json()["reconciliation"] == "RUNNING_UNCHANGED"
+        assert client.get(base + "/deployment-package").json()["status"] == "STATUS_UNKNOWN"
+
+        target_clients.append(recovery_client(backup=target_config, deployed=deployable))
+        recovered = client.post(base + "/target/recovery", json={**target_body(),
+            "confirmed_target_hostname": "fw-target-serial",
+            "recovery_confirmation": "RECOVER fw-target-serial"}, headers=HEADERS)
+        assert recovered.status_code == 200, recovered.text
+        assert recovered.json()["status"] == "RECOVERED"
+        assert recovered.json()["recovery_commit_job_id"] == "88"
+        assert recovered.json()["recovery_validation_sha256"]
+        assert recovered.json()["recovery_verification_sha256"]

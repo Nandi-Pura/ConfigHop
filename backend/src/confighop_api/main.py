@@ -17,8 +17,11 @@ from .schemas import (
     CandidateMetadata, CandidateRequest, ErrorView, HealthView, InventoryView,
     PreviewRequest, PreviewView, ProfileDetail, ProfileSummary, ProjectView, SelectProfileRequest,
     SourceCollectRequest, SourceConnectionRequest, SourceConnectionTestView, SourceProvenance, SourceView,
+    TargetCommitApprovalRequest, TargetCommitApprovalView, TargetCommitReconcileView,
+    TargetCommitRequest, TargetCommitView,
     TargetBaselineCollectRequest, TargetPackageReviewRequest, TargetPreflightRequest,
-    TargetPreflightView, TargetReconcileView, TargetStageRequest, TargetStageView,
+    TargetPreflightView, TargetReconcileView, TargetRecoveryRequest, TargetRecoveryView,
+    TargetStageRequest, TargetStageView,
 )
 from .services import (
     PROFILE_ID, ProjectStore, ServiceError, build_target_deployment_package,
@@ -27,11 +30,15 @@ from .services import (
     profile_detail, profile_summary, project_deployment_plan, project_view, require_inventory, require_live, select_profile,
     review_target_deployment_package, select_source_profile, assess_project, test_source_connection,
     update_preview, upload_source, stage_target_package, reconcile_target_stage,
+    commit_target_package, issue_target_commit_approval, reconcile_target_commit,
+    recover_target_package,
 )
 from .panos_xml import XmlApiError, normalize_source_endpoint
 from .access_audit import AuditStore, ProjectAccess, SESSION_COOKIE, SESSION_SECONDS
 from .project_state import DeploymentEvent, DeploymentPackage, SourceSnapshot, TargetBaseline, sha256_file
 from .artifacts import decode_artifact_key
+
+SENSITIVE_PACKAGE_FIELDS = {"approval_token_sha256", "approval_actor_sha256"}
 
 
 def _error(code: str, message: str, status: int) -> JSONResponse:
@@ -151,7 +158,11 @@ def create_app(store: ProjectStore | None = None, *,
             ("POST", "target/package/review"): "TARGET_PACKAGE_REVIEW",
             ("POST", "target/preflight/check"): "TARGET_PREFLIGHT_CHECK",
             ("POST", "target/stage"): "TARGET_STAGE",
-            ("POST", "target/stage/reconcile"): "TARGET_STAGE_RECONCILE"}.get((request.method, suffix))
+            ("POST", "target/stage/reconcile"): "TARGET_STAGE_RECONCILE",
+            ("POST", "target/commit/approval"): "TARGET_COMMIT_APPROVAL",
+            ("POST", "target/commit"): "TARGET_COMMIT",
+            ("POST", "target/commit/reconcile"): "TARGET_COMMIT_RECONCILE",
+            ("POST", "target/recovery"): "TARGET_RECOVERY"}.get((request.method, suffix))
         audit = request.app.state.audit
         digest = project.source_provenance.sha256 if project.source_provenance else None
         if not request.app.state.access.allows(project_id, token):
@@ -218,6 +229,8 @@ def create_app(store: ProjectStore | None = None, *,
             "panos_target_read_only_preflight": bool(request.app.state.allowed_target_endpoints),
             "panos_target_stage_validate": (request.app.state.deployment_mode == "lab" and
                 bool(request.app.state.allowed_target_endpoints)),
+            "panos_target_commit_recovery": (request.app.state.deployment_mode == "lab" and
+                bool(request.app.state.allowed_target_endpoints)),
             "deployment_mode": request.app.state.deployment_mode},
             "switch": {"backend_enabled": False}},
             "verified_hardware_profiles": [p.id for p in profiles if p.profile_status == "verified"],
@@ -255,7 +268,8 @@ def create_app(store: ProjectStore | None = None, *,
         current_store(request).get(project_id)
         return current_store(request).database.snapshots(project_id)
 
-    @app.get("/api/v1/projects/{project_id}/deployment-package", response_model=DeploymentPackage)
+    @app.get("/api/v1/projects/{project_id}/deployment-package", response_model=DeploymentPackage,
+        response_model_exclude=SENSITIVE_PACKAGE_FIELDS)
     async def get_deployment_package(project_id: str, request: Request):
         project = current_store(request).get(project_id)
         if not project.active_package_id:
@@ -317,12 +331,14 @@ def create_app(store: ProjectStore | None = None, *,
             raise ServiceError("TARGET_BASELINE_NOT_AVAILABLE", "No target baseline has been collected.", 409)
         return project.target_baseline
 
-    @app.post("/api/v1/projects/{project_id}/target/package/build", response_model=DeploymentPackage)
+    @app.post("/api/v1/projects/{project_id}/target/package/build", response_model=DeploymentPackage,
+        response_model_exclude=SENSITIVE_PACKAGE_FIELDS)
     async def post_build_target_package(project_id: str, request: Request):
         return await build_target_deployment_package(current_store(request),
             current_store(request).get(project_id))
 
-    @app.post("/api/v1/projects/{project_id}/target/package/review", response_model=DeploymentPackage)
+    @app.post("/api/v1/projects/{project_id}/target/package/review", response_model=DeploymentPackage,
+        response_model_exclude=SENSITIVE_PACKAGE_FIELDS)
     async def post_review_target_package(project_id: str, body: TargetPackageReviewRequest,
         request: Request):
         actor = ProjectAccess.fingerprint(request.cookies.get(SESSION_COOKIE))
@@ -361,6 +377,58 @@ def create_app(store: ProjectStore | None = None, *,
             host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
             ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
             expected_model=body.expected_model,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
+
+    @app.post("/api/v1/projects/{project_id}/target/commit/approval",
+        response_model=TargetCommitApprovalView)
+    async def post_target_commit_approval(project_id: str, body: TargetCommitApprovalRequest,
+        request: Request):
+        if request.app.state.deployment_mode != "lab":
+            raise ServiceError("LIVE_DEPLOYMENT_DISABLED",
+                "Commit approval is disabled outside approved lab mode.", 403)
+        actor = ProjectAccess.fingerprint(request.cookies.get(SESSION_COOKIE))
+        return issue_target_commit_approval(current_store(request), current_store(request).get(project_id),
+            expected_serial=body.expected_serial, expected_model=body.expected_model,
+            confirmed_target_hostname=body.confirmed_target_hostname, actor_sha256=actor)
+
+    @app.post("/api/v1/projects/{project_id}/target/commit", response_model=TargetCommitView)
+    async def post_target_commit(project_id: str, body: TargetCommitRequest, request: Request):
+        if request.app.state.deployment_mode != "lab":
+            raise ServiceError("LIVE_DEPLOYMENT_DISABLED",
+                "Target commit is disabled outside approved lab mode.", 403)
+        actor = ProjectAccess.fingerprint(request.cookies.get(SESSION_COOKIE))
+        return await commit_target_package(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
+            expected_model=body.expected_model,
+            confirmed_target_hostname=body.confirmed_target_hostname,
+            approval_token=body.approval_token.get_secret_value(), actor_sha256=actor,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
+
+    @app.post("/api/v1/projects/{project_id}/target/commit/reconcile",
+        response_model=TargetCommitReconcileView)
+    async def post_reconcile_target_commit(project_id: str, body: TargetStageRequest,
+        request: Request):
+        if request.app.state.deployment_mode != "lab":
+            raise ServiceError("LIVE_DEPLOYMENT_DISABLED",
+                "Commit reconciliation is disabled outside approved lab mode.", 403)
+        return await reconcile_target_commit(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
+            expected_model=body.expected_model,
+            allowed_endpoints=request.app.state.allowed_target_endpoints)
+
+    @app.post("/api/v1/projects/{project_id}/target/recovery", response_model=TargetRecoveryView)
+    async def post_target_recovery(project_id: str, body: TargetRecoveryRequest, request: Request):
+        if request.app.state.deployment_mode != "lab":
+            raise ServiceError("LIVE_DEPLOYMENT_DISABLED",
+                "Target recovery is disabled outside approved lab mode.", 403)
+        return await recover_target_package(current_store(request), current_store(request).get(project_id),
+            host=body.host, port=body.port, api_key=body.api_key.get_secret_value(),
+            ca_pem=body.ca_certificate_pem, expected_serial=body.expected_serial,
+            expected_model=body.expected_model,
+            confirmed_target_hostname=body.confirmed_target_hostname,
+            recovery_confirmation=body.recovery_confirmation,
             allowed_endpoints=request.app.state.allowed_target_endpoints)
 
     async def xml_stream(project, path: Path):

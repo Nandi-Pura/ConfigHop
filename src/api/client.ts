@@ -1,4 +1,4 @@
-import type { CandidateMetadata, Capabilities, CompatibilityAssessment, DeploymentPackage, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload, TargetBaseline, TargetPreflight, TargetReconcile, TargetStage } from './types'
+import type { CandidateMetadata, Capabilities, CompatibilityAssessment, DeploymentPackage, EvidenceRecord, HardwareProfileDetail, HardwareProfileSummary, InterfaceMapping, InventoryView, MigrationPreview, ProjectState, SourceConnectionInput, SourceConnectionTest, SourceUpload, TargetBaseline, TargetCommit, TargetCommitApproval, TargetCommitReconcile, TargetPreflight, TargetReconcile, TargetRecovery, TargetStage } from './types'
 
 const LOCAL_API_HOST = typeof window !== 'undefined' && window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1'
 export const API_BASE = (import.meta.env.VITE_CONFIGHOP_API_URL || `http://${LOCAL_API_HOST}:8000/api/v1`).replace(/\/$/, '')
@@ -79,6 +79,18 @@ export const api = {
     method: 'POST', body: JSON.stringify(input), signal,
   }),
   reconcileTargetStage: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; confirmed_target_hostname: string }, signal?: AbortSignal) => request<TargetReconcile>(`/projects/${id}/target/stage/reconcile`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  issueTargetCommitApproval: (id: string, input: { expected_serial: string; expected_model: string; confirmed_target_hostname: string }, signal?: AbortSignal) => request<TargetCommitApproval>(`/projects/${id}/target/commit/approval`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  commitTargetPackage: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; confirmed_target_hostname: string; approval_token: string }, signal?: AbortSignal) => request<TargetCommit>(`/projects/${id}/target/commit`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  reconcileTargetCommit: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; confirmed_target_hostname: string }, signal?: AbortSignal) => request<TargetCommitReconcile>(`/projects/${id}/target/commit/reconcile`, {
+    method: 'POST', body: JSON.stringify(input), signal,
+  }),
+  recoverTargetPackage: (id: string, input: SourceConnectionInput & { expected_serial: string; expected_model: string; confirmed_target_hostname: string; recovery_confirmation: string }, signal?: AbortSignal) => request<TargetRecovery>(`/projects/${id}/target/recovery`, {
     method: 'POST', body: JSON.stringify(input), signal,
   }),
   getSource: (id: string, signal?: AbortSignal) => xml(`/projects/${id}/source`, signal),

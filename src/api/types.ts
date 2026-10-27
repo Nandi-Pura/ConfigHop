@@ -96,7 +96,17 @@ export interface DeploymentPackage {
   change_summary_sha256: string | null
   validation_sha256: string | null
   validation_job_id: string | null
-  ambiguous_operation: 'IMPORT' | 'LOAD' | 'VALIDATE' | null
+  ambiguous_operation: 'IMPORT' | 'LOAD' | 'VALIDATE' | 'COMMIT' | 'RECOVERY_LOAD' | 'RECOVERY_VALIDATE' | 'RECOVERY_COMMIT' | null
+  approval_sha256: string | null
+  approval_expires_at_utc: string | null
+  approval_used_at_utc: string | null
+  commit_job_id: string | null
+  commit_result_sha256: string | null
+  post_verification_sha256: string | null
+  recovery_load_sha256: string | null
+  recovery_validation_sha256: string | null
+  recovery_commit_job_id: string | null
+  recovery_verification_sha256: string | null
   status: string
 }
 
@@ -116,6 +126,40 @@ export interface TargetStage {
 
 export interface TargetReconcile extends TargetStage {
   reconciliation: 'CONFIRMED_LOADED' | 'RUNNING_UNCHANGED' | 'STILL_AMBIGUOUS' | 'DRIFTED'
+}
+
+export interface TargetCommitApproval {
+  package_id: string
+  status: 'AWAITING_COMMIT_APPROVAL'
+  target_serial: string
+  approval_token: string
+  approval_expires_at_utc: string
+  message: string
+}
+
+export interface TargetCommit {
+  package_id: string
+  status: string
+  commit_job_id: string | null
+  commit_result_sha256: string | null
+  post_verification_sha256: string | null
+  ambiguous_operation: string | null
+  message: string
+}
+
+export interface TargetCommitReconcile extends TargetCommit {
+  reconciliation: 'CONFIRMED_COMMITTED' | 'RUNNING_UNCHANGED' | 'STILL_AMBIGUOUS' | 'DRIFTED'
+}
+
+export interface TargetRecovery {
+  package_id: string
+  status: string
+  recovery_load_sha256: string | null
+  recovery_validation_sha256: string | null
+  recovery_commit_job_id: string | null
+  recovery_verification_sha256: string | null
+  ambiguous_operation: string | null
+  message: string
 }
 
 export interface Capabilities {

@@ -69,6 +69,16 @@ PACKAGE = {
     "validation_sha256": None,
     "validation_job_id": None,
     "ambiguous_operation": None,
+    "approval_sha256": None,
+    "approval_expires_at_utc": None,
+    "approval_used_at_utc": None,
+    "commit_job_id": None,
+    "commit_result_sha256": None,
+    "post_verification_sha256": None,
+    "recovery_load_sha256": None,
+    "recovery_validation_sha256": None,
+    "recovery_commit_job_id": None,
+    "recovery_verification_sha256": None,
     "status": "DRAFT",
 }
 
@@ -79,7 +89,8 @@ def fulfill(route: Route, body, status=200):
 
 def main():
     state = {"baseline": False, "package": False, "reviewed": False, "staged": False,
-        "ambiguous": False,
+        "approved": False, "committed": False, "ambiguous": False,
+        "commit_ambiguous": False, "recovered": False,
         "connection_attempts": 0}
     request_bodies = []
 
@@ -90,7 +101,8 @@ def main():
             request_bodies.append({"path": path, "body": json.loads(request.post_data)})
         if path == "/capabilities":
             return fulfill(route, {"domains": {"firewall": {
-                "panos_target_stage_validate": True, "deployment_mode": "lab"}}})
+                "panos_target_stage_validate": True, "panos_target_commit_recovery": True,
+                "deployment_mode": "lab"}}})
         if path == "/hardware-profiles":
             return fulfill(route, [PROFILE])
         if path == "/evidence":
@@ -149,6 +161,30 @@ def main():
                 body.update({"review_id": "review-1", "review_sha256": "e" * 64,
                     "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
                     "ambiguous_operation": "IMPORT", "status": "STATUS_UNKNOWN"})
+            if state["approved"]:
+                body.update({"review_id": "review-1", "review_sha256": "e" * 64,
+                    "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                    "loaded_candidate_sha256": "d" * 64, "change_summary_sha256": "3" * 64,
+                    "validation_sha256": "4" * 64, "validation_job_id": "42",
+                    "approval_expires_at_utc": "2026-10-27T10:10:00Z",
+                    "status": "AWAITING_COMMIT_APPROVAL"})
+            if state["committed"]:
+                body.update({"review_id": "review-1", "review_sha256": "e" * 64,
+                    "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                    "validation_sha256": "4" * 64, "commit_job_id": "84",
+                    "commit_result_sha256": "5" * 64, "post_verification_sha256": "6" * 64,
+                    "status": "SUCCEEDED"})
+            if state["commit_ambiguous"]:
+                body.update({"review_id": "review-1", "review_sha256": "e" * 64,
+                    "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                    "validation_sha256": "4" * 64, "approval_used_at_utc": "2026-10-27T10:00:00Z",
+                    "ambiguous_operation": "COMMIT", "status": "STATUS_UNKNOWN"})
+            if state["recovered"]:
+                body.update({"review_id": "review-1", "review_sha256": "e" * 64,
+                    "running_backup_sha256": "1" * 64, "candidate_backup_sha256": "2" * 64,
+                    "recovery_load_sha256": "7" * 64, "recovery_validation_sha256": "8" * 64,
+                    "recovery_commit_job_id": "88", "recovery_verification_sha256": "9" * 64,
+                    "status": "RECOVERED"})
             return fulfill(route, body)
         if path == f"/projects/{PROJECT_ID}/target/connection/test":
             state["connection_attempts"] += 1
@@ -189,6 +225,30 @@ def main():
                 "ambiguous_operation": "IMPORT", "commit_created": False,
                 "reconciliation": "STILL_AMBIGUOUS",
                 "message": "The import may exist, but read-only checks cannot prove it. Do not retry automatically."})
+        if path == f"/projects/{PROJECT_ID}/target/commit/approval":
+            state["approved"] = True
+            return fulfill(route, {"package_id": "package-1", "status": "AWAITING_COMMIT_APPROVAL",
+                "target_serial": "TARGET1", "approval_token": "memory-only-approval-token-1234567890",
+                "approval_expires_at_utc": "2026-10-27T10:10:00Z",
+                "message": "One-time approval issued."})
+        if path == f"/projects/{PROJECT_ID}/target/commit":
+            state["committed"] = True
+            return fulfill(route, {"package_id": "package-1", "status": "SUCCEEDED",
+                "commit_job_id": "84", "commit_result_sha256": "5" * 64,
+                "post_verification_sha256": "6" * 64, "ambiguous_operation": None,
+                "message": "Commit job finished and active configuration matches."})
+        if path == f"/projects/{PROJECT_ID}/target/commit/reconcile":
+            return fulfill(route, {"package_id": "package-1", "status": "STATUS_UNKNOWN",
+                "commit_job_id": None, "commit_result_sha256": None,
+                "post_verification_sha256": None, "ambiguous_operation": "COMMIT",
+                "reconciliation": "STILL_AMBIGUOUS",
+                "message": "No retry was performed."})
+        if path == f"/projects/{PROJECT_ID}/target/recovery":
+            state["recovered"] = True
+            return fulfill(route, {"package_id": "package-1", "status": "RECOVERED",
+                "recovery_load_sha256": "7" * 64, "recovery_validation_sha256": "8" * 64,
+                "recovery_commit_job_id": "88", "recovery_verification_sha256": "9" * 64,
+                "ambiguous_operation": None, "message": "Backup validated and verified."})
         return fulfill(route, {"error": {"code": "UNEXPECTED_UAT_ROUTE", "message": path}}, 500)
 
     with sync_playwright() as playwright:
@@ -262,6 +322,24 @@ def main():
         panel.get_by_text("Staging complete", exact=True).wait_for()
         assert panel.get_by_label("XML API key").input_value() == ""
 
+        approval_input = panel.get_by_label("Type APPROVE COMMIT", exact=False)
+        approval_input.fill("APPROVE COMMIT target-fw")
+        approval_input.focus()
+        page.keyboard.press("Tab")
+        assert page.evaluate("document.activeElement.textContent") == "Issue One-time Commit Approval"
+        page.keyboard.press("Enter")
+        panel.get_by_text("Approval ready", exact=True).wait_for()
+        panel.get_by_label("Management IP").fill("192.0.2.20")
+        panel.get_by_label("XML API key").fill("request-only-key-commit")
+        panel.get_by_role("button", name="Test Target Connection").click()
+        panel.locator(".target-identity").get_by_text("target-fw", exact=True).wait_for()
+        commit_button = panel.get_by_role("button", name="Commit Validated Candidate")
+        assert commit_button.is_enabled()
+        commit_button.focus()
+        page.keyboard.press("Enter")
+        panel.get_by_text("Commit verified", exact=True).wait_for()
+        assert panel.get_by_label("XML API key").input_value() == ""
+
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(100)
         overflow = panel.evaluate("element => element.scrollWidth - element.clientWidth")
@@ -274,7 +352,8 @@ def main():
         assert any(item["path"].endswith("/target/stage") and item["body"]["confirmed_target_hostname"] == "target-fw" for item in request_bodies)
         assert "request-only-key" not in json.dumps(PACKAGE)
 
-        state.update({"staged": False, "ambiguous": True})
+        state.update({"staged": False, "approved": False, "committed": False,
+            "ambiguous": True, "commit_ambiguous": False, "recovered": False})
         ambiguous_page = context.new_page()
         ambiguous_page.on("pageerror", lambda error: page_errors.append(str(error)))
         ambiguous_page.on("console", lambda message: console_errors.append(message.text)
@@ -293,18 +372,53 @@ def main():
         ambiguous_panel.get_by_label("XML API key").fill("request-only-key-4")
         ambiguous_panel.get_by_role("button", name="Test Target Connection").click()
         ambiguous_panel.locator(".target-identity").get_by_text("target-fw", exact=True).wait_for()
-        ambiguous_panel.get_by_role("button", name="Run Read-only Reconciliation").click()
+        ambiguous_panel.get_by_role("button", name="Run Read-only Stage Reconciliation").click()
         ambiguous_panel.get_by_text("Still Ambiguous", exact=True).wait_for()
         assert ambiguous_panel.get_by_text("Do not retry automatically.", exact=False).is_visible()
         assert ambiguous_panel.get_by_label("XML API key").input_value() == ""
         assert sum(item["path"].endswith("/target/stage") for item in request_bodies) == 1
         assert sum(item["path"].endswith("/target/stage/reconcile") for item in request_bodies) == 1
         ambiguous_page.close()
+
+        state.update({"ambiguous": False, "commit_ambiguous": True, "recovered": False})
+        recovery_page = context.new_page()
+        recovery_page.on("pageerror", lambda error: page_errors.append(str(error)))
+        recovery_page.on("console", lambda message: console_errors.append(message.text)
+            if message.type == "error" and not message.text.startswith("Failed to load resource") else None)
+        recovery_page.route("**/api/v1/**", api_route)
+        recovery_page.add_init_script("""localStorage.setItem('confighop-project', JSON.stringify({
+            project_id: 'uat-target-project', project_name: 'Target UAT', source_filename: null,
+            target_profile_id: 'paloalto-pa-5410', mappings: []
+        }))""")
+        recovery_page.goto("http://127.0.0.1:5174/", wait_until="networkidle")
+        recovery_page.get_by_label("Target vendor").select_option(label="Palo Alto Networks")
+        recovery_page.get_by_role("button", name="Load Project", exact=True).click()
+        recovery_panel = recovery_page.locator("section", has_text="Target Migration Review")
+        recovery_panel.get_by_text("Commit result is unknown", exact=True).wait_for()
+        recovery_panel.get_by_label("Management IP").fill("192.0.2.20")
+        recovery_panel.get_by_label("XML API key").fill("request-only-key-recovery")
+        recovery_panel.get_by_role("button", name="Test Target Connection").click()
+        recovery_panel.locator(".target-identity").get_by_text("target-fw", exact=True).wait_for()
+        recovery_panel.get_by_role("button", name="Run Read-only Commit Reconciliation").click()
+        recovery_panel.get_by_text("Still Ambiguous", exact=True).wait_for()
+        recovery_panel.get_by_label("Management IP").fill("192.0.2.20")
+        recovery_panel.get_by_label("XML API key").fill("request-only-key-recovery-2")
+        recovery_panel.get_by_role("button", name="Test Target Connection").click()
+        recovery_input = recovery_panel.get_by_label("Type RECOVER", exact=False)
+        recovery_input.fill("RECOVER target-fw")
+        recovery_input.focus()
+        recovery_page.keyboard.press("Tab")
+        assert recovery_page.evaluate("document.activeElement.textContent") == "Run Validated Recovery"
+        recovery_page.keyboard.press("Enter")
+        recovery_panel.get_by_text("Recovery verified", exact=True).wait_for()
+        assert recovery_panel.get_by_label("XML API key").input_value() == ""
+        recovery_page.close()
         print(json.dumps({"target_ui_flow": "passed", "empty_loading_error_success": True,
             "keyboard_focus": True, "mobile_overflow_px": overflow, "page_errors": page_errors,
             "console_errors": console_errors, "expected_http_failures": expected_http_failures,
             "stage_validate": True, "ambiguous_reconcile": True, "blind_retry": False,
-            "commit_created": False, "api_requests": len(request_bodies)}))
+            "commit_verified": True, "recovery_verified": True,
+            "api_requests": len(request_bodies)}))
         context.close()
         browser.close()
 

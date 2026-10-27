@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from confighop_api.panos_xml import (
-    XmlApiError, create_source_client, export_configuration, import_configuration,
+    XmlApiError, commit_configuration, create_source_client, export_configuration, import_configuration,
     load_configuration, read_job, read_running_configuration, read_system_info,
     validate_full,
 )
@@ -307,6 +307,38 @@ def test_load_validate_and_job_poll_use_expected_operational_commands():
         "<validate><full></full></validate>",
         "<show><jobs><id>42</id></jobs></show>",
     ]
+
+
+def test_commit_requires_an_enqueued_job_and_uses_commit_request():
+    seen: list[dict[str, str]] = []
+
+    def responder(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(httpx.QueryParams(request.content.decode())))
+        return httpx.Response(200, content=(
+            b'<response status="success" code="19"><result><msg><line>'
+            b'Commit job enqueued with jobid 84</line></msg><job>84</job></result></response>'))
+
+    async def run():
+        async with httpx.AsyncClient(base_url="https://target.example.test/",
+            transport=httpx.MockTransport(responder)) as client:
+            return await commit_configuration(client, "secret")
+
+    receipt = asyncio.run(run())
+    assert receipt.job_id == "84"
+    assert seen == [{"type": "commit", "cmd": "<commit></commit>"}]
+
+
+def test_commit_rejects_success_without_expected_job():
+    async def run():
+        async with httpx.AsyncClient(base_url="https://target.example.test/",
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, content=(
+                b'<response status="success" code="19"><result><msg>'
+                b'There are no changes to commit.</msg></result></response>')))) as client:
+            await commit_configuration(client, "secret")
+
+    with pytest.raises(XmlApiError) as error:
+        asyncio.run(run())
+    assert error.value.code == "XML_API_COMMIT_NOT_QUEUED"
 
 
 @pytest.mark.parametrize("document,code", [

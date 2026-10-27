@@ -215,7 +215,7 @@
 .target-connection input,.target-connection textarea,.target-review-confirm input{width:100%;min-height:44px;border:1px solid var(--border);border-radius:5px;background:#081019;color:var(--text);padding:9px 10px;font:inherit;font-size:11px;outline:none}
 .target-connection textarea{resize:vertical;font-family:"JetBrains Mono",Consolas,monospace;font-size:9px;line-height:1.4}
 .target-actions{display:grid;grid-template-columns:1fr 1.3fr;gap:8px;max-width:520px}
-.target-actions .btn,.target-stage-heading .btn,.target-review-confirm .btn,.target-preflight-stage>.btn,.target-deploy-stage>.btn,.target-ambiguous .btn{min-height:44px;height:auto}
+.target-actions .btn,.target-stage-heading .btn,.target-review-confirm .btn,.target-preflight-stage>.btn,.target-deploy-stage>.btn,.target-commit-stage .btn,.target-recovery-stage>.btn,.target-ambiguous .btn{min-height:44px;height:auto}
 .target-identity,.target-error,.target-state-message{display:flex;align-items:center;gap:10px;min-height:40px;padding:9px 10px;border:1px solid var(--border);border-radius:5px;background:#0b151e;line-height:1.4}
 .target-identity span,.target-state-message{color:var(--muted)}
 .target-state-message strong{flex:none;color:var(--text)}
@@ -227,7 +227,7 @@
 .target-baseline-summary>div,.target-preservation>div{display:flex;flex-direction:column;gap:3px;min-width:0;padding:9px 10px;border:1px solid var(--border);border-radius:5px;background:#0b151e}
 .target-baseline-summary span,.target-baseline-summary small,.target-preservation span{color:var(--muted);font-size:9px}
 .target-baseline-summary code,.target-baseline-summary small{overflow-wrap:anywhere}
-.target-package-stage,.target-preflight-stage,.target-deploy-stage{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:6px;background:#0a131b;min-width:0}
+.target-package-stage,.target-preflight-stage,.target-deploy-stage,.target-commit-stage,.target-recovery-stage{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--border);border-radius:6px;background:#0a131b;min-width:0}
 .target-preservation{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
 .target-preservation strong{color:var(--success);font-size:10px}
 .target-change-table{max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:5px}
@@ -253,6 +253,13 @@
 .target-stage-confirm{display:flex;flex-direction:column;gap:6px;max-width:620px;color:#b9c6d0;font-size:10px;font-weight:700}
 .target-stage-confirm code{color:var(--warning)}
 .target-stage-confirm input{width:100%;min-height:44px;border:1px solid var(--border);border-radius:5px;background:#081019;color:var(--text);padding:9px 10px;font:inherit;outline:none}
+.target-approval-control{display:grid;grid-template-columns:minmax(240px,1fr) auto;align-items:end;gap:9px}
+.target-approval-control label{display:flex;flex-direction:column;gap:6px;color:#b9c6d0;font-size:10px;font-weight:700}
+.target-approval-control code{color:var(--warning)}
+.target-approval-control input{width:100%;min-height:44px;border:1px solid var(--border);border-radius:5px;background:#081019;color:var(--text);padding:9px 10px;font:inherit;outline:none}
+.target-approval-control small,.target-approval-record small,.target-commit-stage>small,.target-recovery-stage>small{color:var(--muted)}
+.target-approval-record{display:flex;align-items:flex-start;flex-direction:column;gap:6px;padding:10px;border:1px solid #816626;border-radius:5px;background:#251f10;color:#f6d887;line-height:1.45}
+.target-approval-record .btn{margin-top:2px}
 .target-ambiguous{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:10px;border:1px solid #8b4040;border-radius:5px;background:#281719;color:#ffd4d4;line-height:1.45}
 .target-validation-evidence{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 12px;padding:10px;border:1px solid #287248;border-radius:5px;background:#10261d;color:#9eebbd}
 .target-validation-evidence strong{grid-column:1/-1}.target-validation-evidence span{color:#8bc9a5;font-size:9px}.target-validation-evidence code{overflow-wrap:anywhere;font-size:9px}
@@ -267,4 +274,4 @@
 .target-workflow :is(button,input,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .target-workflow fieldset:disabled{opacity:.72}.target-workflow button:disabled{cursor:not-allowed;opacity:.55}
 @media(max-width:1200px){.target-connection{grid-template-columns:1fr 100px 1fr}.target-ca{grid-column:1/-1}.target-preservation,.preflight-checks{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:700px){.target-workflow{padding:8px}.target-workflow-intro,.target-stage-heading,.target-preflight-stage>div:first-child{align-items:stretch;flex-direction:column}.target-state{align-self:flex-start}.target-connection,.target-baseline-summary,.target-preservation,.preflight-checks,.target-review-confirm,.target-actions,.target-validation-evidence{grid-template-columns:1fr}.target-ca{grid-column:auto}.target-actions{max-width:none}.target-stage-heading .btn,.target-review-confirm .btn,.target-preflight-stage>.btn,.target-deploy-stage>.btn,.target-ambiguous .btn{width:100%}.target-identity{align-items:flex-start;flex-direction:column}.target-identity code{margin-left:0}.target-review-record{grid-template-columns:1fr}.target-change-table{max-width:100%}}
+@media(max-width:700px){.target-workflow{padding:8px}.target-workflow-intro,.target-stage-heading,.target-preflight-stage>div:first-child{align-items:stretch;flex-direction:column}.target-state{align-self:flex-start}.target-connection,.target-baseline-summary,.target-preservation,.preflight-checks,.target-review-confirm,.target-actions,.target-validation-evidence,.target-approval-control{grid-template-columns:1fr}.target-ca{grid-column:auto}.target-actions{max-width:none}.target-stage-heading .btn,.target-review-confirm .btn,.target-preflight-stage>.btn,.target-deploy-stage>.btn,.target-commit-stage .btn,.target-recovery-stage>.btn,.target-ambiguous .btn{width:100%}.target-identity{align-items:flex-start;flex-direction:column}.target-identity code{margin-left:0}.target-review-record{grid-template-columns:1fr}.target-change-table{max-width:100%}}

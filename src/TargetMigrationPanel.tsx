@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, ApiClientError } from './api/client'
-import type { Capabilities, DeploymentPackage, SourceConnectionInput, SourceConnectionTest, TargetBaseline, TargetPreflight, TargetReconcile, TargetStage } from './api/types'
+import type { Capabilities, DeploymentPackage, SourceConnectionInput, SourceConnectionTest, TargetBaseline, TargetCommit, TargetCommitApproval, TargetCommitReconcile, TargetPreflight, TargetReconcile, TargetRecovery, TargetStage } from './api/types'
 
 
-type BusyAction = 'loading' | 'testing' | 'collecting' | 'building' | 'reviewing' | 'preflight' | 'staging' | 'reconciling' | null
+type BusyAction = 'loading' | 'testing' | 'collecting' | 'building' | 'reviewing' | 'preflight' | 'staging' | 'reconciling' | 'approving' | 'committing' | 'commit-reconciling' | 'recovering' | null
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiClientError ? `${error.code}: ${error.message}` : 'The target workflow could not complete the request.'
@@ -32,12 +32,17 @@ export default function TargetMigrationPanel({ projectId, candidateAvailable, ta
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null)
   const [stageConfirmation, setStageConfirmation] = useState('')
   const [stageResult, setStageResult] = useState<TargetStage | TargetReconcile | null>(null)
+  const [commitConfirmation, setCommitConfirmation] = useState('')
+  const [approval, setApproval] = useState<TargetCommitApproval | null>(null)
+  const [commitResult, setCommitResult] = useState<TargetCommit | TargetCommitReconcile | null>(null)
+  const [recoveryConfirmation, setRecoveryConfirmation] = useState('')
+  const [recoveryResult, setRecoveryResult] = useState<TargetRecovery | null>(null)
   const [busy, setBusy] = useState<BusyAction>('loading')
   const [error, setError] = useState('')
 
   useEffect(() => {
     const controller = new AbortController()
-    setBaseline(null); setDeploymentPackage(null); setAccepted([]); setPreflight(null); setStageResult(null); setError(''); setBusy('loading')
+    setBaseline(null); setDeploymentPackage(null); setAccepted([]); setPreflight(null); setStageResult(null); setApproval(null); setCommitResult(null); setRecoveryResult(null); setError(''); setBusy('loading')
     Promise.allSettled([
       api.getTargetBaseline(projectId, controller.signal),
       api.getDeploymentPackage(projectId, controller.signal),
@@ -159,15 +164,83 @@ export default function TargetMigrationPanel({ projectId, candidateAvailable, ta
     finally { setBusy(null) }
   }
 
+  async function issueCommitApproval() {
+    if (!baseline || !targetModel) return
+    setBusy('approving'); setError(''); setApproval(null); setCommitResult(null)
+    try {
+      const result = await api.issueTargetCommitApproval(projectId, {
+        expected_serial: baseline.serial, expected_model: targetModel,
+        confirmed_target_hostname: baseline.hostname,
+      })
+      setApproval(result)
+      setDeploymentPackage(await api.getDeploymentPackage(projectId))
+    } catch (requestError) { setError(errorMessage(requestError)) }
+    finally { setBusy(null) }
+  }
+
+  async function commitPackage() {
+    if (!connection || !baseline || !targetModel || !approval) return
+    setBusy('committing'); setError(''); setCommitResult(null)
+    try {
+      const result = await api.commitTargetPackage(projectId, { ...input,
+        expected_serial: baseline.serial, expected_model: targetModel,
+        confirmed_target_hostname: baseline.hostname,
+        approval_token: approval.approval_token,
+      })
+      setCommitResult(result)
+    } catch (requestError) { setError(errorMessage(requestError)) }
+    finally {
+      setApproval(null); setApiKey(''); setCaPem(''); setConnection(null)
+      try { setDeploymentPackage(await api.getDeploymentPackage(projectId)) } catch {}
+      setBusy(null)
+    }
+  }
+
+  async function reconcileCommit() {
+    if (!connection || !baseline || !targetModel) return
+    setBusy('commit-reconciling'); setError(''); setCommitResult(null)
+    try {
+      const result = await api.reconcileTargetCommit(projectId, { ...input,
+        expected_serial: baseline.serial, expected_model: targetModel,
+        confirmed_target_hostname: baseline.hostname,
+      })
+      setCommitResult(result)
+    } catch (requestError) { setError(errorMessage(requestError)) }
+    finally { setApiKey(''); setCaPem(''); setConnection(null); setBusy(null) }
+  }
+
+  async function recoverPackage() {
+    if (!connection || !baseline || !targetModel) return
+    setBusy('recovering'); setError(''); setRecoveryResult(null)
+    try {
+      const result = await api.recoverTargetPackage(projectId, { ...input,
+        expected_serial: baseline.serial, expected_model: targetModel,
+        confirmed_target_hostname: baseline.hostname,
+        recovery_confirmation: recoveryConfirmation,
+      })
+      setRecoveryResult(result)
+    } catch (requestError) { setError(errorMessage(requestError)) }
+    finally {
+      setApiKey(''); setCaPem(''); setConnection(null); setRecoveryConfirmation('')
+      try { setDeploymentPackage(await api.getDeploymentPackage(projectId)) } catch {}
+      setBusy(null)
+    }
+  }
+
   const reviewReady = !!deploymentPackage?.deployable_candidate_sha256 && !deploymentPackage.review_id &&
     !hasBlockingFinding && [...requiredCodes].every((code) => accepted.includes(code)) &&
     confirmedHostname.trim() === baseline?.hostname
   const labStageEnabled = capabilities?.domains.firewall.panos_target_stage_validate === true
+  const labCommitEnabled = capabilities?.domains.firewall.panos_target_commit_recovery === true
   const stageReady = !!connection && !!baseline && stageConfirmation === `STAGE ${baseline.hostname}`
+  const approvalReady = !!baseline && commitConfirmation === `APPROVE COMMIT ${baseline.hostname}`
+  const recoveryMutationUnknown = deploymentPackage?.status === 'STATUS_UNKNOWN' &&
+    deploymentPackage.ambiguous_operation?.startsWith('RECOVERY_')
+  const recoveryReady = !recoveryMutationUnknown && !!connection && !!baseline && recoveryConfirmation === `RECOVER ${baseline.hostname}`
 
   return <div className="target-workflow" aria-busy={busy ? 'true' : 'false'}>
     <div className="target-workflow-intro">
-      <div><strong>Target package, preflight, and staging</strong><span>Direct-firewall, single-vsys workflow. Staging stops after full validation; commit requires a separate approval flow.</span></div>
+      <div><strong>Target migration control</strong><span>Direct-firewall, single-vsys lab workflow. Staging, one-time approval, commit, verification, and recovery remain separate operations.</span></div>
       <span className={`target-state ${preflight?.status === 'PASSED' ? 'clear' : deploymentPackage?.review_id ? 'reviewed' : 'pending'}`}>{preflight?.status === 'PASSED' ? 'Preflight passed' : deploymentPackage?.review_id ? 'Package reviewed' : baseline ? 'Baseline collected' : 'Target not collected'}</span>
     </div>
 
@@ -220,10 +293,36 @@ export default function TargetMigrationPanel({ projectId, candidateAvailable, ta
             <button className="btn secondary" type="button" onClick={stagePackage} disabled={!stageReady || !!busy}>{busy === 'staging' ? 'Backing up, staging, and validating...' : 'Stage and Validate Candidate'}</button>
             {!connection && <small>Test the target connection again with fresh request-scoped credentials before staging.</small>}
           </>}
-          {deploymentPackage.status === 'STATUS_UNKNOWN' && <div className="target-ambiguous" role="alert"><strong>Device result is unknown</strong><span>The {deploymentPackage.ambiguous_operation?.toLowerCase()} request may have reached the firewall. ConfigHop will not retry it automatically.</span><button className="btn secondary" type="button" onClick={reconcileStage} disabled={!connection || !!busy}>{busy === 'reconciling' ? 'Reading target state...' : 'Run Read-only Reconciliation'}</button>{!connection && <small>Test the same target connection again before reconciliation.</small>}</div>}
+          {deploymentPackage.status === 'STATUS_UNKNOWN' && !['COMMIT', 'RECOVERY_COMMIT'].includes(deploymentPackage.ambiguous_operation ?? '') && <div className="target-ambiguous" role="alert"><strong>Device result is unknown</strong><span>The {deploymentPackage.ambiguous_operation?.toLowerCase()} request may have reached the firewall. ConfigHop will not retry it automatically.</span><button className="btn secondary" type="button" onClick={reconcileStage} disabled={!connection || !!busy}>{busy === 'reconciling' ? 'Reading target state...' : 'Run Read-only Stage Reconciliation'}</button>{!connection && <small>Test the same target connection again before reconciliation.</small>}</div>}
           {deploymentPackage.status === 'VALIDATED' && <div className="target-validation-evidence" role="status"><strong>Candidate validated, commit not created</strong><span>Running backup</span><code>{deploymentPackage.running_backup_sha256}</code><span>Candidate backup</span><code>{deploymentPackage.candidate_backup_sha256}</code><span>Loaded candidate</span><code>{deploymentPackage.loaded_candidate_sha256}</code><span>Validation evidence</span><code>{deploymentPackage.validation_sha256}</code>{deploymentPackage.validation_job_id && <><span>Validation job</span><code>{deploymentPackage.validation_job_id}</code></>}</div>}
           {stageResult && <div className={`target-stage-result ${'reconciliation' in stageResult ? stageResult.reconciliation.toLowerCase() : 'validated'}`} role="status"><strong>{'reconciliation' in stageResult ? checkLabel(stageResult.reconciliation) : 'Staging complete'}</strong><span>{stageResult.message}</span></div>}
         </>}
+      </div>}
+
+      {deploymentPackage && ['VALIDATED', 'AWAITING_COMMIT_APPROVAL', 'COMMIT_QUEUED', 'COMMIT_RUNNING', 'VERIFYING', 'SUCCEEDED', 'STATUS_UNKNOWN'].includes(deploymentPackage.status) && <div className="target-commit-stage">
+        <div className="target-stage-heading"><div><strong>Approve, commit, and verify</strong><span>The one-time approval is bound to this package, target serial, validation evidence, and browser session. A queued job is not success.</span></div><span className={`target-state ${deploymentPackage.status === 'SUCCEEDED' ? 'clear' : deploymentPackage.status === 'STATUS_UNKNOWN' ? 'unknown' : 'reviewed'}`}>{checkLabel(deploymentPackage.status)}</span></div>
+        {!labCommitEnabled ? <div className="target-state-message"><strong>Commit unavailable</strong><span>Server deployment mode is disabled. Commit remains limited to an approved lab target.</span></div> : <>
+          {['VALIDATED', 'AWAITING_COMMIT_APPROVAL'].includes(deploymentPackage.status) && <div className="target-approval-control">
+            <label><span>Type <code>APPROVE COMMIT {baseline?.hostname}</code> to issue a one-time approval.</span><input value={commitConfirmation} autoComplete="off" onChange={(event) => setCommitConfirmation(event.target.value)} /></label>
+            <button className="btn secondary" type="button" onClick={issueCommitApproval} disabled={!approvalReady || !!busy}>{busy === 'approving' ? 'Issuing one-time approval...' : deploymentPackage.status === 'AWAITING_COMMIT_APPROVAL' ? 'Reissue One-time Approval' : 'Issue One-time Commit Approval'}</button>
+            {deploymentPackage.status === 'AWAITING_COMMIT_APPROVAL' && !approval && <small>The raw token is not stored. Reissue approval if this page was refreshed.</small>}
+          </div>}
+          {approval && <div className="target-approval-record" role="status"><strong>Approval ready</strong><span>Expires {new Date(approval.approval_expires_at_utc).toLocaleString()}</span><small>The token stays in this tab only and is cleared after one commit attempt.</small><button className="btn secondary" type="button" onClick={commitPackage} disabled={!connection || !!busy}>{busy === 'committing' ? 'Committing and verifying...' : 'Commit Validated Candidate'}</button>{!connection && <small>Test the exact target connection again before commit.</small>}</div>}
+          {deploymentPackage.status === 'STATUS_UNKNOWN' && deploymentPackage.ambiguous_operation === 'COMMIT' && <div className="target-ambiguous" role="alert"><strong>Commit result is unknown</strong><span>ConfigHop consumed the approval and will not issue an automatic retry. Reconciliation only reads the job and target configuration.</span><button className="btn secondary" type="button" onClick={reconcileCommit} disabled={!connection || !!busy}>{busy === 'commit-reconciling' ? 'Reading commit evidence...' : 'Run Read-only Commit Reconciliation'}</button>{!connection && <small>Test the same target connection again before reconciliation.</small>}</div>}
+          {deploymentPackage.status === 'SUCCEEDED' && <div className="target-validation-evidence" role="status"><strong>Commit verified</strong><span>Commit job</span><code>{deploymentPackage.commit_job_id}</code><span>Terminal job evidence</span><code>{deploymentPackage.commit_result_sha256}</code><span>Post-commit verification</span><code>{deploymentPackage.post_verification_sha256}</code></div>}
+          {commitResult && <div className={`target-stage-result ${'reconciliation' in commitResult ? commitResult.reconciliation.toLowerCase() : 'validated'}`} role="status"><strong>{'reconciliation' in commitResult ? checkLabel(commitResult.reconciliation) : checkLabel(commitResult.status)}</strong><span>{commitResult.message}</span></div>}
+        </>}
+      </div>}
+
+      {deploymentPackage && ['FAILED_SAFE', 'FAILED_NEEDS_OPERATOR', 'STATUS_UNKNOWN', 'RECOVERED'].includes(deploymentPackage.status) && <div className="target-recovery-stage">
+        <div className="target-stage-heading"><div><strong>Validated recovery</strong><span>Loads the encrypted pre-stage backup, validates it, commits only when changes remain, then verifies running and candidate state.</span></div><span className={`target-state ${deploymentPackage.status === 'RECOVERED' ? 'clear' : 'unknown'}`}>{checkLabel(deploymentPackage.status)}</span></div>
+        {recoveryMutationUnknown ? <div className="target-ambiguous" role="alert"><strong>Recovery result is unknown</strong><span>The recovery mutation may have reached the firewall. ConfigHop will not retry it. Inspect the device and out-of-band access manually.</span></div> : deploymentPackage.status !== 'RECOVERED' && <>
+          <label className="target-stage-confirm"><span>Type <code>RECOVER {baseline?.hostname}</code> to confirm the exact target.</span><input value={recoveryConfirmation} autoComplete="off" onChange={(event) => setRecoveryConfirmation(event.target.value)} /></label>
+          <button className="btn secondary" type="button" onClick={recoverPackage} disabled={!labCommitEnabled || !recoveryReady || !!busy}>{busy === 'recovering' ? 'Loading, validating, and verifying backup...' : 'Run Validated Recovery'}</button>
+          {!connection && <small>Test the exact target connection again before recovery.</small>}
+        </>}
+        {deploymentPackage.status === 'RECOVERED' && <div className="target-validation-evidence" role="status"><strong>Recovery verified</strong><span>Backup load evidence</span><code>{deploymentPackage.recovery_load_sha256}</code><span>Recovery validation</span><code>{deploymentPackage.recovery_validation_sha256}</code>{deploymentPackage.recovery_commit_job_id && <><span>Recovery commit job</span><code>{deploymentPackage.recovery_commit_job_id}</code></>}<span>Recovery verification</span><code>{deploymentPackage.recovery_verification_sha256}</code></div>}
+        {recoveryResult && <div className="target-stage-result validated" role="status"><strong>{checkLabel(recoveryResult.status)}</strong><span>{recoveryResult.message}</span></div>}
       </div>}
     </>}
   </div>

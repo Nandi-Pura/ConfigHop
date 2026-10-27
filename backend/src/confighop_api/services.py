@@ -31,13 +31,14 @@ from .schemas import (
     CandidateMetadata, DependencySummary, InventorySummary, InventoryView, PhysicalInterfaceView,
     DeviceIdentityView, PlatformView, ProfileDetail, ProfileSummary, ProjectView,
     SourceConnectionTestView, SourceProvenance, SourceView, TargetPreflightView,
-    TargetReconcileView, TargetStageView,
+    TargetCommitApprovalView, TargetCommitReconcileView, TargetCommitView,
+    TargetReconcileView, TargetRecoveryView, TargetStageView,
 )
 from .artifacts import (
     ARTIFACT_FORMAT, ArtifactIntegrityError, ArtifactKeyError, EncryptedArtifactStore,
 )
 from .panos_xml import (
-    XmlApiError, create_source_client, create_target_client, export_configuration,
+    XmlApiError, commit_configuration, create_source_client, create_target_client, export_configuration,
     import_configuration, load_configuration, read_candidate_configuration,
     read_change_summary, read_job, read_preflight_probe, read_running_configuration,
     read_system_info, validate_full,
@@ -1110,6 +1111,388 @@ async def reconcile_target_stage(store: ProjectStore, project: ProjectSession, *
     async with client:
         return await reconcile_target_stage_from_client(store, project, client, api_key,
             expected_serial=expected_serial, expected_model=expected_model)
+
+
+def _target_identity_matches(identity, baseline: TargetBaseline) -> bool:
+    return (identity.serial, identity.model, identity.hostname, identity.panos_version) == (
+        baseline.serial, baseline.model, baseline.hostname, baseline.panos_version)
+
+
+def _commit_view(package: DeploymentPackage, message: str) -> TargetCommitView:
+    return TargetCommitView(package_id=package.package_id, status=package.status,
+        commit_job_id=package.commit_job_id,
+        commit_result_sha256=package.commit_result_sha256,
+        post_verification_sha256=package.post_verification_sha256,
+        ambiguous_operation=package.ambiguous_operation, message=message)
+
+
+def _recovery_view(package: DeploymentPackage, message: str) -> TargetRecoveryView:
+    return TargetRecoveryView(package_id=package.package_id, status=package.status,
+        recovery_load_sha256=package.recovery_load_sha256,
+        recovery_validation_sha256=package.recovery_validation_sha256,
+        recovery_commit_job_id=package.recovery_commit_job_id,
+        recovery_verification_sha256=package.recovery_verification_sha256,
+        ambiguous_operation=package.ambiguous_operation, message=message)
+
+
+def issue_target_commit_approval(store: ProjectStore, project: ProjectSession, *,
+    expected_serial: str, expected_model: str, confirmed_target_hostname: str,
+    actor_sha256: str) -> TargetCommitApprovalView:
+    package = store.database.package(project.active_package_id) if project.active_package_id else None
+    baseline = project.target_baseline
+    if package is None or baseline is None:
+        raise ServiceError("TARGET_PACKAGE_NOT_AVAILABLE", "A validated target package is required.", 409)
+    if (expected_serial, expected_model, confirmed_target_hostname) != (
+        baseline.serial, baseline.model, baseline.hostname):
+        raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+            "Confirmed target identity differs from the collected baseline.", 409)
+    try:
+        package, token = store.database.issue_commit_approval(package.package_id,
+            expected_input_sha256=package.input_sha256, actor_sha256=actor_sha256)
+    except ValueError as exc:
+        raise ServiceError("COMMIT_APPROVAL_NOT_AVAILABLE", str(exc), 409) from None
+    return TargetCommitApprovalView(package_id=package.package_id,
+        status="AWAITING_COMMIT_APPROVAL", target_serial=baseline.serial,
+        approval_token=token, approval_expires_at_utc=package.approval_expires_at_utc,
+        message="One-time approval issued for this validated package and target serial.")
+
+
+async def _poll_job(client: httpx.AsyncClient, api_key: str, job_id: str, *,
+    failure_code: str, failure_message: str, poll_interval_seconds: float,
+    max_poll_attempts: int):
+    for _ in range(max_poll_attempts):
+        job = await read_job(client, api_key, job_id)
+        if job.state == "SUCCEEDED":
+            return job
+        if job.state == "FAILED":
+            raise XmlApiError(failure_code, failure_message)
+        await asyncio.sleep(poll_interval_seconds)
+    raise XmlApiError("XML_API_TIMEOUT", "The device job did not finish before the polling limit.")
+
+
+def _mark_mutation_error(store: ProjectStore, package_id: str, operation: str,
+    exc: XmlApiError, *, failed_state: str) -> None:
+    ambiguous = exc.code in {
+        "XML_API_TIMEOUT", "XML_API_TRANSPORT_ERROR", "XML_API_HTTP_ERROR",
+        "XML_API_REDIRECT", "XML_API_INVALID_COMMIT", "XML_API_INVALID_JOB",
+        "XML_API_JOB_FAILED",
+    }
+    package = store.database.package(package_id)
+    if package is None:
+        return
+    try:
+        store.database.transition_package(package.package_id,
+            "STATUS_UNKNOWN" if ambiguous else failed_state,
+            expected_input_sha256=package.input_sha256,
+            ambiguous_operation=operation if ambiguous else None)
+    except ValueError:
+        pass
+
+
+async def commit_target_package_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str,
+    expected_model: str, confirmed_target_hostname: str, approval_token: str,
+    actor_sha256: str, poll_interval_seconds: float = 2.0,
+    max_poll_attempts: int = 60) -> TargetCommitView:
+    async with project.lock:
+        package = store.database.package(project.active_package_id) if project.active_package_id else None
+        baseline = project.target_baseline
+        if package is None or baseline is None or package.status != "AWAITING_COMMIT_APPROVAL":
+            raise ServiceError("COMMIT_APPROVAL_REQUIRED",
+                "Issue a fresh one-time approval for the validated package first.", 409)
+        if (expected_serial, expected_model, confirmed_target_hostname) != (
+            baseline.serial, baseline.model, baseline.hostname):
+            raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+                "Confirmed target identity differs from the collected baseline.", 409)
+        try:
+            store.database.verify_package_artifacts(package)
+            deployable = store.artifacts.read_deployable(project.project_id, package.package_id,
+                package.deployable_candidate_sha256 or "", max_plaintext_bytes=store.max_source_bytes)
+            identity = await read_system_info(client, api_key)
+            running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            change_summary = await read_change_summary(client, api_key)
+        except (ValueError, ArtifactIntegrityError, ArtifactKeyError):
+            raise ServiceError("PACKAGE_INTEGRITY_FAILED",
+                "Deployment package artifact integrity check failed.", 409) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if not _target_identity_matches(identity, baseline):
+            raise ServiceError("TARGET_IDENTITY_DRIFT", "Target identity changed before commit.", 409)
+        if (hashlib.sha256(running).hexdigest() != package.running_backup_sha256 or
+            candidate != deployable or not change_summary or
+            hashlib.sha256(change_summary).hexdigest() != package.change_summary_sha256):
+            raise ServiceError("TARGET_STATE_DRIFT",
+                "Running, candidate, or change summary changed after validation. Issue no commit.", 409)
+        try:
+            package = store.database.consume_commit_approval(package.package_id, approval_token,
+                expected_input_sha256=package.input_sha256, actor_sha256=actor_sha256)
+        except ValueError as exc:
+            raise ServiceError("COMMIT_APPROVAL_REJECTED", str(exc), 409) from None
+
+        try:
+            receipt = await commit_configuration(client, api_key)
+            package = store.database.transition_package(package.package_id, "COMMIT_RUNNING",
+                expected_input_sha256=package.input_sha256, job_id=receipt.job_id)
+            job = await _poll_job(client, api_key, receipt.job_id or "", failure_code="XML_API_COMMIT_JOB_FAILED",
+                failure_message="The target commit job failed.",
+                poll_interval_seconds=poll_interval_seconds, max_poll_attempts=max_poll_attempts)
+            package = store.database.transition_package(package.package_id, "VERIFYING",
+                expected_input_sha256=package.input_sha256,
+                evidence_sha256=job.response_sha256)
+        except asyncio.CancelledError:
+            _mark_mutation_error(store, package.package_id, "COMMIT",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "The commit request was interrupted."),
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise
+        except XmlApiError as exc:
+            _mark_mutation_error(store, package.package_id, "COMMIT", exc,
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise xml_api_service_error(exc) from None
+
+        try:
+            identity = await read_system_info(client, api_key)
+            running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            change_summary = await read_change_summary(client, api_key)
+        except XmlApiError as exc:
+            _mark_mutation_error(store, package.package_id, "COMMIT", exc,
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise xml_api_service_error(exc) from None
+        if not _target_identity_matches(identity, baseline) or running != deployable or (
+            candidate != running or change_summary):
+            try:
+                store.database.transition_package(package.package_id, "FAILED_NEEDS_OPERATOR",
+                    expected_input_sha256=package.input_sha256)
+            except ValueError:
+                pass
+            raise ServiceError("POST_COMMIT_VERIFICATION_FAILED",
+                "Commit finished, but target running state did not match the reviewed package.", 409)
+        verification_sha256 = _evidence_digest(serial=identity.serial,
+            running=hashlib.sha256(running).hexdigest(),
+            candidate=hashlib.sha256(candidate).hexdigest(), change_summary="EMPTY")
+        package = store.database.transition_package(package.package_id, "SUCCEEDED",
+            expected_input_sha256=package.input_sha256,
+            evidence_sha256=verification_sha256)
+        return _commit_view(package,
+            "Commit job finished and the active configuration matches the reviewed package.")
+
+
+async def commit_target_package(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, confirmed_target_hostname: str, approval_token: str,
+    actor_sha256: str, allowed_endpoints: set[tuple[str, int]]) -> TargetCommitView:
+    package = store.database.package(project.active_package_id) if project.active_package_id else None
+    if package is None or package.status != "AWAITING_COMMIT_APPROVAL":
+        raise ServiceError("COMMIT_APPROVAL_REQUIRED",
+            "Issue a fresh one-time approval for the validated package first.", 409)
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await commit_target_package_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model,
+            confirmed_target_hostname=confirmed_target_hostname,
+            approval_token=approval_token, actor_sha256=actor_sha256)
+
+
+async def reconcile_target_commit_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str,
+    expected_model: str) -> TargetCommitReconcileView:
+    async with project.lock:
+        package = store.database.package(project.active_package_id) if project.active_package_id else None
+        baseline = project.target_baseline
+        if (package is None or baseline is None or package.status != "STATUS_UNKNOWN" or
+            package.ambiguous_operation != "COMMIT"):
+            raise ServiceError("COMMIT_RECONCILIATION_NOT_REQUIRED",
+                "Read-only commit reconciliation requires an ambiguous commit result.", 409)
+        if (expected_serial, expected_model) != (baseline.serial, baseline.model):
+            raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+                "Confirmed target identity differs from the collected baseline.", 409)
+        try:
+            deployable = store.artifacts.read_deployable(project.project_id, package.package_id,
+                package.deployable_candidate_sha256 or "", max_plaintext_bytes=store.max_source_bytes)
+            backup = store.artifacts.read_backup(project.project_id, package.package_id, "running",
+                package.running_backup_sha256 or "", max_plaintext_bytes=store.max_source_bytes)
+            identity = await read_system_info(client, api_key)
+            running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            summary = await read_change_summary(client, api_key)
+            job_state = (await read_job(client, api_key, package.commit_job_id)).state if package.commit_job_id else None
+        except (ValueError, ArtifactIntegrityError, ArtifactKeyError):
+            raise ServiceError("PACKAGE_INTEGRITY_FAILED",
+                "Deployment package artifact integrity check failed.", 409) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if not _target_identity_matches(identity, baseline):
+            reconciliation, message = "DRIFTED", "Target identity changed. Stop and investigate manually."
+        elif running == deployable and candidate == running and not summary and job_state != "FAILED":
+            reconciliation, message = "CONFIRMED_COMMITTED", (
+                "Read-only evidence confirms the reviewed configuration is active. Package state remains unknown for operator review.")
+        elif running == backup and candidate == running and not summary:
+            reconciliation, message = "RUNNING_UNCHANGED", (
+                "Running configuration remains at the captured backup. No commit retry was performed.")
+        elif running in {backup, deployable}:
+            reconciliation, message = "STILL_AMBIGUOUS", (
+                "Device state is not sufficient to prove a safe result. No commit retry was performed.")
+        else:
+            reconciliation, message = "DRIFTED", (
+                "Running configuration differs from both captured backup and reviewed package.")
+        view = _commit_view(package, message).model_dump()
+        return TargetCommitReconcileView(**view, reconciliation=reconciliation)
+
+
+async def reconcile_target_commit(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, allowed_endpoints: set[tuple[str, int]]) -> TargetCommitReconcileView:
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await reconcile_target_commit_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model)
+
+
+async def recover_target_package_from_client(store: ProjectStore, project: ProjectSession,
+    client: httpx.AsyncClient, api_key: str, *, expected_serial: str,
+    expected_model: str, confirmed_target_hostname: str, recovery_confirmation: str,
+    poll_interval_seconds: float = 2.0, max_poll_attempts: int = 60) -> TargetRecoveryView:
+    async with project.lock:
+        package = store.database.package(project.active_package_id) if project.active_package_id else None
+        baseline = project.target_baseline
+        if package is None or baseline is None or package.status not in {
+            "FAILED_SAFE", "FAILED_NEEDS_OPERATOR", "STATUS_UNKNOWN"}:
+            raise ServiceError("TARGET_RECOVERY_NOT_AVAILABLE",
+                "Recovery is available only after a failed or ambiguous deployment.", 409)
+        if package.status == "STATUS_UNKNOWN" and (package.ambiguous_operation or "").startswith("RECOVERY_"):
+            raise ServiceError("RECOVERY_RESULT_UNKNOWN",
+                "A recovery mutation is already ambiguous. Do not retry it automatically.", 409)
+        if (expected_serial, expected_model, confirmed_target_hostname) != (
+            baseline.serial, baseline.model, baseline.hostname) or (
+            recovery_confirmation != f"RECOVER {baseline.hostname}"):
+            raise ServiceError("TARGET_CONFIRMATION_MISMATCH",
+                "Recovery confirmation does not match the collected target.", 409)
+        try:
+            backup = store.artifacts.read_backup(project.project_id, package.package_id, "candidate",
+                package.candidate_backup_sha256 or "", max_plaintext_bytes=store.max_source_bytes)
+            identity = await read_system_info(client, api_key)
+        except (ValueError, ArtifactIntegrityError, ArtifactKeyError):
+            raise ServiceError("RECOVERY_BACKUP_INTEGRITY_FAILED",
+                "Encrypted recovery backup could not be verified.", 409) from None
+        except XmlApiError as exc:
+            raise xml_api_service_error(exc) from None
+        if not _target_identity_matches(identity, baseline):
+            raise ServiceError("TARGET_IDENTITY_DRIFT", "Target identity changed before recovery.", 409)
+        package = store.database.transition_package(package.package_id, "RECOVERY_REQUESTED",
+            expected_input_sha256=package.input_sha256)
+        filename = f"confighop-{package.package_id}.xml"
+        try:
+            await import_configuration(client, api_key, filename=filename, content=backup)
+            await load_configuration(client, api_key, filename=filename)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            summary = await read_change_summary(client, api_key)
+            if candidate != backup:
+                raise XmlApiError("XML_API_RECOVERY_MISMATCH",
+                    "The loaded recovery candidate does not match the encrypted backup.")
+            load_sha256 = _evidence_digest(candidate=hashlib.sha256(candidate).hexdigest(),
+                change_summary=hashlib.sha256(summary).hexdigest() if summary else "EMPTY")
+            package = store.database.transition_package(package.package_id, "BACKUP_LOADED",
+                expected_input_sha256=package.input_sha256, evidence_sha256=load_sha256)
+        except asyncio.CancelledError:
+            _mark_mutation_error(store, package.package_id, "RECOVERY_LOAD",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "Recovery load was interrupted."),
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise
+        except XmlApiError as exc:
+            _mark_mutation_error(store, package.package_id, "RECOVERY_LOAD", exc,
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise xml_api_service_error(exc) from None
+
+        try:
+            validation = await validate_full(client, api_key)
+            validation_sha256 = validation.response_sha256
+            if validation.job_id:
+                job = await _poll_job(client, api_key, validation.job_id,
+                    failure_code="XML_API_RECOVERY_VALIDATION_FAILED",
+                    failure_message="The target rejected the recovery candidate during validation.",
+                    poll_interval_seconds=poll_interval_seconds,
+                    max_poll_attempts=max_poll_attempts)
+                validation_sha256 = job.response_sha256
+            package = store.database.transition_package(package.package_id, "RECOVERY_VALIDATING",
+                expected_input_sha256=package.input_sha256,
+                evidence_sha256=validation_sha256)
+        except asyncio.CancelledError:
+            _mark_mutation_error(store, package.package_id, "RECOVERY_VALIDATE",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "Recovery validation was interrupted."),
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise
+        except XmlApiError as exc:
+            _mark_mutation_error(store, package.package_id, "RECOVERY_VALIDATE", exc,
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise xml_api_service_error(exc) from None
+
+        try:
+            running = await read_running_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            candidate = await read_candidate_configuration(client, api_key, max_bytes=store.max_source_bytes)
+            summary = await read_change_summary(client, api_key)
+            if running != backup or candidate != running or summary:
+                receipt = await commit_configuration(client, api_key)
+                package = store.database.transition_package(package.package_id, "RECOVERY_COMMITTING",
+                    expected_input_sha256=package.input_sha256, job_id=receipt.job_id)
+                await _poll_job(client, api_key, receipt.job_id or "",
+                    failure_code="XML_API_RECOVERY_COMMIT_FAILED",
+                    failure_message="The target recovery commit job failed.",
+                    poll_interval_seconds=poll_interval_seconds,
+                    max_poll_attempts=max_poll_attempts)
+                running = await read_running_configuration(client, api_key,
+                    max_bytes=store.max_source_bytes)
+                candidate = await read_candidate_configuration(client, api_key,
+                    max_bytes=store.max_source_bytes)
+                summary = await read_change_summary(client, api_key)
+            identity = await read_system_info(client, api_key)
+            if (not _target_identity_matches(identity, baseline) or running != backup or
+                candidate != running or summary):
+                raise XmlApiError("XML_API_RECOVERY_VERIFICATION_FAILED",
+                    "Recovery finished, but target running state does not match the encrypted backup.")
+        except asyncio.CancelledError:
+            _mark_mutation_error(store, package.package_id, "RECOVERY_COMMIT",
+                XmlApiError("XML_API_TRANSPORT_ERROR", "Recovery commit was interrupted."),
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise
+        except XmlApiError as exc:
+            _mark_mutation_error(store, package.package_id, "RECOVERY_COMMIT", exc,
+                failed_state="FAILED_NEEDS_OPERATOR")
+            raise xml_api_service_error(exc) from None
+        verification_sha256 = _evidence_digest(serial=identity.serial,
+            running=hashlib.sha256(running).hexdigest(),
+            candidate=hashlib.sha256(candidate).hexdigest(), change_summary="EMPTY")
+        package = store.database.transition_package(package.package_id, "RECOVERED",
+            expected_input_sha256=package.input_sha256,
+            evidence_sha256=verification_sha256)
+        return _recovery_view(package,
+            "Encrypted backup was loaded, validated, and verified as the active target configuration.")
+
+
+async def recover_target_package(store: ProjectStore, project: ProjectSession, *,
+    host: str, port: int, api_key: str, ca_pem: str | None, expected_serial: str,
+    expected_model: str, confirmed_target_hostname: str, recovery_confirmation: str,
+    allowed_endpoints: set[tuple[str, int]]) -> TargetRecoveryView:
+    package = store.database.package(project.active_package_id) if project.active_package_id else None
+    if (package is not None and package.status == "STATUS_UNKNOWN" and
+        (package.ambiguous_operation or "").startswith("RECOVERY_")):
+        raise ServiceError("RECOVERY_RESULT_UNKNOWN",
+            "A recovery mutation is already ambiguous. Do not retry it automatically.", 409)
+    try:
+        client = create_target_client(host, port, allowed_endpoints=allowed_endpoints, ca_pem=ca_pem)
+    except XmlApiError as exc:
+        raise xml_api_service_error(exc) from None
+    async with client:
+        return await recover_target_package_from_client(store, project, client, api_key,
+            expected_serial=expected_serial, expected_model=expected_model,
+            confirmed_target_hostname=confirmed_target_hostname,
+            recovery_confirmation=recovery_confirmation)
 
 
 def assess_project(project: ProjectSession, mappings: list[InterfaceMapping]) -> CompatibilityAssessment:

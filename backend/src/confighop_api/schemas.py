@@ -114,6 +114,20 @@ class TargetStageRequest(TargetBaselineCollectRequest):
     confirmed_target_hostname: str = Field(min_length=1, max_length=128)
 
 
+class TargetCommitApprovalRequest(BaseModel):
+    expected_serial: str = Field(min_length=1, max_length=128)
+    expected_model: str = Field(min_length=1, max_length=128)
+    confirmed_target_hostname: str = Field(min_length=1, max_length=128)
+
+
+class TargetCommitRequest(TargetStageRequest):
+    approval_token: SecretStr = Field(min_length=32, max_length=256)
+
+
+class TargetRecoveryRequest(TargetStageRequest):
+    recovery_confirmation: str = Field(min_length=1, max_length=256)
+
+
 class TargetPackageReviewRequest(BaseModel):
     confirmed_target_hostname: str = Field(min_length=1, max_length=128)
     accepted_finding_codes: list[str] = Field(default_factory=list, max_length=100)
@@ -145,6 +159,42 @@ class TargetStageView(BaseModel):
 
 class TargetReconcileView(TargetStageView):
     reconciliation: Literal["CONFIRMED_LOADED", "RUNNING_UNCHANGED", "STILL_AMBIGUOUS", "DRIFTED"]
+
+
+class TargetCommitApprovalView(BaseModel):
+    package_id: str
+    status: Literal["AWAITING_COMMIT_APPROVAL"]
+    target_serial: str
+    approval_token: str
+    approval_expires_at_utc: datetime
+    message: str
+
+
+class TargetCommitView(BaseModel):
+    package_id: str
+    status: str
+    commit_job_id: str | None = None
+    commit_result_sha256: str | None = None
+    post_verification_sha256: str | None = None
+    ambiguous_operation: str | None = None
+    message: str
+
+
+class TargetCommitReconcileView(TargetCommitView):
+    reconciliation: Literal[
+        "CONFIRMED_COMMITTED", "RUNNING_UNCHANGED", "STILL_AMBIGUOUS", "DRIFTED",
+    ]
+
+
+class TargetRecoveryView(BaseModel):
+    package_id: str
+    status: str
+    recovery_load_sha256: str | None = None
+    recovery_validation_sha256: str | None = None
+    recovery_commit_job_id: str | None = None
+    recovery_verification_sha256: str | None = None
+    ambiguous_operation: str | None = None
+    message: str
 
 
 class DeviceIdentityView(BaseModel):

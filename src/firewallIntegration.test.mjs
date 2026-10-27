@@ -82,6 +82,10 @@ test('target review client binds connection, package review, and preflight reque
     await api.checkTargetPreflight('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', recovery_path_confirmed: true })
     await api.stageTargetPackage('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', confirmed_target_hostname: 'target-fw' })
     await api.reconcileTargetStage('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', confirmed_target_hostname: 'target-fw' })
+    await api.issueTargetCommitApproval('project-1', { expected_serial: 'TARGET1', expected_model: 'PA-5410', confirmed_target_hostname: 'target-fw' })
+    await api.commitTargetPackage('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', confirmed_target_hostname: 'target-fw', approval_token: 'one-time-token' })
+    await api.reconcileTargetCommit('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', confirmed_target_hostname: 'target-fw' })
+    await api.recoverTargetPackage('project-1', { ...connection, expected_serial: 'TARGET1', expected_model: 'PA-5410', confirmed_target_hostname: 'target-fw', recovery_confirmation: 'RECOVER target-fw' })
     assert.deepEqual(calls.map((call) => call.url), [
       `${API_BASE}/projects/project-1/target/connection/test`,
       `${API_BASE}/projects/project-1/target/baseline/collect`,
@@ -90,24 +94,31 @@ test('target review client binds connection, package review, and preflight reque
       `${API_BASE}/projects/project-1/target/preflight/check`,
       `${API_BASE}/projects/project-1/target/stage`,
       `${API_BASE}/projects/project-1/target/stage/reconcile`,
+      `${API_BASE}/projects/project-1/target/commit/approval`,
+      `${API_BASE}/projects/project-1/target/commit`,
+      `${API_BASE}/projects/project-1/target/commit/reconcile`,
+      `${API_BASE}/projects/project-1/target/recovery`,
     ])
     assert.ok(calls.every((call) => call.init.headers['X-ConfigHop-Client'] === 'web'))
     assert.deepEqual(JSON.parse(calls[3].init.body), { confirmed_target_hostname: 'target-fw', accepted_finding_codes: ['TARGET_POLICY_ORDER_REVIEW_REQUIRED'] })
     assert.equal(JSON.parse(calls[4].init.body).recovery_path_confirmed, true)
     assert.equal(JSON.parse(calls[5].init.body).confirmed_target_hostname, 'target-fw')
     assert.equal(JSON.parse(calls[6].init.body).expected_serial, 'TARGET1')
+    assert.equal(JSON.parse(calls[7].init.body).confirmed_target_hostname, 'target-fw')
+    assert.equal(JSON.parse(calls[8].init.body).approval_token, 'one-time-token')
+    assert.equal(JSON.parse(calls[10].init.body).recovery_confirmation, 'RECOVER target-fw')
   } finally { globalThis.fetch = previous; await vite.close() }
 })
 
-test('target migration panel discloses the separate staging and commit boundaries before any request', async () => {
+test('target migration panel discloses the separate lab mutation boundaries before any request', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {
     const { default: TargetMigrationPanel } = await vite.ssrLoadModule('/src/TargetMigrationPanel.tsx')
     const html = renderToStaticMarkup(React.createElement(TargetMigrationPanel,
       { projectId: 'project-1', candidateAvailable: true, targetModel: 'PA-5410' }))
-    assert.ok(html.includes('Direct-firewall, single-vsys workflow'))
-    assert.ok(html.includes('Staging stops after full validation'))
-    assert.ok(html.includes('commit requires a separate approval flow'))
+    assert.ok(html.includes('Direct-firewall, single-vsys lab workflow'))
+    assert.ok(html.includes('one-time approval'))
+    assert.ok(html.includes('recovery remain separate operations'))
     assert.ok(html.includes('Loading target baseline and package state'))
     assert.ok(!html.includes('Deploy to Target'))
   } finally { await vite.close() }
