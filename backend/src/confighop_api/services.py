@@ -166,21 +166,29 @@ class ProjectStore:
     async def reap_expired(self) -> None:
         async with self.lock:
             for project in list(self.projects.values()):
-                if project.deleted or project.lock.locked() or self.clock() - project.touched < self.idle_seconds:
+                if project.lock.locked() or (not project.deleted and self.clock() - project.touched < self.idle_seconds):
                     continue
                 async with project.lock:
-                    if self.clock() - project.touched < self.idle_seconds:
+                    if not project.deleted and self.clock() - project.touched < self.idle_seconds:
                         continue
-                    project.expired = True
-                    project.deleted = True
-                    self.expired_ids.append(project.project_id)
+                    if not project.deleted:
+                        project.expired = True
+                        project.deleted = True
+                        self.expired_ids.append(project.project_id)
                     try:
-                        project.cleanup_debt_bytes = self._bytes(project.workspace)
-                        shutil.rmtree(project.workspace)
+                        self._remove_owned(project)
                     except OSError:
                         project.cleanup_debt = True
                         continue  # Files remain under the store root and still count toward its budget.
-                    self.projects.pop(project.project_id, None)
+
+    def _remove_owned(self, project: ProjectSession) -> None:
+        project.cleanup_debt_bytes = max(project.cleanup_debt_bytes, self._bytes(project.workspace))
+        try:
+            shutil.rmtree(project.workspace)
+        except FileNotFoundError:
+            if project.workspace.exists():
+                raise
+        self.projects.pop(project.project_id, None)
 
     async def create(self) -> ProjectSession:
         await self.reap_expired()
@@ -216,17 +224,15 @@ class ProjectStore:
     async def delete(self, project_id: str) -> None:
         async with self.lock:
             project = self.projects.get(project_id)
-            if project is None or project.deleted:
+            if project is None or (project.deleted and not project.cleanup_debt):
                 raise ServiceError("PROJECT_NOT_FOUND", "Project session was not found.", 404)
             async with project.lock:
                 project.deleted = True
                 try:
-                    project.cleanup_debt_bytes = self._bytes(project.workspace)
-                    shutil.rmtree(project.workspace)
+                    self._remove_owned(project)
                 except OSError as exc:
                     project.cleanup_debt = True
                     raise ServiceError("TEMP_STORAGE_UNAVAILABLE", "Project files could not be removed; storage remains reserved.", 507) from exc
-                self.projects.pop(project_id, None)
 
     def close(self) -> None:
         try:

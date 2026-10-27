@@ -21,8 +21,11 @@ uploads, candidate staging, validation copies, and unreclaimed cleanup debt.
 The store reserves additional bytes before writing. Source replacement retains
 the prior source and candidate if upload or validation fails. Candidate failures
 leave no candidate available for export. Idle expiry runs after 24 hours without
-a project request; active operations and downloads are protected by the project
-lock. Project access after expiry returns `PROJECT_EXPIRED` (HTTP 404). Expiry
+a project request; active operations and candidate snapshot creation are protected
+by the project lock. A candidate download sends the authorized, digest-checked
+snapshot even if the project changes after that check. Each in-flight candidate
+download can retain up to 100 MiB in memory until its response completes.
+Project access after expiry returns `PROJECT_EXPIRED` (HTTP 404). Expiry
 cleanup runs periodically and before creating a project; storage is not reclaimed
 until cleanup succeeds.
 
@@ -38,7 +41,9 @@ Quota responses use `PROJECT_LIMIT_REACHED` (429),
 `QUOTA_RESERVATION_UNAVAILABLE` (503), and `TEMP_STORAGE_UNAVAILABLE` (507).
 Deleting an unused project can relieve the project-count and aggregate limits;
 it cannot fix a source or per-project size violation. A failed filesystem
-cleanup remains accounted and requires operator attention.
+cleanup remains accounted. DELETE can retry cleanup for a workspace known to
+the running store, and periodic expiry cleanup also retries it. Repeated failure
+still reserves the debt and requires operator attention.
 
 The store root is a Python temporary directory. Normal deletion and clean
 service shutdown remove owned files. A crash or forced termination may leave a

@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import re
 import threading
 from pathlib import Path
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from confighop_api.main import create_app
 from confighop_api.services import PROFILE_ID, ProjectStore, ServiceError, upload_source
@@ -293,7 +295,7 @@ def test_partially_failed_deletion_keeps_predelete_accounting(monkeypatch):
         assert upload(client, project_id).status_code == 200
         original_delete = services.shutil.rmtree
         def partial_delete(path):
-            (Path(path) / 'source.xml').unlink()
+            (Path(path) / 'source.xml').unlink(missing_ok=True)
             raise OSError('synthetic partial deletion')
         monkeypatch.setattr(services.shutil, 'rmtree', partial_delete)
         failed = client.delete(f'/api/v1/projects/{project_id}', headers=HEADERS)
@@ -303,6 +305,220 @@ def test_partially_failed_deletion_keeps_predelete_accounting(monkeypatch):
         assert upload(client, second).status_code == 507
         assert not capacity.projects[project_id].workspace.joinpath('source.xml').exists()
         monkeypatch.setattr(services.shutil, 'rmtree', original_delete)
+        assert client.delete(f'/api/v1/projects/{project_id}', headers=HEADERS).status_code == 204
+        assert capacity.usage()[0] == 0
+        assert upload(client, second).status_code == 200
+        assert client.delete(f'/api/v1/projects/{project_id}', headers=HEADERS).status_code == 404
+
+
+def test_failed_deletion_reaper_retries_only_owned_workspaces(monkeypatch, tmp_path):
+    from confighop_api import services
+    capacity = store()
+    unrelated = tmp_path / 'unrelated'
+    unrelated.mkdir()
+    (unrelated / 'keep').write_text('keep')
+    try:
+        project = asyncio.run(capacity.create())
+        project.source_path.write_bytes(SOURCE)
+        original_delete = services.shutil.rmtree
+        monkeypatch.setattr(services.shutil, 'rmtree', lambda path: (_ for _ in ()).throw(OSError('synthetic failure')))
+        with pytest.raises(ServiceError, match='Project files could not be removed'):
+            asyncio.run(capacity.delete(project.project_id))
+        assert capacity.usage()[0] == len(SOURCE)
+        monkeypatch.setattr(services.shutil, 'rmtree', original_delete)
+        asyncio.run(capacity.reap_expired())
+        assert project.project_id not in capacity.projects
+        assert capacity.usage()[0] == 0
+        assert (unrelated / 'keep').read_text() == 'keep'
+    finally:
+        capacity.close()
+
+
+@pytest.mark.parametrize('finalize', ['delete', 'expire'])
+def test_candidate_download_snapshot_survives_invalidation_and_delete(finalize):
+    async def run():
+        now = [0.0]
+        capacity = store(clock=lambda: now[0])
+        app = create_app(capacity)
+        app.state.store = capacity
+        entered, release = asyncio.Event(), asyncio.Event()
+        gated_once = False
+
+        async def gated(scope, receive, send):
+            async def gated_send(message):
+                nonlocal gated_once
+                if (not gated_once and scope['path'].endswith('/candidate/download')
+                        and message['type'] == 'http.response.start'):
+                    gated_once = True
+                    entered.set()
+                    await release.wait()
+                await send(message)
+            await app(scope, receive, gated_send)
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=gated), base_url='http://test') as client:
+                created = await client.post('/api/v1/projects', headers=HEADERS)
+                project_id = created.json()['project_id']
+                base = f'/api/v1/projects/{project_id}'
+                assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                rendered = await client.post(base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/50'}]}, headers=HEADERS)
+                assert rendered.status_code == 200 and rendered.json()['candidate_available']
+                expected = capacity.get(project_id).candidate_path.read_bytes()
+                download = asyncio.create_task(client.get(base + '/candidate/download'))
+                await asyncio.wait_for(entered.wait(), 5)
+                assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.get(base + '/candidate/download')).status_code == 409
+                assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                newer = await client.post(base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/51'}]}, headers=HEADERS)
+                assert newer.status_code == 200 and newer.json()['candidate_available']
+                assert capacity.get(project_id).candidate_path.read_bytes() != expected
+                if finalize == 'delete':
+                    assert (await client.delete(base, headers=HEADERS)).status_code == 204
+                else:
+                    now[0] = capacity.idle_seconds
+                    await capacity.reap_expired()
+                    assert (await client.get(base + '/candidate/download')).status_code == 404
+                release.set()
+                response = await download
+                assert response.status_code == 200
+                assert response.content == expected
+                assert response.headers['etag'] == hashlib.sha256(response.content).hexdigest()
+        finally:
+            release.set()
+            capacity.close()
+    asyncio.run(run())
+
+
+def test_candidate_download_rejects_missing_or_tampered_file():
+    capacity = store()
+    with TestClient(create_app(capacity)) as client:
+        project_id = create(client)
+        assert upload(client, project_id).status_code == 200
+        assert candidate(client, project_id).json()['candidate_available']
+        path = capacity.get(project_id).candidate_path
+        original = path.read_bytes()
+        path.write_bytes(b'X' + original[1:])
+        endpoint = f'/api/v1/projects/{project_id}/candidate/download'
+        assert client.get(endpoint).status_code == 409
+        path.unlink()
+        assert client.get(endpoint).status_code == 409
+
+
+def test_invalidated_candidate_is_not_downloadable_after_unlink_failure(monkeypatch):
+    capacity = store()
+    with TestClient(create_app(capacity)) as client:
+        project_id = create(client)
+        assert upload(client, project_id).status_code == 200
+        assert candidate(client, project_id).json()['candidate_available']
+        path = capacity.get(project_id).candidate_path
+        original_unlink = Path.unlink
+        def denied_unlink(file, *args, **kwargs):
+            if file == path:
+                raise OSError('synthetic unlink failure')
+            return original_unlink(file, *args, **kwargs)
+        monkeypatch.setattr(Path, 'unlink', denied_unlink)
+        try:
+            assert upload(client, project_id).status_code == 200
+            assert path.exists()
+            assert client.get(f'/api/v1/projects/{project_id}/candidate/download').status_code == 409
+        finally:
+            monkeypatch.setattr(Path, 'unlink', original_unlink)
+
+
+def test_concurrent_cleanup_retries_reclaim_once(monkeypatch):
+    from confighop_api import services
+    async def run():
+        capacity = store()
+        try:
+            project = await capacity.create()
+            project.source_path.write_bytes(SOURCE)
+            original_delete = services.shutil.rmtree
+            monkeypatch.setattr(services.shutil, 'rmtree', lambda path: (_ for _ in ()).throw(OSError('synthetic failure')))
+            with pytest.raises(ServiceError) as failed:
+                await capacity.delete(project.project_id)
+            assert failed.value.status == 507 and capacity.usage()[0] == len(SOURCE)
+            monkeypatch.setattr(services.shutil, 'rmtree', original_delete)
+            results = await asyncio.gather(capacity.delete(project.project_id), capacity.delete(project.project_id),
+                return_exceptions=True)
+            assert sum(result is None for result in results) == 1
+            assert sum(isinstance(result, ServiceError) and result.status == 404 for result in results) == 1
+            assert capacity.usage()[0] == 0
+        finally:
+            monkeypatch.undo()
+            capacity.close()
+    asyncio.run(run())
+
+
+def test_download_waiting_for_authorization_rejects_invalidation_and_cancellation():
+    async def run():
+        capacity = store()
+        app = create_app(capacity)
+        app.state.store = capacity
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+                project_id = (await client.post('/api/v1/projects', headers=HEADERS)).json()['project_id']
+                base = f'/api/v1/projects/{project_id}'
+                assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                rendered = await client.post(base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/50'}]}, headers=HEADERS)
+                assert rendered.status_code == 200 and rendered.json()['candidate_available']
+                project = capacity.get(project_id)
+                await project.lock.acquire()
+                pending = asyncio.create_task(client.get(base + '/candidate/download'))
+                try:
+                    await asyncio.wait_for(_wait_for_lock_waiter(project.lock), 5)
+                    pending.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await pending
+                finally:
+                    project.lock.release()
+                await project.lock.acquire()
+                pending = asyncio.create_task(client.get(base + '/candidate/download'))
+                try:
+                    await asyncio.wait_for(_wait_for_lock_waiter(project.lock), 5)
+                    project.invalidate()
+                finally:
+                    project.lock.release()
+                denied = await pending
+                assert denied.status_code == 409 and denied.json()['error']['code'] == 'CANDIDATE_NOT_AVAILABLE'
+        finally:
+            capacity.close()
+    asyncio.run(run())
+
+
+async def _wait_for_lock_waiter(lock):
+    while not lock._waiters:
+        await asyncio.sleep(0)
+
+
+def test_failed_expiry_cleanup_is_retried_without_resurrection(monkeypatch):
+    from confighop_api import services
+    now = [0.0]
+    capacity = store(clock=lambda: now[0])
+    try:
+        project = asyncio.run(capacity.create())
+        project.source_path.write_bytes(SOURCE)
+        now[0] = capacity.idle_seconds
+        original_delete = services.shutil.rmtree
+        monkeypatch.setattr(services.shutil, 'rmtree', lambda path: (_ for _ in ()).throw(OSError('synthetic failure')))
+        asyncio.run(capacity.reap_expired())
+        assert capacity.usage()[0] == len(SOURCE)
+        with pytest.raises(ServiceError) as expired:
+            capacity.get(project.project_id)
+        assert expired.value.code == 'PROJECT_EXPIRED'
+        monkeypatch.setattr(services.shutil, 'rmtree', original_delete)
+        asyncio.run(capacity.reap_expired())
+        assert capacity.usage()[0] == 0
+        with pytest.raises(ServiceError) as expired_again:
+            capacity.get(project.project_id)
+        assert expired_again.value.code == 'PROJECT_EXPIRED'
+    finally:
+        monkeypatch.undo()
+        capacity.close()
 
 
 def test_cancelled_upload_removes_partial_file_and_reservation():

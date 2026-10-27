@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from confighop_core.models.transformation import SemanticMigrationDiff
 from confighop_core.evidence.registry import EVIDENCE
@@ -248,13 +249,22 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.get("/api/v1/projects/{project_id}/candidate/download")
     async def download_candidate(project_id: str, request: Request):
-        project = current_store(request).get(project_id)
+        store = current_store(request)
+        project = store.get(project_id)
         async with project.lock:
             require_live(project)
-            if project.candidate is None or not project.candidate.validation.valid or not project.candidate_path.is_file():
+            if project.candidate is None or not project.candidate.validation.valid:
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
             digest = project.candidate.candidate_sha256 or ""
-        return StreamingResponse(xml_stream(project, project.candidate_path), media_type="application/xml",
+            try:
+                with project.candidate_path.open("rb") as stream:
+                    body = stream.read(store.max_candidate_bytes + 1)
+            except OSError as exc:
+                raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409) from exc
+            if (len(body) > store.max_candidate_bytes or len(body) != project.candidate.candidate_size_bytes
+                    or hashlib.sha256(body).hexdigest() != digest):
+                raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
+        return Response(content=body, media_type="application/xml",
             headers={"Content-Disposition": 'attachment; filename="confighop-candidate.xml"', "ETag": digest})
 
     @app.get("/api/v1/projects/{project_id}/semantic-diff", response_model=SemanticMigrationDiff)
