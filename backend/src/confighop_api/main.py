@@ -37,6 +37,19 @@ def _overall(preview_status: str, compatibility: CompatibilityAssessment | None)
     return "BLOCKED" if "BLOCKED" in statuses else "REVIEW_REQUIRED" if "REVIEW_REQUIRED" in statuses else "READY"
 
 
+class CandidateDownloadLifecycle:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            release = scope.pop("confighop.candidate_download_release", None)
+            if release is not None:
+                release()
+
+
 def create_app(store: ProjectStore | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -90,6 +103,9 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
+
+    # Wrap the complete ASGI send, outside the HTTP middleware's buffered response.
+    app.add_middleware(CandidateDownloadLifecycle)
 
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, exc: ServiceError):
@@ -255,13 +271,15 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
             require_live(project)
             if project.candidate is None or not project.candidate.validation.valid:
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
+            reservation, release = await store.admit_candidate_download()
+            request.scope["confighop.candidate_download_release"] = release
             digest = project.candidate.candidate_sha256 or ""
             try:
                 with project.candidate_path.open("rb") as stream:
-                    body = stream.read(store.max_candidate_bytes + 1)
+                    body = stream.read(reservation + 1)
             except OSError as exc:
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409) from exc
-            if (len(body) > store.max_candidate_bytes or len(body) != project.candidate.candidate_size_bytes
+            if (len(body) > reservation or len(body) != project.candidate.candidate_size_bytes
                     or hashlib.sha256(body).hexdigest() != digest):
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
         return Response(content=body, media_type="application/xml",

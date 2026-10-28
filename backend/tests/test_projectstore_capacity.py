@@ -368,6 +368,8 @@ def test_candidate_download_snapshot_survives_invalidation_and_delete(finalize):
                 expected = capacity.get(project_id).candidate_path.read_bytes()
                 download = asyncio.create_task(client.get(base + '/candidate/download'))
                 await asyncio.wait_for(entered.wait(), 5)
+                assert capacity.active_candidate_downloads == 1
+                assert not capacity.lock.locked() and not capacity.get(project_id).lock.locked()
                 assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
                 assert (await client.get(base + '/candidate/download')).status_code == 409
                 assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
@@ -381,11 +383,13 @@ def test_candidate_download_snapshot_survives_invalidation_and_delete(finalize):
                     now[0] = capacity.idle_seconds
                     await capacity.reap_expired()
                     assert (await client.get(base + '/candidate/download')).status_code == 404
+                assert capacity.active_candidate_downloads == 1
                 release.set()
                 response = await download
                 assert response.status_code == 200
                 assert response.content == expected
                 assert response.headers['etag'] == hashlib.sha256(response.content).hexdigest()
+                assert capacity.active_candidate_downloads == 0
         finally:
             release.set()
             capacity.close()
@@ -403,8 +407,219 @@ def test_candidate_download_rejects_missing_or_tampered_file():
         path.write_bytes(b'X' + original[1:])
         endpoint = f'/api/v1/projects/{project_id}/candidate/download'
         assert client.get(endpoint).status_code == 409
+        assert capacity.active_candidate_downloads == 0
         path.unlink()
         assert client.get(endpoint).status_code == 409
+        assert capacity.active_candidate_downloads == 0
+
+
+def test_candidate_download_global_admission_holds_through_asgi_send(monkeypatch):
+    async def run():
+        capacity = store()
+        app = create_app(capacity)
+        app.state.store = capacity
+        entered = asyncio.Queue()
+        releases = [asyncio.Event(), asyncio.Event()]
+        requests = 0
+
+        async def gated(scope, receive, send):
+            nonlocal requests
+            slot = requests
+            if scope['path'].endswith('/candidate/download'):
+                requests += 1
+            paused = False
+            async def gated_send(message):
+                nonlocal paused
+                if (slot < 2 and not paused and scope['path'].endswith('/candidate/download')
+                        and message['type'] == 'http.response.body' and message.get('body')):
+                    paused = True
+                    await entered.put(slot)
+                    await releases[slot].wait()
+                await send(message)
+            await app(scope, receive, gated_send)
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=gated), base_url='http://test') as client:
+                project_id = (await client.post('/api/v1/projects', headers=HEADERS)).json()['project_id']
+                base = f'/api/v1/projects/{project_id}'
+                assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                rendered = await client.post(base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/50'}]}, headers=HEADERS)
+                assert rendered.status_code == 200 and rendered.json()['candidate_available']
+                second_project_id = (await client.post('/api/v1/projects', headers=HEADERS)).json()['project_id']
+                second_base = f'/api/v1/projects/{second_project_id}'
+                assert (await client.put(second_base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.put(second_base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                second_rendered = await client.post(second_base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/50'}]}, headers=HEADERS)
+                assert second_rendered.status_code == 200 and second_rendered.json()['candidate_available']
+                endpoint = base + '/candidate/download'
+                second_endpoint = second_base + '/candidate/download'
+                first = asyncio.create_task(client.get(endpoint))
+                second = asyncio.create_task(client.get(second_endpoint))
+                assert {await asyncio.wait_for(entered.get(), 5), await asyncio.wait_for(entered.get(), 5)} == {0, 1}
+                assert capacity.active_candidate_downloads == 2
+                assert capacity.candidate_snapshot_reserved_bytes == 200 * MiB
+                candidate_path = capacity.get(project_id).candidate_path
+                original_open = Path.open
+                def reject_candidate_read(path, *args, **kwargs):
+                    if path == candidate_path:
+                        raise AssertionError('Third download read candidate before admission')
+                    return original_open(path, *args, **kwargs)
+                monkeypatch.setattr(Path, 'open', reject_candidate_read)
+                try:
+                    denied = await client.get(endpoint)
+                finally:
+                    monkeypatch.setattr(Path, 'open', original_open)
+                assert denied.status_code == 429
+                assert denied.json()['error']['code'] == 'CANDIDATE_DOWNLOAD_LIMIT_REACHED'
+                assert capacity.active_candidate_downloads == 2
+                releases[0].set()
+                response = await first
+                assert response.status_code == 200
+                assert response.headers['etag'] == hashlib.sha256(response.content).hexdigest()
+                assert int(response.headers['content-length']) == len(response.content)
+                assert capacity.active_candidate_downloads == 1
+                assert (await client.get(endpoint)).status_code == 200
+                assert capacity.active_candidate_downloads == 1
+                releases[1].set()
+                assert (await second).status_code == 200
+                assert capacity.active_candidate_downloads == capacity.candidate_snapshot_reserved_bytes == 0
+        finally:
+            for release in releases:
+                release.set()
+            capacity.close()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('failure', ['cancel', 'send'])
+def test_candidate_download_releases_admission_on_cancel_or_send_failure(failure):
+    async def run():
+        capacity = store()
+        app = create_app(capacity)
+        app.state.store = capacity
+        entered, release = asyncio.Event(), asyncio.Event()
+        intercepted = False
+
+        async def gated(scope, receive, send):
+            async def gated_send(message):
+                nonlocal intercepted
+                if (not intercepted and scope['path'].endswith('/candidate/download')
+                        and message['type'] == 'http.response.body' and message.get('body')):
+                    intercepted = True
+                    entered.set()
+                    await release.wait()
+                    if failure == 'send':
+                        raise OSError('synthetic send failure')
+                await send(message)
+            await app(scope, receive, gated_send)
+
+        try:
+            async with AsyncClient(transport=ASGITransport(app=gated), base_url='http://test') as client:
+                project_id = (await client.post('/api/v1/projects', headers=HEADERS)).json()['project_id']
+                base = f'/api/v1/projects/{project_id}'
+                assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                rendered = await client.post(base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/50'}]}, headers=HEADERS)
+                assert rendered.status_code == 200 and rendered.json()['candidate_available']
+                task = asyncio.create_task(client.get(base + '/candidate/download'))
+                await asyncio.wait_for(entered.wait(), 5)
+                assert capacity.active_candidate_downloads == 1
+                if failure == 'cancel':
+                    task.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await task
+                else:
+                    release.set()
+                    with pytest.raises(Exception, match='synthetic send failure'):
+                        await task
+                assert capacity.active_candidate_downloads == capacity.candidate_snapshot_reserved_bytes == 0
+                assert (await client.get(base + '/candidate/download')).status_code == 200
+        finally:
+            release.set()
+            capacity.close()
+    asyncio.run(run())
+
+
+def test_candidate_download_reservation_release_is_idempotent_and_cancel_safe():
+    async def run():
+        capacity = store(max_candidate_bytes=64)
+        try:
+            reservation, release = await capacity.admit_candidate_download()
+            assert reservation == 64
+            assert (capacity.active_candidate_downloads, capacity.candidate_snapshot_reserved_bytes) == (1, 64)
+            release()
+            release()
+            assert (capacity.active_candidate_downloads, capacity.candidate_snapshot_reserved_bytes) == (0, 0)
+            async with capacity.candidate_download_lock:
+                waiting = asyncio.create_task(capacity.admit_candidate_download())
+                await asyncio.sleep(0)
+                waiting.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await waiting
+            assert (capacity.active_candidate_downloads, capacity.candidate_snapshot_reserved_bytes) == (0, 0)
+        finally:
+            capacity.close()
+    asyncio.run(run())
+
+
+def test_candidate_response_construction_failure_releases_admission(monkeypatch):
+    from confighop_api import main
+    capacity = store()
+    with TestClient(create_app(capacity), raise_server_exceptions=False) as client:
+        project_id = create(client)
+        assert upload(client, project_id).status_code == 200
+        assert candidate(client, project_id).json()['candidate_available']
+        def fail_response(*args, **kwargs):
+            raise RuntimeError('synthetic response failure')
+        monkeypatch.setattr(main, 'Response', fail_response)
+        denied = client.get(f'/api/v1/projects/{project_id}/candidate/download')
+        assert denied.status_code == 500
+        assert 'synthetic' not in denied.text
+        assert capacity.active_candidate_downloads == capacity.candidate_snapshot_reserved_bytes == 0
+
+
+def test_candidate_download_disconnect_releases_admission():
+    async def run():
+        capacity = store()
+        app = create_app(capacity)
+        app.state.store = capacity
+        try:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+                project_id = (await client.post('/api/v1/projects', headers=HEADERS)).json()['project_id']
+                base = f'/api/v1/projects/{project_id}'
+                assert (await client.put(base + '/source', content=SOURCE, headers=HEADERS)).status_code == 200
+                assert (await client.put(base + '/target-profile', json={'profile_id': PROFILE_ID}, headers=HEADERS)).status_code == 200
+                rendered = await client.post(base + '/candidate', json={'mappings': [
+                    {'source_interface': 'ethernet1/12', 'target_interface': 'ethernet1/50'}]}, headers=HEADERS)
+                assert rendered.status_code == 200 and rendered.json()['candidate_available']
+            messages = asyncio.Queue()
+            await messages.put({'type': 'http.request', 'body': b'', 'more_body': False})
+            entered, disconnected = asyncio.Event(), asyncio.Event()
+            async def receive():
+                return await messages.get()
+            async def send(message):
+                if message['type'] == 'http.response.body' and message.get('body'):
+                    entered.set()
+                    await disconnected.wait()
+                    raise ConnectionError('synthetic client disconnect')
+            path = base + '/candidate/download'
+            scope = {'type': 'http', 'asgi': {'version': '3.0'}, 'method': 'GET', 'path': path,
+                'raw_path': path.encode(), 'query_string': b'', 'headers': [], 'scheme': 'http',
+                'server': ('test', 80), 'client': ('test', 1), 'root_path': ''}
+            task = asyncio.create_task(app(scope, receive, send))
+            await asyncio.wait_for(entered.wait(), 5)
+            assert capacity.active_candidate_downloads == 1
+            await messages.put({'type': 'http.disconnect'})
+            disconnected.set()
+            with pytest.raises(Exception, match='synthetic client disconnect'):
+                await task
+            assert capacity.active_candidate_downloads == capacity.candidate_snapshot_reserved_bytes == 0
+        finally:
+            capacity.close()
+    asyncio.run(run())
 
 
 def test_invalidated_candidate_is_not_downloadable_after_unlink_failure(monkeypatch):

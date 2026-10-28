@@ -106,11 +106,33 @@ class ProjectStore:
         self.aggregate_bytes = aggregate_bytes
         self.project_bytes = project_bytes
         self.max_candidate_bytes = max_candidate_bytes
+        self.candidate_download_lock = asyncio.Lock()
+        self.active_candidate_downloads = 0
+        self.candidate_snapshot_reserved_bytes = 0
         self.idle_seconds = idle_seconds
         self.free_floor_bytes = free_floor_bytes
         self.reservations: dict[str, int] = {}
         self.max_source_bytes = MAX_XML_BYTES
         self._process_file = None
+
+    async def admit_candidate_download(self) -> tuple[int, Callable[[], None]]:
+        reservation = min(self.max_candidate_bytes, 100 * 1024 * 1024)
+        async with self.candidate_download_lock:
+            if (self.active_candidate_downloads >= 2
+                    or self.candidate_snapshot_reserved_bytes + reservation > 200 * 1024 * 1024):
+                raise ServiceError("CANDIDATE_DOWNLOAD_LIMIT_REACHED",
+                    "Candidate download capacity reached. Finish or cancel an active download and retry.", 429)
+            self.active_candidate_downloads += 1
+            self.candidate_snapshot_reserved_bytes += reservation
+        released = False
+        def release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            self.active_candidate_downloads -= 1
+            self.candidate_snapshot_reserved_bytes -= reservation
+        return reservation, release
 
     def acquire_process_lock(self) -> None:
         if self._process_file is not None:

@@ -11,6 +11,8 @@ or device-validation status.
 | File bytes in one project | 320 MiB |
 | Source XML | 100 MiB |
 | Candidate XML | 100 MiB |
+| Active candidate downloads | 2 globally |
+| Reserved active candidate snapshot payload | 200 MiB |
 | Idle project lifetime | 24 hours |
 | Concurrent store writes | 1 |
 | Free space retained on the temporary volume | 1,024 MiB |
@@ -25,6 +27,11 @@ a project request; active operations and candidate snapshot creation are protect
 by the project lock. A candidate download sends the authorized, digest-checked
 snapshot even if the project changes after that check. Each in-flight candidate
 download can retain up to 100 MiB in memory until its response completes.
+Admission reserves up to 100 MiB per response before reading the candidate;
+the third simultaneous download receives HTTP 429
+`CANDIDATE_DOWNLOAD_LIMIT_REACHED`. A reservation is released when the ASGI
+response completes, is cancelled, or fails. This bounds retained candidate
+payload, not total Python process memory or XML parsing and rendering overhead.
 Project access after expiry returns `PROJECT_EXPIRED` (HTTP 404). Expiry
 cleanup runs periodically and before creating a project; storage is not reclaimed
 until cleanup succeeds.
@@ -38,7 +45,8 @@ authentication. Do not expose this local API to a network.
 Quota responses use `PROJECT_LIMIT_REACHED` (429),
 `STORE_CAPACITY_EXCEEDED` (507), `PROJECT_CAPACITY_EXCEEDED` (507),
 `SOURCE_TOO_LARGE` (413), `CANDIDATE_CAPACITY_EXCEEDED` (507),
-`QUOTA_RESERVATION_UNAVAILABLE` (503), and `TEMP_STORAGE_UNAVAILABLE` (507).
+`QUOTA_RESERVATION_UNAVAILABLE` (503), `TEMP_STORAGE_UNAVAILABLE` (507),
+and `CANDIDATE_DOWNLOAD_LIMIT_REACHED` (429).
 Deleting an unused project can relieve the project-count and aggregate limits;
 it cannot fix a source or per-project size violation. A failed filesystem
 cleanup remains accounted. DELETE can retry cleanup for a workspace known to
