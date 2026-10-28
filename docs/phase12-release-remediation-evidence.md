@@ -4,6 +4,12 @@ This is a private-repository review record, not publication approval. Baseline:
 `main` at `9f3fd68eb6f55c5530485b93db2a5a5127e128cd`. PR #27 is merged;
 PR #20 remains open and was not changed.
 
+The owner selected Apache-2.0 as a **conditional direction**, GitHub Private
+Vulnerability Reporting as the **preferred future channel**, and retention of
+the current **Python dependency version ranges**. None of these choices is a
+copyright attestation, repository-setting change, or claim of reproducible
+Python resolution.
+
 ## REL-01: rights gate
 
 The owner selected Apache-2.0 as a direction. No `LICENSE` or `NOTICE` is added
@@ -20,6 +26,27 @@ license every contribution or redistribute every historical asset.
 | Screenshots | Tracked browser screenshots use the workbench; rights to every depicted component and the generated images were not attested | Unresolved |
 | Historical artwork | Deleted `public/brand/confighop-logo.svg`, `public/brand/confighop-mark.svg`, and `public/favicon.svg` remain reachable in Git history | Unresolved |
 | Vendored packages | No vendored dependency directory found in tracked files; npm dependencies are installed from the lockfile | No vendored package found |
+
+The rights assessment is more specific than commit attribution:
+
+| Class and reachable path | Apparent source | Rights/obligations evidence | Apache-2.0 gate |
+|---|---|---|---|
+| Backend `backend/src/` | Git commits under multiple author identities | No assignment or licensing grant found | **BLOCKED**: attest authority for each contribution |
+| Frontend `src/` | Git commits under multiple author identities | No assignment or licensing grant found | **BLOCKED**: attest authority for each contribution |
+| Tests `backend/tests/`, `src/*.test.mjs`, `src/*.browser.mjs` | Repository commits | No test-code rights grant found | **BLOCKED**: include tests in attestation |
+| Configuration fixtures `backend/tests/fixtures/` | Repository commits; synthetic labels and documentation ranges | Synthetic appearance does not prove origin or redistribution rights | **BLOCKED**: attest fixture origin and permissions |
+| Documentation `README.md`, `docs/`, including PR #20 | Repository commits | Git author identity does not prove copyright ownership | **BLOCKED**: attest text and imported excerpts |
+| Screenshots `artifacts/` | Browser-test outputs committed to Git | Generated image provenance and depicted-asset rights not attested | **BLOCKED**: attest screenshot distribution rights |
+| Historical deleted artwork `public/brand/*.svg`, `public/favicon.svg` | Added at `a995058`, removed at `16f2ca5`; still reachable | No original artwork rights record found | **BLOCKED**: attest rights or decide separately how to treat public history |
+| Current icons `lucide-react` | Installed third-party npm package | Installed package declares ISC; it is not repository-owned code | Preserve its own license obligations; do not relicense it |
+| Fonts and vendored packages | CSS names local/system fonts; no tracked font file or vendored package directory found | No bundled font/vendor asset identified | **NOT_APPLICABLE** to tracked source; reassess release bundles |
+
+The Git history contains four apparent author identities across the reviewed
+refs. An owner attestation must identify the legal rights holder, cover all
+contributions and historical assets, state whether employment/contractor terms
+or imported material limit relicensing, and confirm synthetic fixture and
+screenshot redistribution rights. Obtain permission from any other rights
+holder where needed. No such attestation is present; `REL01_LICENSE_GATE_BLOCKED`.
 
 The advertised branches and PR head/merge refs yielded 104 reachable commits,
 1,388 objects, 711 blobs, and no tags at the audit baseline. Historical deleted
@@ -47,14 +74,38 @@ through that route, request sanitized synthetic reproductions, and forbid
 credentials, customer configurations, and sensitive screenshots in public issues.
 It should not promise a response time without owner authorization.
 
+The owner prefers GitHub Private Vulnerability Reporting (PVR). [GitHub's
+configuration documentation](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
+limits researcher-submitted PVR to **public repositories**. ConfigHop is
+currently **private**, so the external researcher form cannot be verified or
+activated now. A private draft repository advisory lets administrators discuss
+a vulnerability but does not supply an external reporting route. The owner must
+choose an interim verified private contact if reports are needed before
+publication. After separately authorized publication, an owner/admin must use
+**Settings → Security and quality → Advanced Security → Private vulnerability
+reporting → Enable**, then verify an external researcher sees **Security and
+quality → Advisories → Report a vulnerability**. Only then should `SECURITY.md`
+describe that route. No PVR setting was changed in this work.
+
 The sole workflow uses `push` and `pull_request`, checks out the tested ref, and
 needs repository read access to install dependencies, test, build, and upload
 browser evidence. It has no `pull_request_target` trigger or repository secret
 reference. This branch adds `permissions: contents: read`; it does not change
 GitHub repository settings. The owner must inspect **Settings → Actions → General**
 for default token permissions, fork PR approval and secret policies, then inspect
-branch rules/required checks and **Settings → Security** for private vulnerability
-reporting. Record the results before publication. Until then:
+branch rules/required checks. GitHub's read-only main-branch metadata reports
+`protected=false`, no required status checks, and enforcement `off`. The
+branch-protection endpoint returned 403 (`Resource not accessible by
+integration`); the rulesets endpoint returned 403 (`Upgrade to GitHub Pro or
+make this repository public to enable this feature`). This does **not** prove
+that every account-level workflow setting is safe. In **Settings → Actions →
+General**, the owner must verify default token access is read-only, fork PRs
+cannot receive write tokens or secrets, workflow approvals are appropriate,
+and Actions cannot create/approve PRs without a need. Verify public-fork
+approval policy immediately before any visibility change. In **Settings →
+Branches** or **Rules → Rulesets**, enable an available main-branch rule with
+the CI test check required before merge, or record the plan/visibility
+prerequisite and recheck before publication. Until then:
 `GITHUB_PUBLIC_FORK_SETTINGS_NOT_VERIFIED`.
 
 ## REL-05: dependency and installation evidence
@@ -83,18 +134,32 @@ packages. The distinct reported IDs were `PYSEC-2026-1795`,
 across 25.3–26.2.0. `pip` is installation tooling, not an application runtime
 requirement. After upgrading only that disposable environment's installer to
 `pip 26.2.2`, the same audit reported **0 known vulnerabilities in 26 installed
-packages**. This does not prove future resolutions are vulnerability-free.
+packages**. A fresh Python 3.12 installation and a second audit on 2026-10-28
+resolved the same versions. With `pip-audit 2.10.1 --vulnerability-service pypi
+--path <isolated-venv>/Lib/site-packages`, PyPI advisory data reported no known
+vulnerabilities for the installed third-party packages; the local editable
+`confighop-core 0.7.0` is not on PyPI and cannot be audited by that service.
+Only package names and versions were sent for advisory lookup, not repository
+source or configurations. This does not prove future resolutions are
+vulnerability-free.
 No Python lock or constraints file exists; JavaScript uses `package-lock.json`.
-The owner should decide whether to require a patched installer baseline and
-whether to add narrowly scoped Python constraints in a separate change. Do not
-claim byte-for-byte reproducibility from the current version ranges.
+The owner explicitly retained Python ranges; no lockfile or constraints file
+will be added in this phase. CI tests Python 3.12; `backend/pyproject.toml`
+declares Python 3.12 or newer. Record exact installed versions for each
+candidate validation because future resolution may differ. A patched installer
+baseline remains an owner-side installation prerequisite decision. Do not claim
+byte-for-byte reproducibility from the current version ranges.
 
 ## Open gates
 
 - `REL01_LICENSE_GATE_BLOCKED`: rights attestation and historical asset treatment.
-- REL-02: verify a private reporting channel before publishing `SECURITY.md`.
-- REL-04: verify GitHub fork/Actions/security settings in the owner account.
-- REL-05: current environment audited; future Python resolution remains unlocked.
+- REL-02: external PVR is unavailable while private; choose an interim private
+  route if needed, then separately authorize and verify PVR after publication.
+- REL-04: main is unprotected; verify fork/Actions settings and require CI by an
+  available branch rule before publication.
+- REL-05: current Python environment audited under the approved ranges; future
+  resolution remains unlocked by owner policy.
+- `HISTORY_SECRET_CLEARANCE_NOT_VERIFIED`: no dedicated full-history scanner ran.
 
 Repository visibility must remain private. No release, tag, merge, or device
 validation is authorized by this record.
