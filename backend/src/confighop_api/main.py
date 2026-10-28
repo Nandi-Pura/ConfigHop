@@ -1,11 +1,13 @@
+import asyncio
+import hashlib
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from confighop_core.models.transformation import SemanticMigrationDiff
 from confighop_core.evidence.registry import EVIDENCE
@@ -35,13 +37,40 @@ def _overall(preview_status: str, compatibility: CompatibilityAssessment | None)
     return "BLOCKED" if "BLOCKED" in statuses else "REVIEW_REQUIRED" if "REVIEW_REQUIRED" in statuses else "READY"
 
 
+class CandidateDownloadLifecycle:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            release = scope.pop("confighop.candidate_download_release", None)
+            if release is not None:
+                release()
+
+
 def create_app(store: ProjectStore | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.store = store or ProjectStore()
+        if store is None:
+            try:
+                app.state.store.acquire_process_lock()
+            except RuntimeError:
+                app.state.store.close()
+                raise
+        async def expire_idle() -> None:
+            while True:
+                await asyncio.sleep(60)
+                await app.state.store.reap_expired()
+        expiry_task = asyncio.create_task(expire_idle())
         try:
             yield
         finally:
+            expiry_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await expiry_task
             app.state.store.close()
 
     app = FastAPI(title="ConfigHop Local API", version="0.7.0",
@@ -74,6 +103,9 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
+
+    # Wrap the complete ASGI send, outside the HTTP middleware's buffered response.
+    app.add_middleware(CandidateDownloadLifecycle)
 
     @app.exception_handler(ServiceError)
     async def service_error(_request: Request, exc: ServiceError):
@@ -132,6 +164,7 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
             with path.open("rb") as stream:
                 while chunk := stream.read(1024 * 1024):
                     yield chunk
+            project.touch()
 
     @app.get("/api/v1/projects/{project_id}/source")
     async def get_source(project_id: str, request: Request):
@@ -217,9 +250,11 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.post("/api/v1/projects/{project_id}/candidate", response_model=CandidateMetadata)
     async def post_candidate(project_id: str, body: CandidateRequest, request: Request):
-        project = current_store(request).get(project_id)
-        async with project.lock:
-            return await generate_candidate(project, body.mappings, body.allow_review)
+        store = current_store(request)
+        async with store.lock:
+            project = store.get(project_id)
+            async with project.lock:
+                return await generate_candidate(project, body.mappings, body.allow_review, store)
 
     @app.get("/api/v1/projects/{project_id}/candidate", response_model=CandidateMetadata)
     async def get_candidate(project_id: str, request: Request):
@@ -230,13 +265,24 @@ def create_app(store: ProjectStore | None = None) -> FastAPI:
 
     @app.get("/api/v1/projects/{project_id}/candidate/download")
     async def download_candidate(project_id: str, request: Request):
-        project = current_store(request).get(project_id)
+        store = current_store(request)
+        project = store.get(project_id)
         async with project.lock:
             require_live(project)
-            if project.candidate is None or not project.candidate.validation.valid or not project.candidate_path.is_file():
+            if project.candidate is None or not project.candidate.validation.valid:
                 raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
+            reservation, release = await store.admit_candidate_download()
+            request.scope["confighop.candidate_download_release"] = release
             digest = project.candidate.candidate_sha256 or ""
-        return StreamingResponse(xml_stream(project, project.candidate_path), media_type="application/xml",
+            try:
+                with project.candidate_path.open("rb") as stream:
+                    body = stream.read(reservation + 1)
+            except OSError as exc:
+                raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409) from exc
+            if (len(body) > reservation or len(body) != project.candidate.candidate_size_bytes
+                    or hashlib.sha256(body).hexdigest() != digest):
+                raise ServiceError("CANDIDATE_NOT_AVAILABLE", "Validated candidate is not available.", 409)
+        return Response(content=body, media_type="application/xml",
             headers={"Content-Disposition": 'attachment; filename="confighop-candidate.xml"', "ETag": digest})
 
     @app.get("/api/v1/projects/{project_id}/semantic-diff", response_model=SemanticMigrationDiff)
