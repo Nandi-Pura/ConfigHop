@@ -77,7 +77,11 @@ typing-inspection 0.4.4; uvicorn 0.54.0
 
 `pip-audit 2.10.1 --path <isolated-venv>/Lib/site-packages` initially found
 12 advisory records for installer `pip 25.0.1` and none for application/runtime
-packages. After upgrading only that disposable environment's installer to
+packages. The distinct reported IDs were `PYSEC-2026-1795`,
+`PYSEC-2026-1796`, `PYSEC-2026-2875`, `PYSEC-2026-2876`,
+`PYSEC-2026-196`, and `PYSEC-2026-3721`; the scanner listed patched versions
+across 25.3–26.2.0. `pip` is installation tooling, not an application runtime
+requirement. After upgrading only that disposable environment's installer to
 `pip 26.2.2`, the same audit reported **0 known vulnerabilities in 26 installed
 packages**. This does not prove future resolutions are vulnerability-free.
 No Python lock or constraints file exists; JavaScript uses `package-lock.json`.
