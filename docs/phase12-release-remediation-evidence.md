@@ -4,15 +4,18 @@ This is a private-repository review record, not publication approval. Baseline:
 `main` at `9f3fd68eb6f55c5530485b93db2a5a5127e128cd`. PR #27 is merged;
 PR #20 remains open and was not changed.
 
-The owner selected Apache-2.0 as a **conditional direction**, GitHub Private
-Vulnerability Reporting as the **preferred future channel**, and retention of
+The owner selected MIT instead of Apache-2.0 as a **conditional direction**,
+GitHub Private Vulnerability Reporting as the **preferred future channel**, and retention of
 the current **Python dependency version ranges**. None of these choices is a
 copyright attestation, repository-setting change, or claim of reproducible
 Python resolution.
 
 ## REL-01: rights gate
 
-The owner selected Apache-2.0 as a direction. No `LICENSE` or `NOTICE` is added
+The owner selected MIT as the simpler candidate. [The official MIT
+text](https://opensource.org/license/mit) requires an accurate copyright year and holder and preservation of its notice
+in copies or substantial portions. The license itself requires no notarization
+or copyright registration. No `LICENSE` is added
 because repository authorship and a Git commit do not prove the authority to
 license every contribution or redistribute every historical asset.
 
@@ -29,7 +32,7 @@ license every contribution or redistribute every historical asset.
 
 The rights assessment is more specific than commit attribution:
 
-| Class and reachable path | Apparent source | Rights/obligations evidence | Apache-2.0 gate |
+| Class and reachable path | Apparent source | Rights/obligations evidence | MIT gate |
 |---|---|---|---|
 | Backend `backend/src/` | Git commits under multiple author identities | No assignment or licensing grant found | **BLOCKED**: attest authority for each contribution |
 | Frontend `src/` | Git commits under multiple author identities | No assignment or licensing grant found | **BLOCKED**: attest authority for each contribution |
@@ -42,11 +45,15 @@ The rights assessment is more specific than commit attribution:
 | Fonts and vendored packages | CSS names local/system fonts; no tracked font file or vendored package directory found | No bundled font/vendor asset identified | **NOT_APPLICABLE** to tracked source; reassess release bundles |
 
 The Git history contains four apparent author identities across the reviewed
-refs. An owner attestation must identify the legal rights holder, cover all
-contributions and historical assets, state whether employment/contractor terms
-or imported material limit relicensing, and confirm synthetic fixture and
-screenshot redistribution rights. Obtain permission from any other rights
-holder where needed. No such attestation is present; `REL01_LICENSE_GATE_BLOCKED`.
+refs, including identities other than the repository owner. A concise owner
+confirmation can suffice for material the owner actually controls. It must
+identify the rights holder and accurate attribution year, specify which code,
+tests, documentation, fixtures, screenshots, and historical artwork the owner
+created or can license, and disclose other contributors, employment/contractor
+limits, and imported material. Obtain permission from another rights holder
+where needed; an owner statement cannot override that holder's rights. No
+confirmation or contribution grants are present; `REL01_LICENSE_GATE_BLOCKED`
+and `MIT_LICENSE_OWNER_CONFIRMATION_REQUIRED`.
 
 The advertised branches and PR head/merge refs yielded 104 reachable commits,
 1,388 objects, 711 blobs, and no tags at the audit baseline. Historical deleted
@@ -57,13 +64,13 @@ access-key pattern. It flagged credential-shaped test strings and source-code
 identifiers for contextual review. A dedicated history scanner was unavailable;
 this is not a secret-clearance claim.
 
-Before creating an Apache-2.0 `LICENSE`, the owner must provide a documented
-rights attestation for the first-party material and contributions, identify any
-third-party portions and their obligations, and decide the treatment of fixtures,
+Before creating an MIT `LICENSE`, the owner must give that narrow factual
+confirmation, approve the exact holder/year attribution, identify third-party
+portions and their obligations, and decide the treatment of fixtures,
 screenshots, and historical artwork. Obtain separate permission or exclude
 material whose rights cannot be established. Do not rewrite history without a
-separate owner decision. Review the official text at
-<https://www.apache.org/licenses/LICENSE-2.0> when the gate is satisfied.
+separate owner decision. Do not describe an unlicensed public repository as
+open source.
 
 ## REL-02 and REL-04: GitHub controls
 
@@ -108,6 +115,11 @@ the CI test check required before merge, or record the plan/visibility
 prerequisite and recheck before publication. Until then:
 `GITHUB_PUBLIC_FORK_SETTINGS_NOT_VERIFIED`.
 
+An interim private-reporting option is an owner-approved, monitored security
+contact reachable by invited users; the owner must supply and test the actual
+address or other private route. No address is assumed, and no `SECURITY.md` is
+added until a working route is verified.
+
 ## REL-05: dependency and installation evidence
 
 Python 3.12 isolated environment: `python -m pip install -e ".[api,dev]"`
@@ -142,6 +154,12 @@ vulnerabilities for the installed third-party packages; the local editable
 Only package names and versions were sent for advisory lookup, not repository
 source or configurations. This does not prove future resolutions are
 vulnerability-free.
+
+The same isolated environment was re-audited on 2026-10-28 with
+`pip-audit 2.10.1 --vulnerability-service pypi`: 26 installed distributions,
+zero known advisory findings. This is environment evidence, not a lockfile or
+a source-code audit.
+
 No Python lock or constraints file exists; JavaScript uses `package-lock.json`.
 The owner explicitly retained Python ranges; no lockfile or constraints file
 will be added in this phase. CI tests Python 3.12; `backend/pyproject.toml`
@@ -163,3 +181,24 @@ byte-for-byte reproducibility from the current version ranges.
 
 Repository visibility must remain private. No release, tag, merge, or device
 validation is authorized by this record.
+
+## Phase 12C decision matrix
+
+| Gate | Evidence | Status |
+|---|---|---|
+| MIT license direction | Owner selected MIT as candidate; official text reviewed | PASS |
+| First-party rights | Git history gives attribution, not legal control; `OWNERSHIP_NOT_VERIFIED` | NOT_VERIFIED |
+| Other contributors | Four apparent author identities; no grants found; `PERMISSION_REQUIRED` | BLOCKED |
+| Fixtures, screenshots, and artwork | Synthetic appearance and generated output do not establish rights; `OWNERSHIP_NOT_VERIFIED` | NOT_VERIFIED |
+| Historical rights | Deleted SVGs remain reachable; no rights record; `OWNERSHIP_NOT_VERIFIED` | NOT_VERIFIED |
+| Accurate MIT holder/year and `LICENSE` | Owner confirmation and attribution approval missing; no file added | BLOCKED |
+| Third-party dependencies/notices | `lucide-react` declares ISC (`THIRD_PARTY_LICENSE_VERIFIED` for that package); other transitive notice obligations were not exhaustively reviewed | NOT_VERIFIED |
+| Private reporting route and `SECURITY.md` | External PVR requires a public repository; no interim contact verified | BLOCKED |
+| README Beta guidance | Backup, review, sensitive-data, blocked export, and device limits stated | PASS |
+| GitHub fork/Actions settings | Workflow uses read-only token; administration settings inaccessible | NOT_VERIFIED |
+| Main branch protection/required checks | Branch metadata reports protection disabled and no required checks | FAIL |
+| Python dependency audit | Python 3.12 isolated installation; 2026-10-28 PyPI audit reported no known third-party findings | PASS |
+| Python ranges | Owner retained ranges; no Python lock or constraints | PASS |
+| History secret clearance | Reachable refs had bounded pattern scan; no dedicated scanner; unreachable objects not enumerable | NOT_VERIFIED |
+| PR #28 exact-head CI | Run 40707872777 passed at `6a674159626a831e4eafc5cc34bd29fc7abc5af0`; rerun after this edit | NOT_VERIFIED |
+| Repository visibility | GitHub repository metadata says private | PASS |
