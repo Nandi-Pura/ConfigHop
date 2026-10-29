@@ -200,5 +200,101 @@ validation is authorized by this record.
 | Python dependency audit | Python 3.12 isolated installation; 2026-10-28 PyPI audit reported no known third-party findings | PASS |
 | Python ranges | Owner retained ranges; no Python lock or constraints | PASS |
 | History secret clearance | Reachable refs had bounded pattern scan; no dedicated scanner; unreachable objects not enumerable | NOT_VERIFIED |
-| PR #28 exact-head CI | Run 40707872777 passed at `6a674159626a831e4eafc5cc34bd29fc7abc5af0`; rerun after this edit | NOT_VERIFIED |
+| PR #28 exact-head CI | [Run 40709714425](https://github.com/Nandi-Pura/ConfigHop/actions/runs/40709714425) passed at `f1da3bd5f14c81a16b45522c8576404e3cb6da83`; verify again after any edit | PASS |
 | Repository visibility | GitHub repository metadata says private | PASS |
+
+## Phase 12D: targeted owner-gate investigation
+
+The current advertised branches and PR head/merge refs contain 109 reachable
+commits, 1,409 objects, 717 blobs, and no tags. The four Git author strings
+below are attribution evidence, not a count of legal copyright holders. Email
+addresses and private rights documents are deliberately omitted.
+
+| Git author identity | Relevant reachable changes | Rights evidence | Minimum clarification | Status |
+|---|---|---|---|---|
+| Nandi Nugraha (62 commits) | Backend, frontend, tests, docs, fixtures, screenshots; historical SVG addition `a995058` | Git attribution only | Confirm legal holder, relevant years, employment/client terms, AI-assisted or adapted material, and asset rights | NOT_VERIFIED |
+| Nandi Pura (28 commits) | PR merge commits, e.g. `9f3fd68`; no distinct file patch in the ordinary commit walk | Git attribution only; may be an alias | Confirm relationship to the first identity; do not count as a separate holder without evidence | NOT_VERIFIED |
+| Partomuan Gearry Andreas Josua (13 commits) | Backend/API, frontend, tests, docs, e.g. `cfb1339` | No contribution license, assignment, or permission located | Confirm contributor permission or applicable employer/client authority for MIT distribution | BLOCKED |
+| chaerudin79 (6 commits) | Switch/Aruba frontend, tests, docs, e.g. `ae4c5bb` | No contribution license, assignment, or permission located | Confirm contributor permission or applicable employer/client authority for MIT distribution | BLOCKED |
+
+No repository record establishes which work was AI-assisted, original, copied,
+or adapted. AI assistance alone neither proves third-party ownership nor proves
+copyrightability or originality. The owner must state the relevant development
+facts; commit authorship is insufficient.
+
+| Asset class | Reachable examples | Provenance and minimum missing evidence | Redistribution status |
+|---|---|---|---|
+| Python code | `backend/src/` | Multiple author identities; rights/assignment and adapted-source facts missing | NOT_VERIFIED |
+| Frontend code | `src/` | Multiple author identities; rights/assignment and adapted-source facts missing | NOT_VERIFIED |
+| Tests | `backend/tests/`, `src/*.test.mjs`, `src/*.browser.mjs` | Multiple author identities; test-code rights missing | NOT_VERIFIED |
+| Documentation | `README.md`, `docs/`, PR #20's reachable head | Author attribution exists; external text/contract rights need confirmation | NOT_VERIFIED |
+| Configuration fixtures | `backend/tests/fixtures/` | Synthetic-looking labels do not prove creation or permission; attest origin and absence of customer data | NOT_VERIFIED |
+| Screenshots | `artifacts/` | Browser-generated files; confirm depicted assets and privacy before redistribution | NOT_VERIFIED |
+| Historical SVGs | `public/brand/confighop-logo.svg`, `public/brand/confighop-mark.svg`, `public/favicon.svg`; added `a995058`, removed `16f2ca5` | Still reachable after deletion; confirm creator and distribution right | BLOCKED |
+| Icons | `lucide-react` dependency | Installed package declares ISC; preserve its license rather than applying MIT to it | THIRD_PARTY_LICENSE_VERIFIED for this package |
+| Other third-party assets | No bundled font or vendored package found in tracked source | Review release bundle and transitive notices before publication | NOT_VERIFIED |
+
+This leaves `REL01_LICENSE_GATE_BLOCKED`. A truthful, short owner confirmation
+plus contributor permissions and asset provenance can resolve it; no notarization
+or registration is demanded. If a historical asset lacks permission, decide its
+treatment separately before public distribution. No history rewrite is authorized.
+
+### Confidential reporting and repository controls
+
+[GitHub documents](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)
+external private vulnerability reporting for **public** repositories. It is
+not an external route for this private repository. Administrators can create
+[draft repository advisories](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/fix-reported-vulnerabilities/create-repository-advisory)
+for internal handling; that does not let an outside researcher initiate a
+confidential report. No actual contact destination or successful test delivery
+was supplied. Options are an owner-controlled security email, a verified
+private form, or another owner-approved confidential channel. For any option,
+the owner must verify control, external reachability, recipient notification,
+attachment/privacy handling, and receipt of a harmless test message. Until then
+`REL02_PRIVATE_REPORTING_ROUTE_REQUIRED`; no `SECURITY.md` is warranted.
+
+The PR workflow has `push` and `pull_request` triggers, repository-level
+`permissions: contents: read`, checkout of the tested ref, backend/frontend
+installation and tests, browser artifact upload, and no `pull_request_target`,
+secret reference, or write-token request. The Actions job actually named `test`
+passed in run 40709714425. This source review cannot establish repository
+settings or the safety of future untrusted fork changes; inspect browser
+artifacts before making them public.
+
+Read-only main metadata still reports `protected=false`, required checks empty,
+and enforcement `off`. The branch-protection API returned 403 to this
+integration. The rulesets API returned 403 with `Upgrade to GitHub Pro or make
+this repository public to enable this feature`. [GitHub's branch-protection
+documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches)
+limits private-repository protection to eligible paid plans; this response does
+not establish the owner's exact plan or UI capabilities. No setting was changed.
+
+Owner-side checklist (observe first; configure only with separate approval):
+
+| GitHub location | Observed | Proposed minimum and timing |
+|---|---|---|
+| Settings → Actions → General → Workflow permissions | Admin value not accessible | Read-only default; disallow Actions creating/approving PRs unless required; verify now and before public |
+| Settings → Actions → General → Fork pull request workflows | Admin value not accessible | Do not send secrets or write tokens; require approval where available; verify private-fork policy now |
+| Settings → Actions → General → Approval for running fork pull request workflows from contributors | Admin value not accessible | Review public-fork approval policy immediately before any visibility change |
+| Settings → Actions → General → Actions permissions | Admin value not accessible | Review allowed actions and third-party action trust; preserve current CI behavior |
+| Settings → Branches → Branch protection or Settings → Rules → Rulesets | Main metadata says unprotected; plan support unknown | If available while private, require PRs and `test`, prevent force-push and deletion, avoid broad bypass; otherwise resolve plan/visibility prerequisite before publication |
+| Security and quality → Advisories / private vulnerability reporting | External route unavailable while private; setting inaccessible | Verify interim private route now; after separately authorized publication, enable PVR and test as an outside reporter |
+
+The private-fork and public-fork controls have different GitHub UI sections;
+[GitHub's Actions settings documentation](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository)
+describes both. `REL04_REPOSITORY_SETTINGS_NOT_VERIFIED` remains open.
+
+### History privacy and preserved gates
+
+No `gitleaks`, `trufflehog`, `detect-secrets`, or `git-secrets` executable was
+available locally. A local-only scan of all 717 reachable blobs in the fetched
+refs found no private-key block, GitHub token pattern, or AWS access-key pattern;
+it printed no candidate values. It does not cover other secret formats, GitHub
+unreachable objects, or a dedicated scanner's rules. Thus
+`HISTORY_SECRET_CLEARANCE_NOT_VERIFIED` remains a publication blocker.
+
+The README retains Beta/Technical Preview, offline workflow, backup,
+engineer-review, sensitive-data, BLOCKED export, and device/packet-flow/
+production limitations. The owner-approved Python version ranges and the
+2026-10-28 isolated Python 3.12 / pip-audit 2.10.1 result remain unchanged;
+future dependency resolution is still not byte-for-byte reproducible.
