@@ -51,8 +51,9 @@ identify the rights holder and accurate attribution year, specify which code,
 tests, documentation, fixtures, screenshots, and historical artwork the owner
 created or can license, and disclose other contributors, employment/contractor
 limits, and imported material. Obtain permission from another rights holder
-where needed; an owner statement cannot override that holder's rights. No
-confirmation or contribution grants are present; `REL01_LICENSE_GATE_BLOCKED`
+where needed; an owner statement cannot override that holder's rights. At
+the Phase 12C review, no approval scope or contribution grants were documented;
+`REL01_LICENSE_GATE_BLOCKED`
 and `MIT_LICENSE_OWNER_CONFIRMATION_REQUIRED`.
 
 The advertised branches and PR head/merge refs yielded 104 reachable commits,
@@ -188,7 +189,7 @@ validation is authorized by this record.
 |---|---|---|
 | MIT license direction | Owner selected MIT as candidate; official text reviewed | PASS |
 | First-party rights | Git history gives attribution, not legal control; `OWNERSHIP_NOT_VERIFIED` | NOT_VERIFIED |
-| Other contributors | Four apparent author identities; no grants found; `PERMISSION_REQUIRED` | BLOCKED |
+| Other contributors | Prior approval is now owner-reported for Gearry and Udin; its MIT/public distribution scope is not documented | BLOCKED |
 | Fixtures, screenshots, and artwork | Synthetic appearance and generated output do not establish rights; `OWNERSHIP_NOT_VERIFIED` | NOT_VERIFIED |
 | Historical rights | Deleted SVGs remain reachable; no rights record; `OWNERSHIP_NOT_VERIFIED` | NOT_VERIFIED |
 | Accurate MIT holder/year and `LICENSE` | Owner confirmation and attribution approval missing; no file added | BLOCKED |
@@ -235,7 +236,7 @@ facts; commit authorship is insufficient.
 | Other third-party assets | No bundled font or vendored package found in tracked source | Review release bundle and transitive notices before publication | NOT_VERIFIED |
 
 This leaves `REL01_LICENSE_GATE_BLOCKED`. A truthful, short owner confirmation
-plus contributor permissions and asset provenance can resolve it; no notarization
+of the existing contributor approval scope and asset provenance can resolve it; no notarization
 or registration is demanded. If a historical asset lacks permission, decide its
 treatment separately before public distribution. No history rewrite is authorized.
 
@@ -298,3 +299,40 @@ engineer-review, sensitive-data, BLOCKED export, and device/packet-flow/
 production limitations. The owner-approved Python version ranges and the
 2026-10-28 isolated Python 3.12 / pip-audit 2.10.1 result remain unchanged;
 future dependency resolution is still not byte-for-byte reproducible.
+
+## Phase 12E: owner-reported contributor approval
+
+The owner states: “Gearry dan Udin sudah disetujui dan tidak perlu diminta izin
+terpisah.” This resolves whether to request duplicate approval. It does **not**
+establish the text or scope of prior permission. No separate contributor
+request is planned merely because these identities appear in Git history.
+
+| Identity and substantive commits | Owner report | Scope of existing approval | Verdict |
+|---|---|---|---|
+| Partomuan Gearry Andreas Josua (“Gearry”): backend/API, frontend, tests, docs; e.g. `cfb1339`, `d976688` | `OWNER_REPORTED_PREVIOUSLY_APPROVED` | Use within ConfigHop, modification, public redistribution, and MIT terms have not been identified | NOT_VERIFIED for `MIT_RELICENSING_RIGHTS_VERIFIED` |
+| `chaerudin79` (“Udin”): Switch/Aruba frontend, tests, docs; e.g. `ae4c5bb`, `ac10db2` | `OWNER_REPORTED_PREVIOUSLY_APPROVED` | Same four scope questions remain unidentified | NOT_VERIFIED for `MIT_RELICENSING_RIGHTS_VERIFIED` |
+| Nandi Nugraha and Nandi Pura | Owner-associated author strings; latter appears on merge commits | Legal holder, relevant years, and any employer/client limits remain unconfirmed | NOT_VERIFIED |
+| Other identities | No other Git author string in the 110 reachable commits after the Phase 12D change | No additional identity found; this does not prove no uncredited third-party material | NOT_VERIFIED |
+
+The exact remaining rights question is whether the **existing** Gearry/Udin
+arrangement already permits use, modification, public distribution, and MIT
+licensing of their contributions. The owner can identify that arrangement and
+its scope privately; a new permission request is unnecessary if it is already
+sufficient. Do not place contracts, contact details, or signatures in this
+future-public repository. Also confirm the actual copyright holder and years,
+first-party authority and employment limits, fixture and screenshot rights,
+and redistribution rights for the reachable historical files
+`public/brand/confighop-logo.svg`, `public/brand/confighop-mark.svg`, and
+`public/favicon.svg` (added at `a995058`, removed at `16f2ca5`). The MIT text
+cannot cure a rights problem in retained history. `REL01_MIT_RIGHTS_NOT_VERIFIED`;
+no `LICENSE` is added.
+
+The other owner actions remain: approve and test a confidential interim contact
+(`REL02_INTERIM_REPORTING_CHANNEL_REQUIRED`), and inspect Actions fork/token
+settings and plan-supported protection for main, including required CI job
+`test` (`REL04_REPOSITORY_SETTINGS_NOT_VERIFIED`). Read-only main metadata still
+reports no protection or required checks; the settings were not changed.
+README Beta guidance, Python version ranges, and the prior Python 3.12 audit
+are preserved. No dedicated local secret scanner was available; Phase 12D's
+bounded 717-blob pattern scan is not publication clearance. The repository
+remains private, and PR #28 remains a draft until independent review.
