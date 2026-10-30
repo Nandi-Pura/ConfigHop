@@ -367,12 +367,14 @@ committed:
 | Location | Scoped assessment | Remaining check |
 |---|---|---|
 | `backend/src/confighop_core/parsers/aruba_aoscx/parser.py:11` at `b9c2b689` | Static parser feature-name strings, likely a rule false positive | Confirm during independent security review |
-| `src/ciscoParser.test.mjs:573` at `3bf5e8b1` | Secret-shaped literal in a test, apparently synthetic | Owner confirms it was never a live or reused credential |
+| `src/ciscoParser.test.mjs:573` at `3bf5e8b1` | Secret-shaped literal in a test | Owner confirms it was synthetic and never a live or reused credential |
 
 The redacted report remains outside the repository. This scan does not cover
 GitHub-unreachable objects, historical Actions logs, every possible secret
-format, or credential validity. `HISTORY_SECRET_CLEARANCE_NOT_VERIFIED` remains
-open until both candidates are resolved and the limits are accepted.
+format, or credential validity. The parser match is a static feature-name
+string and the owner has resolved the test-literal question; neither is
+treated as a discovered live credential. Full publication clearance remains
+`NOT_VERIFIED` because of the scan limits above.
 
 The owner has not supplied a monitored private security destination; therefore
 `SECURITY.md` remains absent and REL-02 is blocked. The next owner action is
