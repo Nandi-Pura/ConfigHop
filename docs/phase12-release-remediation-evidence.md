@@ -9,6 +9,13 @@ notice, and a root `LICENSE` was added. Earlier REL-01 entries below record
 the gate *before* that confirmation. Confidential reporting (REL-02) and
 repository settings (REL-04) remain unresolved. No public release is approved.
 
+**Phase 12I update (2026-10-30):** The owner confirmed receipt of a harmless
+test email sent from a separate account to `nandipura09@gmail.com`. The owner,
+not this reviewer, performed and verified delivery. The address is now in
+`SECURITY.md` as the interim confidential reporting route. Earlier REL-02
+entries below record the state before this confirmation. Repository settings
+(REL-04) remain unverified; no public release is approved.
+
 The owner selected MIT instead of Apache-2.0 as a **conditional direction**,
 GitHub Private Vulnerability Reporting as the **preferred future channel**, and retention of
 the current **Python dependency version ranges**. None of these choices is a
@@ -376,9 +383,29 @@ string and the owner has resolved the test-literal question; neither is
 treated as a discovered live credential. Full publication clearance remains
 `NOT_VERIFIED` because of the scan limits above.
 
-The owner has not supplied a monitored private security destination; therefore
-`SECURITY.md` remains absent and REL-02 is blocked. The next owner action is
-to supply a confidential address or form and confirm receipt of a harmless
-test message. Main protection and fork/Actions settings still require owner
-action and verification. The README Beta guidance and Python ranges remain
-unchanged; the README now explains the MIT and third-party license boundary.
+At Phase 12H, the owner had not yet supplied a monitored private security
+destination, so `SECURITY.md` was absent and REL-02 remained blocked. Main
+protection and fork/Actions settings still required owner action and
+verification. The README Beta guidance and Python ranges remained unchanged;
+the README gained an explanation of the MIT and third-party license boundary.
+
+## Phase 12I: reporting route and repository controls
+
+On 2026-10-30, the owner selected `nandipura09@gmail.com` and reported that a
+harmless delivery test from a separate sender account was received there. No
+message content, mailbox access, or independent delivery evidence was reviewed.
+The root `SECURITY.md` now identifies this owner-tested interim route and
+requests sanitized reports without customer configurations or credentials.
+GitHub Private Vulnerability Reporting remains a separate post-publication
+decision; it is not represented as active for this private repository.
+
+The existing CI workflow uses `push` and `pull_request`, a read-only
+`contents: read` token, and the observed successful job named `test`; it has
+no `pull_request_target` trigger or declared repository secrets. The exact
+head CI run before this change was #140 on `de706a744`, with the `test` job
+successful. The repository's branch protection and Actions fork/token admin
+settings could not be read through the available connector. Earlier branch
+metadata reported main unprotected, but that is not current settings proof.
+REL-04 therefore remains `NOT_VERIFIED`; the owner must inspect and configure
+main PR/check/force-push/deletion controls and fork workflow permissions in
+GitHub Settings. No settings were changed in this phase.
