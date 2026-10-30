@@ -4,6 +4,11 @@ This is a private-repository review record, not publication approval. Baseline:
 `main` at `9f3fd68eb6f55c5530485b93db2a5a5127e128cd`. PR #27 is merged;
 PR #20 remains open and was not changed.
 
+**Current Phase 12H status:** The owner confirmed MIT rights and the 2026
+notice, and a root `LICENSE` was added. Earlier REL-01 entries below record
+the gate *before* that confirmation. Confidential reporting (REL-02) and
+repository settings (REL-04) remain unresolved. No public release is approved.
+
 The owner selected MIT instead of Apache-2.0 as a **conditional direction**,
 GitHub Private Vulnerability Reporting as the **preferred future channel**, and retention of
 the current **Python dependency version ranges**. None of these choices is a
@@ -336,3 +341,42 @@ README Beta guidance, Python version ranges, and the prior Python 3.12 audit
 are preserved. No dedicated local secret scanner was available; Phase 12D's
 bounded 717-blob pattern scan is not publication clearance. The repository
 remains private, and PR #28 remains a draft until independent review.
+
+## Phase 12H: owner-confirmed MIT scope and dedicated local secret scan
+
+The owner identifies **Nandi Pura Nugraha** as the copyright holder for
+first-party material and approves `Copyright (c) 2026 Nandi Pura Nugraha`.
+The reachable root commit is dated 2026-10-04, and all inspected reachable
+commit years are 2026. The owner reports that Gearry and Udin's prior
+permissions cover public MIT distribution of their contributions, without
+transferring their copyright; no signed grants were provided for review.
+The owner also confirms MIT distribution rights for fixtures, screenshots,
+and the three historical SVGs, and confirms no employer or client restriction.
+The root `LICENSE` uses the official MIT text. Third-party dependencies remain
+under their upstream terms; inspected direct packages include `lucide-react`
+(ISC), React/React DOM (MIT), and Vite (MIT). This records owner assertions,
+not an independent legal determination or device validation.
+
+Gitleaks 8.30.1 was downloaded from its official GitHub release into a
+disposable local directory, and its Windows archive matched the release's
+SHA-256 checksum. `gitleaks git --redact=100 --log-opts=--all` scanned the
+fetched reachable patch history locally (83 patch commits, about 2.56 MB).
+It returned two `generic-api-key` candidates, with no values printed or
+committed:
+
+| Location | Scoped assessment | Remaining check |
+|---|---|---|
+| `backend/src/confighop_core/parsers/aruba_aoscx/parser.py:11` at `b9c2b689` | Static parser feature-name strings, likely a rule false positive | Confirm during independent security review |
+| `src/ciscoParser.test.mjs:573` at `3bf5e8b1` | Secret-shaped literal in a test, apparently synthetic | Owner confirms it was never a live or reused credential |
+
+The redacted report remains outside the repository. This scan does not cover
+GitHub-unreachable objects, historical Actions logs, every possible secret
+format, or credential validity. `HISTORY_SECRET_CLEARANCE_NOT_VERIFIED` remains
+open until both candidates are resolved and the limits are accepted.
+
+The owner has not supplied a monitored private security destination; therefore
+`SECURITY.md` remains absent and REL-02 is blocked. The next owner action is
+to supply a confidential address or form and confirm receipt of a harmless
+test message. Main protection and fork/Actions settings still require owner
+action and verification. The README Beta guidance and Python ranges remain
+unchanged; the README now explains the MIT and third-party license boundary.

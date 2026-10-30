@@ -47,3 +47,7 @@ python -m compileall src
 From the repository root, run `npm test` and `npm run build`.
 
 Core v0.1 parses PAN-OS XML, v0.2 previews exact interface dependencies, and v0.3 renders and validates a patched candidate. App v0.5 adds PA-3410 and PA-5410 hardware and PAN-OS compatibility checks. v0.6 adds documentation-verified PA-5410 native QSFP target speed rendering for ports 41–44 with an explicit 40G or 100G choice. v0.7 adds a model-specific hardware registry and PAN-OS support rules. The bounded cross-vendor Switch paths above are implemented; Firewall translation remains focused on PAN-OS and the documented FortiOS subset. Other cross-vendor paths, advanced features, and breakout conversion beyond documented hardware-specific behavior remain unsupported. See [core v0.7](docs/core/CORE_V0_7.md), [API v0.7](docs/api/API_V0_7.md), and [app v0.7](docs/app/APP_V0_7.md). Private XML and generated candidates belong in ignored `local-samples/` and `local-output/` directories.
+
+## License
+
+ConfigHop's first-party code, tests, documentation, fixtures, screenshots, and artwork are available under the [MIT License](LICENSE), based on the owner's confirmed distribution rights and contributor permissions. Contributors retain their own copyrights; this license does not transfer ownership. Third-party dependencies, including `lucide-react`, retain their separate upstream licenses and notices.
